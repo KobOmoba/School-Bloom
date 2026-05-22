@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Educational Bloom · School Portal</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<style>
+/* ── Password Eye Toggle ──────────────────────────────────── */
+.pwd-wrap{position:relative;display:flex;align-items:center;}
+.pwd-wrap input{flex:1;padding-right:2.8rem !important;}
+.eye-btn{position:absolute;right:0;top:0;bottom:0;width:2.6rem;background:none;border:none;cursor:pointer;font-size:1.1rem;padding:0;margin:0;display:flex;align-items:center;justify-content:center;opacity:0.75;transition:opacity .15s;-webkit-tap-highlight-color:transparent;}
+.eye-btn:hover,.eye-btn:active{opacity:1;}
+/* ── Remember Me ──────────────────────────────────────────── */
+.remember-row{display:flex;align-items:center;margin:0.4rem 0 0.55rem;}
+.rem-label{display:flex;align-items:center;gap:0.45rem;font-size:0.8rem;color:var(--sub);cursor:pointer;font-weight:500;user-select:none;}
+.rem-label input[type=checkbox]{width:15px;height:15px;accent-color:var(--brand);cursor:pointer;margin:0;}
+</style>
+<script>
+// Eye toggle — defined here so it works even if app.js has an error
+function toggleEye(inputId, btn) {
+  var inp = document.getElementById(inputId);
+  if (!inp) return;
+  var show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁️';
+  btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+}
+</script>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login" class="login">
+  <div class="lbox">
+    <div class="lbox-logo">🌸 Educational Bloom</div>
+    <div class="lbox-sub">School Management Portal · AariNAT Company</div>
+    <label>School ID</label>
+    <input type="text" id="l-school" placeholder="e.g. BLOOM-ABK0042" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()">
+    <label>Password</label>
+    <div class="pwd-wrap">
+      <input type="password" id="l-pwd" placeholder="Password sent by your agent" onkeydown="if(event.key==='Enter')doLogin()">
+      <button type="button" class="eye-btn" onclick="toggleEye('l-pwd',this)" tabindex="-1">👁️</button>
+    </div>
+    <div class="remember-row">
+      <label class="rem-label"><input type="checkbox" id="l-remember" checked> Remember me</label>
+    </div>
+    <button id="l-btn" class="btn-brand" onclick="doLogin()">▶ Login</button>
+    <div id="l-err" class="err"></div>
+    <p style="font-size:0.72rem;color:var(--sub);text-align:center;margin-top:1rem;">
+      Your <strong>School ID</strong> and <strong>Password</strong> were sent by your AariNAT agent via WhatsApp.<br><br>
+      Need help? <strong>+234 814 507 3941</strong>
+    </p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none;">
+
+  <div class="fee-hero">
+    <div class="fh-label">⚠️ Outstanding Fees This Term</div>
+    <div class="fh-amount" id="banner-amount">₦0</div>
+    <div class="fh-sub" id="banner-sub">Loading...</div>
+    <div class="fh-btns">
+      <button class="fh-btn fh-primary" onclick="sendAllReminders()">📲 Send AI Reminders</button>
+      <button class="fh-btn fh-ghost" onclick="go('students')">👥 View Students</button>
+    </div>
+  </div>
+
+  <header class="hdr">
+    <div>
+      <div class="hdr-name" id="hdr-school">Loading...</div>
+      <div class="hdr-sub"><span id="hdr-role">—</span> · <span id="hdr-term">—</span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;">
+      <span id="planBadge" class="plan-badge plan-basic">Basic</span>
+      <span id="sync" class="sdot sd-off">● Offline</span>
+      <button class="btn-sm btn-ghost" onclick="logout()">Exit</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- 1. REVENUE -->
+    <section id="sec-revenue" class="sec on">
+      <div class="stats">
+        <div class="stat"><div class="sn" id="d-students">0</div><div class="sl">Students</div></div>
+        <div class="stat"><div class="sn" id="d-collected" style="color:var(--money);font-size:1rem;">₦0</div><div class="sl">Collected</div></div>
+        <div class="stat"><div class="sn" id="d-outstanding" style="color:var(--danger);font-size:1rem;">₦0</div><div class="sl">Outstanding</div></div>
+        <div class="stat"><div class="sn" id="d-rate">0%</div><div class="sl">Collection Rate</div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+          <span style="font-weight:700;font-size:0.85rem;">📊 Collection Progress</span>
+          <span id="prog-pct" style="font-weight:800;color:var(--money);font-size:0.88rem;">0%</span>
+        </div>
+        <div class="prog-bg"><div class="prog-fill" id="prog-fill" style="width:0%;"></div></div>
+      </div>
+      <div class="card">
+        <div class="ct">📥 Bulk Payment Import</div>
+        <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.65rem;">Upload a CSV with columns: StudentName, Amount. The system matches by name and adds the payment.</p>
+        <input type="file" id="bulk-csv" accept=".csv" style="display:none;" onchange="handleBulkPayment(event)">
+        <button class="btn-outline" onclick="document.getElementById('bulk-csv').click()">📂 Upload Bank Statement CSV</button>
+        <div id="bulk-feedback" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);"></div>
+      </div>
+      <div class="card">
+        <div class="ct">🚨 Overdue Parents</div>
+        <div id="overdue-list"><p style="text-align:center;color:var(--sub);padding:1rem;">Loading...</p></div>
+        <button class="btn-wa" style="margin-top:0.65rem;" onclick="sendAllReminders()">📲 Send WhatsApp Reminders to All</button>
+      </div>
+    </section>
+
+    <!-- 2. STUDENTS & REPORTS (unified hub) -->
+    <section id="sec-students" class="sec">
+      <div style="display:flex;gap:0.4rem;margin-bottom:0.55rem;flex-wrap:wrap;">
+        <input type="text" id="stu-search" placeholder="Search name or phone…" oninput="renderStudentList()" style="flex:1;min-width:130px;margin:0;">
+        <select id="stu-class" onchange="renderStudentList()" style="margin:0;width:auto;padding:0.5rem 0.55rem;font-size:0.8rem;"></select>
+        <select id="stu-pay" onchange="renderStudentList()" style="margin:0;width:auto;padding:0.5rem 0.55rem;font-size:0.8rem;">
+          <option value="">All</option><option value="paid">Paid</option><option value="owing">Owing</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem;">
+        <button class="btn-brand btn-sm" onclick="openM('add-student-modal')">➕ Add Student</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text);" onclick="$('csv-up').click()">📁 CSV Import</button>
+        <input type="file" id="csv-up" accept=".csv" style="display:none;" onchange="handleCSV(event)">
+      </div>
+      <div id="csv-fb" style="font-size:0.75rem;color:var(--money);margin-bottom:0.4rem;"></div>
+      <div id="students-list"></div>
+    </section>
+
+    <!-- 3. STAFF -->
+    <section id="sec-staff" class="sec">
+      <div class="card">
+        <div class="ct">👥 School Staff</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+          <span id="staff-count" style="font-size:0.8rem;color:var(--sub);">0/3 used (Basic)</span>
+          <button class="btn-brand btn-sm" onclick="openM('add-staff-modal')">➕ Add Staff</button>
+        </div>
+        <div id="staff-list"></div>
+        <div id="staff-upgrade" class="upgrade-lock" style="display:none;">
+          <p style="font-size:0.8rem;font-weight:700;color:#9a3412;">⚠️ Staff limit reached (3/3)</p>
+          <p style="font-size:0.72rem;color:#c2410c;margin:0.4rem 0 0.75rem;">Upgrade to Premium for unlimited staff.</p>
+          <button class="btn-brand" onclick="openM('upgrade-modal')">✨ Upgrade to Premium</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. SPORTS -->
+    <section id="sec-sports" class="sec">
+      <div class="card">
+        <div class="ct">⚽ Sports & Athletics</div>
+        <div class="sports-grid" id="sports-grid">
+          <div class="sport-card sel" onclick="selectSport('football',this)"><div style="font-size:1.3rem;">⚽</div><div style="font-weight:700;font-size:0.85rem;">Football</div><div style="font-size:0.7rem;color:var(--sub);">U-13, U-15, U-17</div></div>
+          <div class="sport-card" onclick="selectSport('athletics',this)"><div style="font-size:1.3rem;">🏃</div><div style="font-weight:700;font-size:0.85rem;">Athletics</div><div style="font-size:0.7rem;color:var(--sub);">Track & Field</div></div>
+          <div class="sport-card" onclick="selectSport('basketball',this)"><div style="font-size:1.3rem;">🏀</div><div style="font-weight:700;font-size:0.85rem;">Basketball</div><div style="font-size:0.7rem;color:var(--sub);">Boys & Girls</div></div>
+          <div class="sport-card" onclick="selectSport('volleyball',this)"><div style="font-size:1.3rem;">🏐</div><div style="font-weight:700;font-size:0.85rem;">Volleyball</div><div style="font-size:0.7rem;color:var(--sub);">Inter-house</div></div>
+          <div class="sport-card" onclick="selectSport('tabletennis',this)"><div style="font-size:1.3rem;">🏓</div><div style="font-weight:700;font-size:0.85rem;">Table Tennis</div><div style="font-size:0.7rem;color:var(--sub);">Individual & Team</div></div>
+        </div>
+        <button class="btn-outline btn-sm" onclick="openM('custom-sport-modal')" style="margin-bottom:0.75rem;">➕ Add Custom Sport</button>
+        <div id="custom-sports-grid" class="sports-grid"></div>
+        <div style="margin-top:0.75rem;">
+          <div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">👥 Team: <span id="current-sport-label">Football</span></div>
+          <button class="btn-sports btn-sm" onclick="openM('add-player-modal')" style="margin-bottom:0.5rem;">➕ Add Player</button>
+          <div id="team-list"></div>
+        </div>
+        <div style="margin-top:0.75rem;">
+          <div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">📅 Fixtures</div>
+          <div id="fixtures-list">
+            <div class="fixture"><div style="font-size:0.72rem;color:var(--sub);">Sat 25 May · 3:00 PM</div><div style="font-weight:600;">Our School vs Kings Academy</div><div style="font-size:0.78rem;color:var(--money);">Venue: School Field · Inter-house Finals</div></div>
+          </div>
+          <button class="btn-outline btn-sm" style="margin-top:0.5rem;" onclick="recordMatchResult()">📝 Record Match Result</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. ARTS -->
+    <section id="sec-arts" class="sec">
+      <div class="card">
+        <div class="ct">🎨 Arts & Culture</div>
+        <div class="art-grid" id="art-gallery">
+          <div class="art-card" onclick="openM('add-artwork-modal')"><div class="art-prev" style="background:#f1f5f9;color:var(--sub);font-size:2rem;">➕</div><div class="art-info"><div class="art-title">Add Artwork</div><div class="art-stu">Tap to add</div></div></div>
+        </div>
+        <button class="btn-arts" onclick="planExhibition()">🖼️ Plan New Exhibition</button>
+      </div>
+    </section>
+
+    <!-- 6. MUSIC -->
+    <section id="sec-music" class="sec">
+      <div class="card">
+        <div class="ct">🎵 Music & Performance</div>
+        <div class="music-grid">
+          <div class="music-card"><div style="font-size:1.3rem;">🎤</div><div style="font-weight:700;font-size:0.85rem;margin-top:0.3rem;">School Choir</div><div style="font-size:0.72rem;color:var(--sub);">Tue/Thu 3PM</div><button class="btn-music btn-sm" style="margin-top:0.5rem;" onclick="openM('log-practice-modal')">Log Practice</button></div>
+          <div class="music-card"><div style="font-size:1.3rem;">🥁</div><div style="font-weight:700;font-size:0.85rem;margin-top:0.3rem;">Drumming</div><div style="font-size:0.72rem;color:var(--sub);">Talking drum, Dundun</div><button class="btn-music btn-sm" style="margin-top:0.5rem;" onclick="openM('log-practice-modal')">Log Practice</button></div>
+          <div class="music-card"><div style="font-size:1.3rem;">🎹</div><div style="font-weight:700;font-size:0.85rem;margin-top:0.3rem;">Instrumental</div><div style="font-size:0.72rem;color:var(--sub);">Piano, Guitar, Keys</div><button class="btn-music btn-sm" style="margin-top:0.5rem;" onclick="openM('book-lesson-modal')">Book Lesson</button></div>
+          <div class="music-card"><div style="font-size:1.3rem;">🎸</div><div style="font-weight:700;font-size:0.85rem;margin-top:0.3rem;">Instruments</div><div style="font-size:0.72rem;color:var(--sub);">Inventory & status</div><button class="btn-music btn-sm" style="margin-top:0.5rem;" onclick="openM('instrument-modal')">View Inventory</button></div>
+        </div>
+        <div style="margin-top:0.75rem;"><div class="ct" style="font-size:0.82rem;">Recent Practice Logs</div><div id="practice-logs"><p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:0.75rem;">No logs yet.</p></div></div>
+        <button class="btn-outline" style="margin-top:0.5rem;" onclick="openM('log-practice-modal')">📝 Log Practice Session</button>
+      </div>
+    </section>
+
+    <!-- 7. HEALTH -->
+    <section id="sec-health" class="sec">
+      <div class="stats">
+        <div class="stat"><div class="sn" id="h-visits">0</div><div class="sl">Sick Bay Visits</div></div>
+        <div class="stat"><div class="sn" id="h-open">0</div><div class="sl">Open Cases</div></div>
+      </div>
+      <div class="card">
+        <div class="ct">🏥 Incident Log</div>
+        <button class="btn-brand btn-sm" style="margin-bottom:0.75rem;" onclick="openM('log-incident-modal')">➕ Log New Incident</button>
+        <div id="health-list"><p style="text-align:center;color:var(--sub);padding:1.5rem;">No incidents logged yet.</p></div>
+      </div>
+    </section>
+
+    <!-- 8. ALUMNI -->
+    <section id="sec-alumni" class="sec">
+      <div class="stats">
+        <div class="stat"><div class="sn" id="al-count">0</div><div class="sl">Registered Alumni</div></div>
+        <div class="stat"><div class="sn" id="al-donations" style="font-size:1rem;">₦0</div><div class="sl">Donations</div></div>
+      </div>
+      <div class="card">
+        <div class="ct">🎓 Alumni Network</div>
+        <button class="btn-brand btn-sm" style="margin-bottom:0.75rem;" onclick="openM('add-alumni-modal')">➕ Add Alumni</button>
+        <div id="alumni-list"><p style="text-align:center;color:var(--sub);padding:1.5rem;">No alumni added yet.</p></div>
+        <button class="btn-wa" style="margin-top:0.5rem;" onclick="sendFundraisingAppeal()">📢 Send Fundraising Appeal</button>
+      </div>
+    </section>
+
+    <!-- 9. EXPENSES -->
+    <section id="sec-expenses" class="sec">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;">
+        <div><div style="font-size:0.75rem;color:var(--sub);">Total This Term</div><div style="font-weight:800;font-size:1.2rem;font-family:'DM Mono',monospace;" id="exp-total">₦0</div></div>
+        <button class="btn-brand btn-sm" onclick="openM('add-expense-modal')">➕ Log Expense</button>
+      </div>
+      <div class="card"><div id="exp-list"><p style="text-align:center;color:var(--sub);padding:2rem;">No expenses logged yet.</p></div></div>
+    </section>
+
+    <!-- 10. FINANCE AI -->
+    <section id="sec-finance" class="sec">
+      <div class="card" style="border-left:4px solid #8b5cf6;">
+        <div class="ct">🤖 Finance AI Advisor</div>
+        <div id="finance-empty" class="ai-empty">
+          <div class="ai-icon">📊</div>
+          <h4 style="color:var(--sub);margin-bottom:0.5rem;">No Financial Data Yet</h4>
+          <p style="font-size:0.82rem;color:var(--sub);margin-bottom:0.75rem;">Upload a CSV with your school's income and expenses to get AI-powered insights.</p>
+          <button class="btn-brand" onclick="$('finance-csv').click()">📤 Upload Financial Data CSV</button>
+          <input type="file" id="finance-csv" accept=".csv,.xlsx" style="display:none;" onchange="handleFinanceUpload(event)">
+          <p style="font-size:0.72rem;color:var(--sub);margin-top:0.5rem;">CSV columns: Date, Description, Amount, Type (income/expense)</p>
+        </div>
+        <div id="finance-analysis" style="display:none;">
+          <div class="stats" style="margin-bottom:0.65rem;">
+            <div class="stat"><div class="sn" id="ai-projection" style="font-size:1rem;">₦0</div><div class="sl">Next Term Projection</div></div>
+            <div class="stat"><div class="sn" id="ai-anomalies" style="color:var(--danger);">0</div><div class="sl">Large Transactions</div></div>
+          </div>
+          <div class="ai-rec" id="ai-recommendation">Analysing your data...</div>
+          <div id="ai-chat-area" style="margin-top:0.65rem;"></div>
+          <label style="margin-top:0.5rem;">Ask the AI a question about your finances</label>
+          <input type="text" id="ai-question" placeholder="e.g. How can I increase collection rate?">
+          <button class="btn-brand" onclick="askFinanceAI()">💬 Ask AI</button>
+          <button class="btn-ghost" style="margin-top:0.4rem;" onclick="$('finance-csv').click()">📤 Re-upload Data</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11. COMMS -->
+    <section id="sec-comms" class="sec">
+      <div class="card">
+        <div class="ct">📢 Social Media Workstation</div>
+        <div style="background:var(--s2);padding:0.9rem;border-radius:10px;margin-bottom:0.75rem;">
+          <div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">➕ Add Social Page</div>
+          <select id="soc-platform" style="margin-bottom:0.5rem;">
+            <option value="">Select Platform</option>
+            <option value="facebook">Facebook</option><option value="instagram">Instagram</option>
+            <option value="twitter">Twitter/X</option><option value="youtube">YouTube</option>
+            <option value="tiktok">TikTok</option><option value="whatsapp">WhatsApp Business</option>
+            <option value="telegram">Telegram</option>
+          </select>
+          <input type="text" id="soc-name" placeholder="Page name (e.g. @BrightStarsAcademy)" style="margin-bottom:0.5rem;">
+          <input type="url" id="soc-url" placeholder="Page URL (optional)">
+          <button class="btn-brand btn-sm" onclick="addSocialPage()">Add Page</button>
+        </div>
+        <div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">🔗 Connected Pages</div>
+        <div id="social-pages"><p style="font-size:0.8rem;color:var(--sub);text-align:center;padding:0.75rem;">No pages added yet.</p></div>
+        <div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">⚡ Quick Broadcast</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
+            <button class="btn-money btn-sm" onclick="broadcastFeeReminder()" style="padding:0.55rem;">📢 Fee Reminder</button>
+            <button class="btn-money btn-sm" onclick="broadcastEvent()" style="padding:0.55rem;">📅 Event Notice</button>
+            <button class="btn-brand btn-sm" onclick="broadcastAnnouncement()" style="padding:0.55rem;">🔔 Announcement</button>
+            <button class="btn-ghost btn-sm" onclick="openM('comms-history-modal')" style="padding:0.55rem;color:var(--text);">📜 Message History</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12. ANALYTICS -->
+    <section id="sec-analytics" class="sec">
+      <div id="analytics-content"><p style="text-align:center;color:var(--sub);padding:2rem;">Loading...</p></div>
+    </section>
+
+    <!-- 13. SECURITY -->
+    <section id="sec-security" class="sec">
+      <div class="card">
+        <div class="ct">🔒 Security Gate</div>
+        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.65rem;">Instant search by student name or guardian name. No paper binders needed.</p>
+        <input type="text" id="sec-search" placeholder="Search student or guardian name…" oninput="securitySearch()">
+        <div id="security-results"></div>
+      </div>
+    </section>
+
+    <!-- 14. SUPPORT -->
+    <section id="sec-support" class="sec">
+      <div class="card" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:2px solid var(--money);">
+        <div class="ct">👤 Your Agent</div>
+        <div id="agent-contact">
+          <div style="text-align:center;padding:1.5rem;color:var(--sub);">
+            <div style="font-size:2.5rem;margin-bottom:0.5rem;">⏳</div>
+            <p style="font-size:0.85rem;">No agent assigned yet.</p>
+            <p style="font-size:0.78rem;margin-top:0.25rem;">Contact AariNAT to get assigned an agent.</p>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ct">📞 AariNAT Support</div>
+        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;border-bottom:1px solid var(--border);">
+          <div style="font-size:1.5rem;">📱</div>
+          <div style="flex:1;"><div style="font-size:0.68rem;color:var(--sub);text-transform:uppercase;">Support Hotline</div><div style="font-weight:600;">+234 814 507 3941</div></div>
+          <button class="btn-wa btn-sm" onclick="window.open('https://wa.me/2348145073941?text=Hello%20AariNAT%20Support%2C%20I%20need%20help%20with%20Educational%20Bloom.','_blank')">📞 Call</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;">
+          <div style="font-size:1.5rem;">✉️</div>
+          <div><div style="font-size:0.68rem;color:var(--sub);text-transform:uppercase;">Email</div><div style="font-weight:600;">aarinat.company.limited@gmail.com</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ct">❓ FAQ</div>
+        <div id="faq-list">
+          <details style="margin-bottom:0.5rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">How do I add students?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Go to Students tab → tap ➕ Add Student. Or tap CSV Import to upload many at once. CSV format: Name, Phone, Class, Fee.</p></details>
+          <details style="margin-bottom:0.5rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">How do I generate a report card?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Go to Students → tap a student → tap Scores tab → enter CA and Exam scores → tap Report Card tab → tap Print.</p></details>
+          <details style="margin-bottom:0.5rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">Why is my data not syncing?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Check your internet connection. The app works offline and syncs automatically when connected. Look at the dot in the top header — green means online.</p></details>
+          <details><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">How do I upgrade to Premium?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Go to Settings tab → tap Upgrade to Premium → contact AariNAT via WhatsApp to arrange payment.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 15. SETTINGS -->
+    <section id="sec-settings" class="sec">
+      <div class="card">
+        <div class="ct">⚙️ School Settings</div>
+        <label>School Name</label><input type="text" id="set-name" placeholder="e.g. Bright Stars Academy">
+        <label>Principal's WhatsApp</label><input type="tel" id="set-phone" placeholder="2348012345678">
+        <label>Principal's Email <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(used for staff login — set here after first login)</span></label>
+        <input type="email" id="set-email" placeholder="principal@school.edu.ng">
+        <label>Login Password <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(change your portal password here)</span></label>
+        <div class="pwd-wrap">
+          <input type="password" id="set-pwd" placeholder="New password (leave blank to keep current)">
+          <button type="button" class="eye-btn" onclick="toggleEye('set-pwd',this)" tabindex="-1">👁️</button>
+        </div>
+        <label>Default Termly Fee (₦)</label><input type="number" id="set-fee" placeholder="50000">
+        <label>Current Term</label>
+        <select id="set-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+        <label>Academic Session</label><input type="text" id="set-session" placeholder="e.g. 2025/2026">
+        <label>Subjects (comma-separated)</label>
+        <textarea id="set-subjects" rows="3" placeholder="English, Mathematics, Basic Science, Social Studies, Civic Education"></textarea>
+        <button class="btn-brand" onclick="saveSettings()">💾 Save Settings</button>
+      </div>
+      <div class="card" style="border-left:4px solid var(--warn);">
+        <div class="ct">Current Plan: <span id="settings-plan">Basic</span></div>
+        <p style="font-size:0.82rem;color:var(--sub);">Staff limit: <span id="settings-staff-limit">3</span> · Finance AI: <span id="settings-ai">Basic</span></p>
+        <button class="btn-brand" style="margin-top:0.65rem;" onclick="openM('upgrade-modal')">✨ Upgrade to Premium</button>
+      </div>
+    </section>
+
+    <!-- 16. OPPORTUNITIES -->
+    <section id="sec-opps" class="sec">
+      <div class="card">
+        <div class="ct">🔍 Opportunity Scout <span class="plan-badge plan-premium" id="opp-plan-badge" style="display:none;">PREMIUM</span></div>
+        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.65rem;">Scholarships, grants and competitions for Nigerian students and schools.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;margin-bottom:0.65rem;">
+          <select id="opp-cat" onchange="renderOpps()" style="margin:0;font-size:0.8rem;padding:0.5rem;">
+            <option value="">All Types</option><option value="scholarship">Scholarships</option>
+            <option value="grant">Grants</option><option value="competition">Competitions</option><option value="internship">Internships</option>
+          </select>
+          <select id="opp-deadline" onchange="renderOpps()" style="margin:0;font-size:0.8rem;padding:0.5rem;">
+            <option value="">Any Deadline</option><option value="7">Next 7 days</option><option value="30">Next 30 days</option>
+          </select>
+        </div>
+        <div id="opps-list"></div>
+        <div id="opp-premium-cta" style="background:linear-gradient(135deg,#f0f9ff,#faf5ff);border:2px solid var(--brand);border-radius:12px;padding:1rem;text-align:center;margin-top:0.75rem;display:none;">
+          <strong>✨ Unlock Full Access</strong>
+          <p style="font-size:0.82rem;color:var(--sub);margin:0.4rem 0 0.75rem;">See eligibility details, apply directly, and get deadline reminders with Premium.</p>
+          <button class="btn-brand" onclick="openM('upgrade-modal')">Upgrade to Premium</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAV — all 16 sections -->
+  <nav class="nav">
+    <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue</button>
+    <button class="nlink" data-t="students" onclick="go('students')"><span class="ni">🎓</span>Students</button>
+    <button class="nlink" data-t="staff" onclick="go('staff')"><span class="ni">👥</span>Staff</button>
+    <button class="nlink" data-t="sports" onclick="go('sports')"><span class="ni">⚽</span>Sports</button>
+    <button class="nlink" data-t="arts" onclick="go('arts')"><span class="ni">🎨</span>Arts</button>
+    <button class="nlink" data-t="music" onclick="go('music')"><span class="ni">🎵</span>Music</button>
+    <button class="nlink" data-t="health" onclick="go('health')"><span class="ni">🏥</span>Health</button>
+    <button class="nlink" data-t="alumni" onclick="go('alumni')"><span class="ni">🎓</span>Alumni</button>
+    <button class="nlink" data-t="expenses" onclick="go('expenses')"><span class="ni">📉</span>Expenses</button>
+    <button class="nlink" data-t="finance" onclick="go('finance')"><span class="ni">🤖</span>Finance AI</button>
+    <button class="nlink" data-t="comms" onclick="go('comms')"><span class="ni">📢</span>Comms</button>
+    <button class="nlink" data-t="analytics" onclick="go('analytics')"><span class="ni">📊</span>Analytics</button>
+    <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🔒</span>Security</button>
+    <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
+    <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
+    <button class="nlink" data-t="opps" onclick="go('opps')"><span class="ni">🔍</span>Scout</button>
+  </nav>
+</div>
+
+<!-- ══════════════ MODALS ══════════════ -->
+
+<div class="modal" id="student-modal">
+  <div class="mbox">
+    <div class="mhead">
+      <div class="prof-hdr" style="flex:1;margin-right:0.5rem;">
+        <div style="font-weight:800;font-size:1rem;" id="prof-name">Student</div>
+        <div style="font-size:0.75rem;opacity:0.85;" id="prof-meta">—</div>
+      </div>
+      <button class="mclose" onclick="closeM('student-modal')">×</button>
+    </div>
+    <div class="profile-tabs">
+      <button class="ptab on" data-pt="fees" onclick="setTab('fees')">💰 Fees</button>
+      <button class="ptab" data-pt="attendance" onclick="setTab('attendance')">📅 Attendance</button>
+      <button class="ptab" data-pt="scores" onclick="setTab('scores')">📚 Scores</button>
+      <button class="ptab" data-pt="report" onclick="setTab('report')">📋 Report Card</button>
+      <button class="ptab" data-pt="swot" onclick="setTab('swot')">🧠 SWOT</button>
+    </div>
+    <div id="profile-content"></div>
+    <button class="btn-ghost" style="margin-top:0.65rem;color:var(--danger);border-color:var(--danger);" onclick="deleteStudent(activeIdx)">🗑️ Remove Student</button>
+  </div>
+</div>
+
+<div class="modal" id="add-student-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Student</h3><button class="mclose" onclick="closeM('add-student-modal')">×</button></div>
+    <label>Full Name</label><input type="text" id="ns-name" placeholder="e.g. Adebayo Okonkwo">
+    <label>Parent's WhatsApp</label><input type="tel" id="ns-phone" placeholder="2348012345678">
+    <label>Class</label><input type="text" id="ns-class" placeholder="e.g. JSS 2, Primary 4, SSS 1">
+    <label>Termly Fee (₦) — blank uses default</label><input type="number" id="ns-fee" placeholder="Leave blank for default">
+    <button class="btn-brand" onclick="addStudent()">✅ Add Student</button>
+  </div>
+</div>
+
+<div class="modal" id="add-staff-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">👤 Add Staff</h3><button class="mclose" onclick="closeM('add-staff-modal')">×</button></div>
+    <label>Full Name</label><input type="text" id="sf-name" placeholder="e.g. Mrs. Adunola Bello">
+    <label>Email (login email)</label><input type="email" id="sf-email" placeholder="teacher@school.edu.ng">
+    <label>Password</label>
+    <div class="pwd-wrap">
+      <input type="password" id="sf-pwd" placeholder="Min 4 characters">
+      <button type="button" class="eye-btn" onclick="toggleEye('sf-pwd',this)" tabindex="-1">👁️</button>
+    </div>
+    <label>Role</label>
+    <select id="sf-role"><option>Teacher</option><option>Bursar</option><option>Head Teacher</option><option>Vice Principal</option><option>Admin</option><option>Sports Coach</option><option>Arts Teacher</option><option>Music Teacher</option></select>
+    <button class="btn-brand" onclick="addStaff()">✅ Add Staff</button>
+  </div>
+</div>
+
+<div class="modal" id="add-expense-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">📉 Log Expense</h3><button class="mclose" onclick="closeM('add-expense-modal')">×</button></div>
+    <label>Category</label>
+    <select id="exp-cat"><option>Staff Salaries</option><option>Utilities (NEPA/Generator)</option><option>Building Maintenance</option><option>Teaching Materials</option><option>Government/Ministry Fees</option><option>Cleaning & Security</option><option>Transport</option><option>Examination Fees</option><option>Other</option></select>
+    <label>Description</label><input type="text" id="exp-desc" placeholder="e.g. Generator servicing">
+    <label>Amount (₦)</label><input type="number" id="exp-amt" placeholder="e.g. 45000">
+    <button class="btn-brand" onclick="addExpense()">💾 Save Expense</button>
+  </div>
+</div>
+
+<div class="modal" id="custom-sport-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Custom Sport</h3><button class="mclose" onclick="closeM('custom-sport-modal')">×</button></div>
+    <label>Sport Name</label><input type="text" id="cs-name" placeholder="e.g. Swimming, Handball">
+    <label>Icon (emoji)</label><input type="text" id="cs-icon" placeholder="e.g. 🏊" maxlength="2">
+    <label>Description</label><input type="text" id="cs-desc" placeholder="e.g. Indoor pool, ages 10–17">
+    <button class="btn-brand" onclick="addCustomSport()">💾 Add Sport</button>
+  </div>
+</div>
+
+<div class="modal" id="add-player-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Player</h3><button class="mclose" onclick="closeM('add-player-modal')">×</button></div>
+    <label>Select Student</label><select id="player-sel"><option value="">— Choose student —</option></select>
+    <label>Position/Role</label><input type="text" id="player-pos" placeholder="e.g. Striker, Goalkeeper">
+    <label>Jersey Number</label><input type="number" id="player-num" placeholder="e.g. 10" min="1" max="99">
+    <button class="btn-sports" onclick="addPlayer()">💾 Add to Team</button>
+  </div>
+</div>
+
+<div class="modal" id="add-artwork-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🎨 Add Artwork</h3><button class="mclose" onclick="closeM('add-artwork-modal')">×</button></div>
+    <label>Student</label><select id="art-stu-sel"><option value="">— Choose student —</option></select>
+    <label>Artwork Title</label><input type="text" id="art-title" placeholder="e.g. Sunset Over Lagos">
+    <label>Medium</label>
+    <select id="art-medium"><option>Drawing</option><option>Painting</option><option>Sculpture</option><option>Beadwork</option><option>Textile</option><option>Photography</option><option>Other</option></select>
+    <label>Description</label><textarea id="art-desc" rows="2" placeholder="Brief description"></textarea>
+    <button class="btn-arts" onclick="saveArtwork()">💾 Save Artwork</button>
+  </div>
+</div>
+
+<div class="modal" id="log-practice-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">📝 Log Practice</h3><button class="mclose" onclick="closeM('log-practice-modal')">×</button></div>
+    <label>Student</label><select id="prac-stu"><option value="">— Choose student —</option></select>
+    <label>Activity</label><input type="text" id="prac-act" placeholder="e.g. Piano practice, Choir rehearsal">
+    <label>Duration</label>
+    <select id="prac-dur"><option>30 mins</option><option>45 mins</option><option>1 hour</option><option>1.5 hours</option><option>2 hours</option></select>
+    <label>Notes</label><textarea id="prac-notes" rows="2" placeholder="Progress made, areas to improve..."></textarea>
+    <button class="btn-music" onclick="savePractice()">💾 Save Log</button>
+  </div>
+</div>
+
+<div class="modal" id="book-lesson-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🎹 Book Lesson</h3><button class="mclose" onclick="closeM('book-lesson-modal')">×</button></div>
+    <label>Student</label><select id="lesson-stu"><option value="">— Choose student —</option></select>
+    <label>Instrument</label>
+    <select id="lesson-inst"><option>Piano</option><option>Guitar</option><option>Keyboard</option><option>Talking Drum</option><option>Vocals</option><option>Other</option></select>
+    <label>Date</label><input type="date" id="lesson-date">
+    <label>Time Slot</label>
+    <select id="lesson-time"><option>3:00–4:00 PM</option><option>4:00–5:00 PM</option><option>5:00–6:00 PM</option></select>
+    <button class="btn-music" onclick="bookLesson()">📅 Confirm Booking</button>
+  </div>
+</div>
+
+<div class="modal" id="instrument-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🎸 Instrument Inventory</h3><button class="mclose" onclick="closeM('instrument-modal')">×</button></div>
+    <div id="instrument-list"></div>
+    <button class="btn-brand btn-sm" style="margin-top:0.65rem;" onclick="addInstrument()">➕ Add Instrument</button>
+  </div>
+</div>
+
+<div class="modal" id="log-incident-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🏥 Log Incident</h3><button class="mclose" onclick="closeM('log-incident-modal')">×</button></div>
+    <label>Student</label><select id="inc-stu"><option value="">— Choose student —</option></select>
+    <label>Incident / Condition</label><input type="text" id="inc-type" placeholder="e.g. Malaria, Injury, Headache">
+    <label>Action Taken</label>
+    <select id="inc-action"><option>Given first aid</option><option>Sent home</option><option>Parent called</option><option>Referred to hospital</option><option>Monitored in sick bay</option></select>
+    <label>Notes</label><textarea id="inc-notes" rows="2" placeholder="Additional details..."></textarea>
+    <button class="btn-brand" onclick="logIncident()">💾 Save Incident</button>
+  </div>
+</div>
+
+<div class="modal" id="add-alumni-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🎓 Add Alumni</h3><button class="mclose" onclick="closeM('add-alumni-modal')">×</button></div>
+    <label>Full Name</label><input type="text" id="al-name" placeholder="e.g. Adebayo Okonkwo">
+    <label>Graduation Year</label><input type="number" id="al-year" placeholder="e.g. 2020">
+    <label>WhatsApp</label><input type="tel" id="al-phone" placeholder="2348012345678">
+    <label>Current Occupation</label><input type="text" id="al-job" placeholder="e.g. Engineer at Dangote Group">
+    <button class="btn-brand" onclick="addAlumni()">✅ Add Alumni</button>
+  </div>
+</div>
+
+<div class="modal" id="comms-history-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">📜 Message History</h3><button class="mclose" onclick="closeM('comms-history-modal')">×</button></div>
+    <div id="comms-history-list"><p style="text-align:center;color:var(--sub);padding:2rem;">No messages sent yet.</p></div>
+  </div>
+</div>
+
+<div class="modal" id="upgrade-modal">
+  <div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">✨ Upgrade to Premium</h3><button class="mclose" onclick="closeM('upgrade-modal')">×</button></div>
+    <div style="background:linear-gradient(135deg,#f0f9ff,#faf5ff);border-radius:12px;padding:1rem;margin-bottom:0.75rem;">
+      <div style="font-weight:800;font-size:1rem;margin-bottom:0.4rem;">Premium Plan — ₦5,000/month</div>
+      <div style="font-size:0.82rem;color:var(--sub);line-height:1.7;">✅ Unlimited staff accounts<br>✅ Finance AI full advisor<br>✅ All Opportunity Scout features<br>✅ Priority support from AariNAT</div>
+    </div>
+    <p style="font-size:0.82rem;color:var(--sub);margin-bottom:0.75rem;">Contact AariNAT via WhatsApp to activate Premium. Your account upgrades within minutes of payment.</p>
+    <button class="btn-wa" onclick="window.open('https://wa.me/2348145073941?text=Hello%20AariNAT%2C%20I%20want%20to%20upgrade%20my%20Educational%20Bloom%20school%20to%20Premium.%20School%20ID%3A%20'+schoolId,'_blank')">💬 WhatsApp AariNAT to Upgrade</button>
+    <button class="btn-ghost" style="margin-top:0.4rem;" onclick="closeM('upgrade-modal')">Maybe Later</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
