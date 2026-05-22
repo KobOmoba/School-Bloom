@@ -1,0 +1,1057 @@
+// ── Firebase ───────────────────────────────────────────────────────────────
+const FB={apiKey:"AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o",authDomain:"educationbloom-699ed.firebaseapp.com",projectId:"educationbloom-699ed",storageBucket:"educationbloom-699ed.firebasestorage.app",messagingSenderId:"33750392965",appId:"1:33750392965:web:2b3da887ede996ea8389ec"};
+let db=null;
+try{firebase.initializeApp(FB);db=firebase.firestore();}catch(e){console.warn('FB:',e);}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let schoolId=null,userRole=null;
+let SD={config:{},students:[],staff:[],expenses:[],attendance:{},sports:{teams:{},custom:[]},arts:{gallery:[]},music:{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]};
+let activeIdx=null,activeTab='fees',currentSport='football';
+
+// ── Sync ───────────────────────────────────────────────────────────────────
+const SQ={
+  q:JSON.parse(localStorage.getItem('p_sq')||'[]'),
+  save(){localStorage.setItem('p_sq',JSON.stringify(this.q));},
+  push(key,data){
+    SD[key]=data;
+    if(schoolId)localStorage.setItem(`p_${schoolId}_${key}`,JSON.stringify(data));
+    this.q.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2),key,data,tries:0});
+    this.save();this.flush();
+  },
+  ping(){
+    const ok=navigator.onLine&&!!db;
+    const el=$('sync');
+    if(el){el.className='sdot '+(ok?this.q.length?'sd-sync':'sd-on':'sd-off');el.textContent=ok?this.q.length?'● Syncing':'● Online':'● Offline';}
+    if(ok&&this.q.length)this.flush();
+  },
+  async flush(){
+    if(!db||!navigator.onLine||!this.q.length)return;
+    const items=[...this.q];
+    for(const item of items){
+      try{await db.collection('schools').doc(schoolId).set({[item.key]:item.data},{merge:true});this.q=this.q.filter(x=>x.id!==item.id);}
+      catch(e){item.tries++;if(item.tries>3)this.q=this.q.filter(x=>x.id!==item.id);}
+    }
+    this.save();this.ping();
+  }
+};
+window.addEventListener('online',()=>SQ.ping());
+window.addEventListener('offline',()=>SQ.ping());
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const $=id=>document.getElementById(id);
+const esc=s=>{if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML;};
+const fmt=n=>'₦'+Number(n||0).toLocaleString('en-NG');
+const openM=id=>$(id).classList.add('on');
+const closeM=id=>$(id).classList.remove('on');
+window.onclick=e=>{if(e.target.classList.contains('modal'))e.target.classList.remove('on');};
+document.onkeydown=e=>{if(e.key==='Escape')document.querySelectorAll('.modal').forEach(m=>m.classList.remove('on'));};
+function loadLocal(key,def){if(!schoolId)return def;const v=localStorage.getItem(`p_${schoolId}_${key}`);if(v)try{return JSON.parse(v);}catch(e){}return def;}
+function gradeScore(t){if(t>=70)return{g:'A',r:'Excellent'};if(t>=60)return{g:'B',r:'Good'};if(t>=50)return{g:'C',r:'Average'};if(t>=40)return{g:'D',r:'Below Average'};return{g:'F',r:'Fail'};}
+
+// ── Password Eye Toggle ────────────────────────────────────────────────────
+function toggleEye(inputId,btn){
+  const inp=$(inputId);if(!inp)return;
+  const show=inp.type==='password';
+  inp.type=show?'text':'password';
+  btn.textContent=show?'🙈':'👁️';
+  btn.title=show?'Hide password':'Show password';
+}
+
+// ── Login ──────────────────────────────────────────────────────────────────
+async function doLogin(){
+  // FIX 1: Normalize School ID — always uppercase, trimmed (admin generates uppercase IDs)
+  const sid=$('l-school').value.trim().toUpperCase();
+  // Email field removed from login page — no longer needed
+  const email='';
+  // FIX 2: Trim password to prevent invisible space issues
+  const pwd=$('l-pwd').value.trim();
+  const err=$('l-err');err.style.display='none';
+  const btn=$('l-btn');
+  if(!sid||!pwd){err.textContent='Enter School ID and password.';err.style.display='block';return;}
+  btn.textContent='Checking...';btn.disabled=true;
+
+  // Helper: match staff password (case-insensitive trim, then exact)
+  function matchUser(staff,email,pwd){
+    const p=pwd.trim();
+    // Try email + password first
+    if(email){
+      const u=staff.find(s=>(s.email||'').trim().toLowerCase()===email && (s.password||'').trim()===p);
+      if(u)return u;
+    }
+    // FIX 3: Password-only match with trim — the main login path for schools
+    return staff.find(s=>(s.password||'').trim()===p)||null;
+  }
+
+  try{
+    let school=null;
+
+    // STEP 1: Try Firestore schools collection first
+    if(db){
+      try{
+        const doc=await db.collection('schools').doc(sid).get();
+        if(doc.exists) school=doc.data();
+        console.log('Step1 Firestore result:', school?'FOUND':'not found');
+      }catch(e){
+        console.warn('Step1 Firestore read failed (rules?):', e.message);
+      }
+    }
+
+    // STEP 2: Check admin_approved_schools (fallback for older approvals)
+    if(!school && db){
+      try{
+        const snap=await db.collection('admin_approved_schools').where('schoolId','==',sid).get();
+        console.log('Step2 admin_approved_schools:', snap.empty?'not found':snap.docs[0].data());
+        if(!snap.empty){
+          const rec=snap.docs[0].data();
+          const recPwd=(rec.password||'').trim();
+          if(recPwd===pwd){
+            // Build school doc and write it so future logins hit Step 1
+            const newDoc={
+              config:{plan:'basic',fee:50000,schoolName:rec.schoolName||'',principalEmail:rec.principalEmail||'',whatsapp:rec.principalPhone||'',createdAt:new Date().toISOString()},
+              staff:[{name:'Principal',email:(rec.principalEmail||sid.toLowerCase()+'@bloom.edu.ng').toLowerCase(),password:rec.password,role:'Principal',phone:rec.principalPhone||''}],
+              students:[],expenses:[],attendance:{},sports:{teams:{},custom:[]},arts:{gallery:[]},
+              music:{practiceLogs:[],instruments:[]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]
+            };
+            try{ await db.collection('schools').doc(sid).set(newDoc,{merge:true}); }catch(e2){console.warn('Could not write school doc:',e2.message);}
+            school=newDoc;
+          } else {
+            err.textContent='Wrong password. Use the password sent by your AariNAT agent.';
+            err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
+          }
+        }
+      }catch(e){ console.warn('Step2 admin_approved_schools failed:', e.message); }
+    }
+
+    // STEP 3: localStorage offline fallback
+    if(!school){
+      const lc=localStorage.getItem(`p_${sid}_config`);
+      const ls=localStorage.getItem(`p_${sid}_staff`);
+      if(lc&&ls){
+        console.log('Step3: using localStorage cache');
+        school={config:JSON.parse(lc),staff:JSON.parse(ls)};
+      }
+    }
+
+    if(!school){
+      // FIX 4: Better error — tell user exactly what was tried
+      const online=navigator.onLine;
+      err.textContent=online
+        ? `School ID "${sid}" not found. Double-check the ID sent by your AariNAT agent (format: BLOOM-XXXXXX).`
+        : 'No internet connection. Connect to WiFi or mobile data and try again.';
+      err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
+    }
+
+    // Match staff member
+    const staff=school.staff||[];
+    const user=matchUser(staff,email,pwd);
+
+    if(!user){
+      // FIX 5: Helpful error if school was found but password wrong
+      err.textContent='School found but password is incorrect. Use the exact password sent by your AariNAT agent (case-sensitive).';
+      err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
+    }
+
+    // ✅ Login success
+    schoolId=sid;userRole=user.role;
+    const rememberMe=$('l-remember')?.checked!==false; // default true
+    const authData=JSON.stringify({schoolId:sid,email:user.email||email,role:user.role});
+    if(rememberMe){
+      localStorage.setItem('p_auth',authData); // persists across browser closes
+    } else {
+      sessionStorage.setItem('p_auth',authData); // clears when browser tab closes
+      localStorage.removeItem('p_auth');
+    }
+    SD.config=school.config||{};SD.students=school.students||[];SD.staff=school.staff||[];
+    SD.expenses=school.expenses||[];SD.attendance=school.attendance||{};
+    SD.sports=school.sports||{teams:{},custom:[]};SD.arts=school.arts||{gallery:[]};
+    SD.music=school.music||{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]};
+    SD.health=school.health||[];SD.alumni=school.alumni||[];
+    SD.socialPages=school.socialPages||[];SD.commsLog=school.commsLog||[];
+    SD.opportunities=school.opportunities||defaultOpps();
+    Object.keys(SD).forEach(k=>localStorage.setItem(`p_${sid}_${k}`,JSON.stringify(SD[k])));
+    startApp();
+
+  }catch(e){
+    console.error('doLogin outer catch:', e);
+    // Last resort: localStorage offline login
+    const lc=localStorage.getItem(`p_${sid}_config`),ls=localStorage.getItem(`p_${sid}_staff`);
+    if(lc&&ls){
+      const staff=JSON.parse(ls);
+      const user=matchUser(staff,email,pwd);
+      if(user){
+        schoolId=sid;userRole=user.role;
+        localStorage.setItem('p_auth',JSON.stringify({schoolId:sid,email:user.email||email,role:user.role}));
+        SD.config=JSON.parse(lc);SD.students=loadLocal('students',[]);SD.staff=staff;
+        SD.expenses=loadLocal('expenses',[]);SD.attendance=loadLocal('attendance',{});
+        SD.sports=loadLocal('sports',{teams:{},custom:[]});SD.arts=loadLocal('arts',{gallery:[]});
+        SD.music=loadLocal('music',{practiceLogs:[],instruments:[]});SD.health=loadLocal('health',[]);
+        SD.alumni=loadLocal('alumni',[]);SD.socialPages=loadLocal('socialPages',[]);
+        SD.commsLog=loadLocal('commsLog',[]);SD.opportunities=loadLocal('opportunities',defaultOpps());
+        startApp();return;
+      }
+    }
+    err.textContent='Login failed: '+(e?.message||'Connection error. Check your internet and try again.');
+    err.style.display='block';
+  }
+  btn.textContent='▶ Login';btn.disabled=false;
+}
+
+function defaultOpps(){
+  return[
+    {id:'ubec',title:'UBEC School Development Grant',provider:'Universal Basic Education Commission',type:'grant',amount:'₦500k–₦2M',deadline:'2026-09-30',audience:['school'],desc:'For primary school infrastructure improvements.'},
+    {id:'ptdf',title:'PTDF Undergraduate Scholarship',provider:'PTDF',type:'scholarship',amount:'Full Tuition',deadline:'2026-08-31',audience:['student'],desc:'For Nigerian citizens studying petroleum-related courses.'},
+    {id:'nnpc',title:'NNPC/TOTAL Scholarship',provider:'NNPC/TOTAL',type:'scholarship',amount:'₦200,000/year',deadline:'2026-07-15',audience:['student'],desc:'For 100-level STEM students.'},
+    {id:'teach',title:'Teach For Nigeria Fellowship',provider:'Teach For Nigeria',type:'internship',amount:'Stipend + Training',deadline:'2026-06-30',audience:['teacher'],desc:'Teaching fellowship for graduates in underserved schools.'}
+  ];
+}
+
+function logout(){if(!confirm('Logout?'))return;localStorage.removeItem('p_auth');sessionStorage.removeItem('p_auth');location.reload();}
+
+function startApp(){
+  $('login').style.display='none';$('app').style.display='block';
+  const name=SD.config.schoolName||schoolId;
+  $('hdr-school').textContent=name;$('hdr-role').textContent=userRole;
+  $('hdr-term').textContent=SD.config.currentTerm||'Term 1';
+  const isPrem=SD.config.plan==='premium';
+  $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
+  $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
+  SQ.ping();renderBanner();go('revenue');
+  if(db&&navigator.onLine){
+    db.collection('schools').doc(schoolId).get().then(doc=>{
+      if(!doc.exists)return;const d=doc.data();
+      Object.assign(SD,d);Object.keys(d).forEach(k=>localStorage.setItem(`p_${schoolId}_${k}`,JSON.stringify(d[k])));
+      renderBanner();if($('sec-revenue').classList.contains('on'))renderRevenue();
+    }).catch(()=>{});
+  }
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function go(tab){
+  document.querySelectorAll('.sec').forEach(s=>s.classList.remove('on'));
+  document.querySelectorAll('.nlink').forEach(b=>b.classList.remove('on'));
+  $(`sec-${tab}`).classList.add('on');
+  const btn=document.querySelector(`[data-t="${tab}"]`);if(btn)btn.classList.add('on');
+  const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps};
+  if(fn[tab])fn[tab]();
+}
+
+// ── Banner ─────────────────────────────────────────────────────────────────
+function renderBanner(){
+  let out=0,cnt=0;
+  (SD.students||[]).forEach(s=>{const o=(s.totalFee||0)-(s.paid||0);if(o>0){out+=o;cnt++;}});
+  $('banner-amount').textContent=fmt(out);
+  $('banner-sub').textContent=`${cnt} parent${cnt!==1?'s':''} overdue · ${SD.students.length} total students`;
+}
+
+// ── 1. REVENUE ─────────────────────────────────────────────────────────────
+function renderRevenue(){
+  renderBanner();
+  const s=SD.students||[];
+  let exp=0,col=0;s.forEach(x=>{exp+=(x.totalFee||0);col+=(x.paid||0);});
+  const pct=exp>0?Math.round((col/exp)*100):0;
+  $('d-students').textContent=s.length;
+  $('d-collected').textContent=fmt(col);
+  $('d-outstanding').textContent=fmt(exp-col);
+  $('d-rate').textContent=pct+'%';
+  $('prog-pct').textContent=pct+'%';
+  $('prog-fill').style.width=pct+'%';
+  const overdue=s.filter(x=>(x.totalFee||0)-(x.paid||0)>0).sort((a,b)=>((b.totalFee||0)-(b.paid||0))-((a.totalFee||0)-(a.paid||0))).slice(0,6);
+  $('overdue-list').innerHTML=overdue.length===0?'<p style="text-align:center;color:var(--sub);padding:1rem;">All fees collected! 🎉</p>':overdue.map(s=>{
+    const idx=SD.students.indexOf(s);const owe=(s.totalFee||0)-(s.paid||0);
+    return`<div class="stu-row"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><button class="btn-wa btn-sm" onclick="sendReminder(${idx})">📲</button></div>`;
+  }).join('');
+}
+
+async function handleBulkPayment(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(x=>x.trim());
+    let matched=0,skipped=0;
+    for(let i=1;i<lines.length;i++){
+      const cols=lines[i].split(',').map(c=>c.trim());
+      if(cols.length<2||!cols[0]||!cols[1])continue;
+      const nm=cols[0].toLowerCase(),amt=parseFloat(cols[1]);
+      if(isNaN(amt)||amt<=0)continue;
+      const hits=SD.students.filter(s=>s.name.toLowerCase().includes(nm)||nm.includes(s.name.toLowerCase()));
+      if(hits.length===1){hits[0].paid=(hits[0].paid||0)+amt;matched++;}else skipped++;
+    }
+    await SQ.push('students',SD.students);
+    $('bulk-feedback').textContent=`✅ ${matched} matched and updated · ⚠️ ${skipped} skipped (ambiguous)`;
+    renderRevenue();
+  };
+  r.readAsText(f);
+}
+
+function sendReminder(idx){
+  const s=SD.students[idx];const owe=(s.totalFee||0)-(s.paid||0);
+  const sn=SD.config.schoolName||'School Management';
+  const msg=`Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
+  if(s.phone)window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
+  else alert('No phone number for this student.');
+}
+
+function sendAllReminders(){
+  const overdue=SD.students.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
+  if(!overdue.length)return alert('No overdue students!');
+  const sn=SD.config.schoolName||'School';
+  const total=overdue.reduce((t,s)=>t+(s.totalFee||0)-(s.paid||0),0);
+  const msg=`Dear Parents of ${sn},\n\nThis is a reminder that some students have outstanding fee balances for this term.\n\nTotal outstanding: *${fmt(total)}*\n*${overdue.length} students* are yet to complete payment.\n\nKindly ensure your ward's fees are paid promptly to avoid disruption.\n\nThank you.\n– ${sn}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+  logComm('Fee Reminder Broadcast',`Sent to ${overdue.length} overdue parents. Total: ${fmt(total)}`);
+}
+
+// ── 2. STUDENTS (central hub) ──────────────────────────────────────────────
+function renderStudentList(){
+  const q=($('stu-search')?.value||'').toLowerCase();
+  const cls=$('stu-class')?.value||'';
+  const pay=$('stu-pay')?.value||'';
+  let list=[...SD.students];
+  if(q)list=list.filter(s=>s.name.toLowerCase().includes(q)||(s.phone||'').includes(q));
+  if(cls)list=list.filter(s=>s.class===cls);
+  if(pay==='paid')list=list.filter(s=>(s.totalFee||0)<=(s.paid||0));
+  else if(pay==='owing')list=list.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
+  populateClassFilter();
+  const c=$('students-list');
+  if(!list.length){c.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No students match. Add a student or adjust filters.</p>';return;}
+  c.innerHTML=list.map(s=>{
+    const idx=SD.students.indexOf(s);
+    const owe=(s.totalFee||0)-(s.paid||0);
+    const pbc=owe<=0?'pb-paid':s.paid>0?'pb-part':'pb-owe';
+    const pbt=owe<=0?'Paid':s.paid>0?'Partial':'Unpaid';
+    return`<div class="stu-row" onclick="openProfile(${idx})"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;min-width:0;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;"><span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}</div></div>`;
+  }).join('');
+}
+
+function populateClassFilter(){
+  const sel=$('stu-class');if(!sel)return;
+  const classes=[...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
+  const cur=sel.value;
+  sel.innerHTML='<option value="">All Classes</option>'+classes.map(c=>`<option value="${esc(c)}" ${c===cur?'selected':''}>${esc(c)}</option>`).join('');
+}
+
+async function addStudent(){
+  const name=$('ns-name').value.trim(),phone=$('ns-phone').value.trim().replace(/\D/g,'');
+  const cls=$('ns-class').value.trim(),fee=parseFloat($('ns-fee').value)||SD.config.fee||50000;
+  if(!name||!phone)return alert('Name and phone required.');
+  SD.students.push({name,phone,class:cls,totalFee:fee,paid:0,scores:{},swot:{}});
+  await SQ.push('students',SD.students);
+  closeM('add-student-modal');
+  $('ns-name').value='';$('ns-phone').value='';$('ns-class').value='';$('ns-fee').value='';
+  renderStudentList();renderBanner();renderRevenue();
+}
+
+async function deleteStudent(idx){
+  if(!confirm(`Delete ${SD.students[idx]?.name}?`))return;
+  SD.students.splice(idx,1);await SQ.push('students',SD.students);
+  closeM('student-modal');renderStudentList();renderBanner();
+}
+
+function handleCSV(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(x=>x.trim());
+    if(lines.length<2){alert('Invalid CSV.');return;}
+    let count=0;
+    for(let i=1;i<lines.length;i++){
+      const c=lines[i].split(',').map(x=>x.trim());
+      if(c[0]&&c[1]){SD.students.push({name:c[0],phone:c[1].replace(/\D/g,''),class:c[2]||'JSS1',totalFee:parseFloat(c[3])||SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;}
+    }
+    await SQ.push('students',SD.students);
+    $('csv-fb').textContent=`✅ Imported ${count} students.`;
+    renderStudentList();renderBanner();renderRevenue();
+  };
+  r.readAsText(f);
+}
+
+// ── STUDENT PROFILE ────────────────────────────────────────────────────────
+function openProfile(idx){
+  activeIdx=idx;activeTab='fees';
+  const s=SD.students[idx];if(!s)return;
+  $('prof-name').textContent=s.name;
+  $('prof-meta').textContent=`${s.class||'—'} · ${s.phone||'—'}`;
+  document.querySelectorAll('.ptab').forEach(t=>t.classList.toggle('on',t.dataset.pt==='fees'));
+  renderTab('fees');openM('student-modal');
+}
+
+function setTab(tab){
+  activeTab=tab;
+  document.querySelectorAll('.ptab').forEach(t=>t.classList.toggle('on',t.dataset.pt===tab));
+  renderTab(tab);
+}
+
+function renderTab(tab){
+  const s=SD.students[activeIdx];if(!s)return;
+  const c=$('profile-content');
+  if(tab==='fees')c.innerHTML=buildFees(s,activeIdx);
+  else if(tab==='attendance')c.innerHTML=buildAttendance(s);
+  else if(tab==='scores')c.innerHTML=buildScores(s,activeIdx);
+  else if(tab==='report')c.innerHTML=buildReport(s);
+  else if(tab==='swot')c.innerHTML=buildSWOT(s,activeIdx);
+}
+
+// FEES TAB
+function buildFees(s,idx){
+  const owe=(s.totalFee||0)-(s.paid||0);
+  const pct=s.totalFee?Math.min(100,Math.round(((s.paid||0)/s.totalFee)*100)):0;
+  return`<div class="card" style="margin-bottom:0.65rem;"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.65rem;">
+    <div class="stat"><div class="sn" style="font-size:1rem;">${fmt(s.totalFee||0)}</div><div class="sl">Fee</div></div>
+    <div class="stat"><div class="sn" style="font-size:1rem;color:var(--money);">${fmt(s.paid||0)}</div><div class="sl">Paid</div></div>
+    <div class="stat"><div class="sn" style="font-size:1rem;color:var(--danger);">${fmt(owe)}</div><div class="sl">Owing</div></div>
+    </div><div class="prog-bg"><div class="prog-fill" style="width:${pct}%;"></div></div>
+    <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% paid</div></div>
+    <div class="card"><div class="ct">Record Payment</div>
+    <label>Amount (₦)</label><input type="number" id="pay-amt" placeholder="e.g. 25000">
+    <label>Method</label><select id="pay-method"><option>Bank Transfer</option><option>Cash</option><option>POS</option><option>Online</option></select>
+    <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
+    <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
+    ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
+    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${s.paymentHistory.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span>${p.date} · ${p.method}</span><strong style="color:var(--money);">${fmt(p.amount)}</strong></div>`).join('')}</div>`:''}
+    </div>`;
+}
+
+async function recordPayment(idx){
+  const amt=parseFloat($('pay-amt')?.value);if(!amt||amt<=0)return alert('Enter valid amount.');
+  SD.students[idx].paid=(SD.students[idx].paid||0)+amt;
+  if(!SD.students[idx].paymentHistory)SD.students[idx].paymentHistory=[];
+  SD.students[idx].paymentHistory.unshift({amount:amt,method:$('pay-method')?.value||'Cash',date:$('pay-date')?.value||new Date().toISOString().split('T')[0],by:userRole});
+  await SQ.push('students',SD.students);
+  $('pay-amt').value='';renderTab('fees');renderBanner();renderRevenue();
+  alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
+}
+
+// ATTENDANCE TAB
+function buildAttendance(s){
+  const days=[];for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()-i);days.push(d.toISOString().split('T')[0]);}
+  const att=SD.attendance||{};
+  const today=days[0];
+  const present=days.filter(d=>att[d]?.[s.name]==='Present').length;
+  const absent=days.filter(d=>att[d]?.[s.name]==='Absent').length;
+  const late=days.filter(d=>att[d]?.[s.name]==='Late').length;
+  const pct=days.length>0?Math.round((present/days.length)*100):0;
+  return`<div class="card" style="margin-bottom:0.65rem;"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;">
+    <div class="stat"><div class="sn" style="color:var(--money);">${present}</div><div class="sl">Present</div></div>
+    <div class="stat"><div class="sn" style="color:var(--danger);">${absent}</div><div class="sl">Absent</div></div>
+    <div class="stat"><div class="sn" style="color:var(--warn);">${late}</div><div class="sl">Late</div></div>
+    </div><div class="prog-bg" style="margin-top:0.65rem;"><div class="prog-fill" style="width:${pct}%;"></div></div>
+    <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% attendance (last 14 days)</div></div>
+    <div class="card"><div class="ct">📅 Mark Today (${today})</div>
+    <div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">
+      <button class="btn-money btn-sm" onclick="markAtt(${activeIdx},'${today}','Present')">✅ Present</button>
+      <button class="btn-danger btn-sm" onclick="markAtt(${activeIdx},'${today}','Absent')">❌ Absent</button>
+      <button style="background:var(--warn);color:white;width:auto;padding:0.32rem 0.7rem;font-size:0.73rem;display:inline-block;margin:0;border-radius:10px;font-weight:700;cursor:pointer;" onclick="markAtt(${activeIdx},'${today}','Late')">⏰ Late</button>
+    </div>
+    <div>${days.map(d=>{const st=att[d]?.[s.name]||null;const cls=st==='Present'?'chip-ok':st==='Absent'?'chip-bad':st==='Late'?'chip-warn':'';return`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;"><span>${d}</span>${st?`<span class="chip ${cls}">${st}</span>`:'<span style="color:var(--sub);font-size:0.7rem;">—</span>'}</div>`;}).join('')}</div></div>`;
+}
+
+async function markAtt(idx,date,status){
+  const s=SD.students[idx];if(!s)return;
+  if(!SD.attendance)SD.attendance={};
+  if(!SD.attendance[date])SD.attendance[date]={};
+  SD.attendance[date][s.name]=status;
+  await SQ.push('attendance',SD.attendance);
+  renderTab('attendance');
+}
+
+// SCORES TAB
+function buildScores(s,idx){
+  const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const sc=s.scores||{};const term=SD.config.currentTerm||'Term 1';
+  return`<div class="card"><div class="ct">📚 ${esc(term)} Scores</div>
+    <p style="font-size:0.75rem;color:var(--sub);margin-bottom:0.65rem;">CA max 40 · Exam max 60 · Total 100</p>
+    <table class="stbl"><thead><tr><th>Subject</th><th>CA/40</th><th>Exam/60</th><th>Total</th><th>Grade</th></tr></thead><tbody>
+    ${subs.map(sub=>{const v=sc[sub]||{ca:0,exam:0};const tot=(v.ca||0)+(v.exam||0);const{g}=gradeScore(tot);
+    return`<tr><td style="font-weight:600;font-size:0.8rem;">${esc(sub)}</td>
+      <td><input type="number" min="0" max="40" value="${v.ca||''}" placeholder="0" onchange="updateScore(${idx},'${esc(sub)}','ca',this.value)" style="margin:0;"></td>
+      <td><input type="number" min="0" max="60" value="${v.exam||''}" placeholder="0" onchange="updateScore(${idx},'${esc(sub)}','exam',this.value)" style="margin:0;"></td>
+      <td style="font-weight:700;font-family:'DM Mono',monospace;">${tot||0}</td>
+      <td class="g${g}">${g}</td></tr>`;}).join('')}
+    </tbody></table>
+    <button class="btn-brand" onclick="saveScores(${idx})">💾 Save Scores</button></div>`;
+}
+
+async function updateScore(idx,sub,type,val){
+  if(!SD.students[idx].scores)SD.students[idx].scores={};
+  if(!SD.students[idx].scores[sub])SD.students[idx].scores[sub]={ca:0,exam:0};
+  SD.students[idx].scores[sub][type]=Math.min(type==='ca'?40:60,Math.max(0,parseFloat(val)||0));
+}
+
+async function saveScores(idx){await SQ.push('students',SD.students);alert('✅ Scores saved!');renderTab('scores');}
+
+// REPORT CARD TAB
+function buildReport(s){
+  const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const sc=s.scores||{};const term=SD.config.currentTerm||'Term 1';const session=SD.config.session||'2025/2026';
+  const sn=SD.config.schoolName||'Educational Bloom School';
+  let total=0,n=0;
+  const rows=subs.map(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);total+=t;n++;const{g,r}=gradeScore(t);return{sub,ca:v.ca||0,exam:v.exam||0,t,g,r};});
+  const avg=n>0?Math.round(total/n):0;const og=gradeScore(avg);
+  const cls=SD.students.filter(x=>x.class===s.class&&x.scores);
+  const pos=cls.map(x=>{let t=0,nn=0;subs.forEach(sub=>{const v=x.scores?.[sub]||{};t+=(v.ca||0)+(v.exam||0);nn++;});return{name:x.name,avg:nn>0?Math.round(t/nn):0};}).sort((a,b)=>b.avg-a.avg).findIndex(x=>x.name===s.name)+1;
+  return`<div class="rc" id="rc-out">
+    <div class="rc-hdr"><div class="rc-school">${esc(sn)}</div><div style="font-size:0.75rem;color:var(--sub);">Session: ${esc(session)} · ${esc(term)}</div>
+    <div style="font-size:0.82rem;margin-top:0.4rem;"><strong>Student:</strong> ${esc(s.name)} &nbsp;|&nbsp; <strong>Class:</strong> ${esc(s.class||'—')} &nbsp;|&nbsp; <strong>Position:</strong> ${pos>0?pos+'/'+cls.length:'—'}</div></div>
+    <table class="rct"><thead><tr><th>Subject</th><th>CA</th><th>Exam</th><th>Total</th><th>Grade</th><th>Remark</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td><strong>${esc(r.sub)}</strong></td><td>${r.ca}</td><td>${r.exam}</td><td><strong>${r.t}</strong></td><td class="g${r.g}"><strong>${r.g}</strong></td><td style="font-size:0.72rem;">${r.r}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="rc-foot"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;text-align:center;margin-bottom:0.5rem;">
+      <div><strong>${n}</strong><div style="font-size:0.68rem;color:var(--sub);">Subjects</div></div>
+      <div><strong>${total}</strong><div style="font-size:0.68rem;color:var(--sub);">Total Score</div></div>
+      <div><strong class="g${og.g}">${avg}% (${og.g})</strong><div style="font-size:0.68rem;color:var(--sub);">Average</div></div>
+    </div>
+    <div style="font-size:0.8rem;"><strong>Remark:</strong> ${og.r}. ${avg>=70?'Keep up the excellent work!':avg>=50?'Good effort — work harder next term.':'More effort needed. Please study consistently.'}</div></div>
+    <div style="display:flex;justify-content:space-between;margin-top:0.75rem;font-size:0.72rem;color:var(--sub);"><span>Class Teacher: ___________</span><span>Principal: ___________</span></div>
+  </div>
+  <div style="display:flex;gap:0.4rem;margin-top:0.65rem;">
+    <button class="btn-brand" onclick="printRC()">🖨️ Print</button>
+    <button class="btn-wa" onclick="sendRC(${activeIdx})">📲 Send via WhatsApp</button>
+  </div>`;
+}
+
+function printRC(){
+  const c=$('rc-out');if(!c)return;
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card</title><style>body{font-family:sans-serif;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{padding:7px;border:1px solid #ccc;font-size:12px;}th{background:#4f46e5;color:white;}.rc-school{font-size:16px;font-weight:800;color:#4f46e5;text-align:center;}.gA{color:#166534;font-weight:700;}.gB{color:#065f46;font-weight:700;}.gC{color:#92400e;font-weight:700;}.gF{color:#dc2626;font-weight:700;}</style></head><body>${c.innerHTML}<script>window.onload=()=>window.print();<\/script></body></html>`);
+  w.document.close();
+}
+
+function sendRC(idx){
+  const s=SD.students[idx];const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const sc=s.scores||{};let lines=`📋 *REPORT CARD — ${SD.config.schoolName||'School'}*\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Term:* ${SD.config.currentTerm||'Term 1'}\n\n*SCORES*\n`;
+  subs.forEach(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);lines+=`${sub}: ${t}/100 (${gradeScore(t).g})\n`;});
+  if(s.phone)window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(lines)}`,'_blank');
+  else alert('No phone number for this student.');
+}
+
+// SWOT TAB
+function buildSWOT(s,idx){
+  const sw=s.swot||{};
+  return`<div class="card"><div class="ct">🧠 SWOT Analysis</div>
+    <label>💪 Strengths</label><textarea id="sw-s" rows="2" placeholder="e.g. Excellent in Mathematics, good team player">${esc(sw.strengths||'')}</textarea>
+    <label>🔍 Weaknesses</label><textarea id="sw-w" rows="2" placeholder="e.g. Needs improvement in writing">${esc(sw.weaknesses||'')}</textarea>
+    <label>🚀 Opportunities</label><textarea id="sw-o" rows="2" placeholder="e.g. Ready for STEM track, scholarship potential">${esc(sw.opportunities||'')}</textarea>
+    <label>⚠️ Considerations</label><textarea id="sw-t" rows="2" placeholder="e.g. Financial constraints">${esc(sw.threats||'')}</textarea>
+    <label>💰 Estimated Family Capacity</label><input type="text" id="sw-cap" value="${esc(sw.capacity||'')}" placeholder="e.g. ₦50,000–₦150,000/term">
+    <button class="btn-brand" onclick="saveSWOT(${idx})">💾 Save SWOT</button></div>`;
+}
+
+async function saveSWOT(idx){
+  SD.students[idx].swot={strengths:$('sw-s').value,weaknesses:$('sw-w').value,opportunities:$('sw-o').value,threats:$('sw-t').value,capacity:$('sw-cap').value};
+  await SQ.push('students',SD.students);alert('✅ SWOT saved!');
+}
+
+// ── 3. STAFF ───────────────────────────────────────────────────────────────
+function renderStaff(){
+  const staff=SD.staff||[];const isPrem=SD.config.plan==='premium';const limit=isPrem?'∞':3;
+  $('staff-count').textContent=`${staff.length}/${limit} used (${isPrem?'Premium':'Basic'})`;
+  $('staff-list').innerHTML=staff.map((s,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);font-size:0.85rem;">
+    <div><strong>${esc(s.name)}</strong> <span class="chip chip-ok" style="margin-left:4px;">${s.role}</span><div style="font-size:0.7rem;color:var(--sub);margin-top:2px;">${s.email}</div></div>
+    ${s.role!=='Principal'?`<button class="btn-danger btn-sm" onclick="removeStaff(${i})">🗑️</button>`:'<span style="font-size:0.68rem;color:var(--sub);">Owner</span>'}
+  </div>`).join('');
+  const atLimit=!isPrem&&staff.length>=3;
+  $('staff-upgrade').style.display=atLimit?'block':'none';
+  $('add-staff-modal').querySelector('.btn-brand').style.display=atLimit?'none':'block';
+}
+
+async function addStaff(){
+  const name=$('sf-name').value.trim(),email=$('sf-email').value.trim(),pwd=$('sf-pwd').value,role=$('sf-role').value;
+  if(!name||!email||!pwd)return alert('Fill all fields.');if(pwd.length<4)return alert('Password min 4 chars.');
+  if((SD.staff||[]).find(s=>s.email===email))return alert('Email already registered.');
+  const isPrem=SD.config.plan==='premium';
+  if(!isPrem&&(SD.staff||[]).length>=3){openM('upgrade-modal');return;}
+  if(!SD.staff)SD.staff=[];
+  SD.staff.push({name,email,password:pwd,role});
+  await SQ.push('staff',SD.staff);
+  closeM('add-staff-modal');$('sf-name').value='';$('sf-email').value='';$('sf-pwd').value='';
+  renderStaff();alert(`✅ ${name} added as ${role}.`);
+}
+
+async function removeStaff(idx){
+  if(!confirm(`Remove ${SD.staff[idx].name}?`))return;
+  SD.staff.splice(idx,1);await SQ.push('staff',SD.staff);renderStaff();
+}
+
+// ── 4. SPORTS ─────────────────────────────────────────────────────────────
+function loadSports(){
+  renderCustomSports();renderTeamList();populatePlayerSelect();
+}
+
+function selectSport(key,el){
+  currentSport=key;
+  document.querySelectorAll('.sport-card').forEach(c=>c.classList.remove('sel'));
+  el.classList.add('sel');
+  $('current-sport-label').textContent=el.querySelector('[style*="font-weight"]')?.textContent||key;
+  renderTeamList();
+}
+
+function renderCustomSports(){
+  const cs=SD.sports?.custom||[];
+  const c=$('custom-sports-grid');
+  if(!cs.length){c.innerHTML='';return;}
+  c.innerHTML=cs.map((s,i)=>`<div class="sport-card" onclick="selectCustomSport('cs_${i}','${esc(s.name)}',this)"><div style="font-size:1.3rem;">${s.icon||'🏅'}</div><div style="font-weight:700;font-size:0.85rem;">${esc(s.name)}</div><div style="font-size:0.7rem;color:var(--sub);">${esc(s.desc||'')}</div><button class="btn-danger btn-sm" style="margin-top:0.4rem;" onclick="event.stopPropagation();deleteCustomSport(${i})">🗑️</button></div>`).join('');
+}
+
+function selectCustomSport(key,name,el){
+  currentSport=key;document.querySelectorAll('.sport-card').forEach(c=>c.classList.remove('sel'));el.classList.add('sel');$('current-sport-label').textContent=name;renderTeamList();
+}
+
+async function addCustomSport(){
+  const name=$('cs-name').value.trim(),icon=$('cs-icon').value.trim()||'🏅',desc=$('cs-desc').value.trim();
+  if(!name)return alert('Enter sport name.');
+  if(!SD.sports)SD.sports={teams:{},custom:[]};if(!SD.sports.custom)SD.sports.custom=[];
+  SD.sports.custom.push({name,icon,desc});
+  await SQ.push('sports',SD.sports);closeM('custom-sport-modal');
+  $('cs-name').value='';$('cs-icon').value='';$('cs-desc').value='';renderCustomSports();
+}
+
+async function deleteCustomSport(idx){
+  if(!confirm('Delete this sport?'))return;
+  SD.sports.custom.splice(idx,1);await SQ.push('sports',SD.sports);renderCustomSports();
+}
+
+function renderTeamList(){
+  const team=SD.sports?.teams?.[currentSport]||[];
+  $('team-list').innerHTML=team.length===0?'<p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:0.75rem;">No players in this team yet.</p>':team.map((p,i)=>`<div class="team-row"><div class="team-av">${p.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div style="font-weight:700;font-size:0.85rem;">${esc(p.name)}</div><div style="font-size:0.7rem;color:var(--sub);">${p.pos||'Player'} · #${p.num||'?'}</div></div><button class="btn-danger btn-sm" onclick="removePlayer(${i})">🗑️</button></div>`).join('');
+}
+
+function populatePlayerSelect(){
+  const sel=$('player-sel');sel.innerHTML='<option value="">— Choose student —</option>';
+  SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});
+}
+
+async function addPlayer(){
+  const idx=$('player-sel').value,pos=$('player-pos').value.trim(),num=$('player-num').value;
+  if(!idx&&idx!==0)return alert('Select a student.');
+  const s=SD.students[parseInt(idx)];if(!s)return;
+  if(!SD.sports)SD.sports={teams:{},custom:[]};if(!SD.sports.teams)SD.sports.teams={};
+  if(!SD.sports.teams[currentSport])SD.sports.teams[currentSport]=[];
+  SD.sports.teams[currentSport].push({name:s.name,pos:pos||'Player',num:num||'?'});
+  await SQ.push('sports',SD.sports);closeM('add-player-modal');renderTeamList();
+}
+
+async function removePlayer(idx){
+  if(!confirm('Remove?'))return;
+  SD.sports.teams[currentSport].splice(idx,1);await SQ.push('sports',SD.sports);renderTeamList();
+}
+
+function recordMatchResult(){
+  const opp=prompt('Opponent school:');if(!opp)return;
+  const us=parseInt(prompt('Our score:')||'0'),them=parseInt(prompt(`${opp} score:`)||'0');
+  const res=us>them?'🏆 Win':us<them?'❌ Loss':'🤝 Draw';
+  const d=new Date().toLocaleDateString('en-NG',{weekday:'short',day:'numeric',month:'short'});
+  $('fixtures-list').insertAdjacentHTML('afterbegin',`<div class="fixture"><div style="font-size:0.72rem;color:var(--sub);">${d} · Result recorded</div><div style="font-weight:600;">Our School ${us}–${them} ${esc(opp)}</div><div style="font-size:0.78rem;color:var(--money);">${res} · ${$('current-sport-label').textContent}</div></div>`);
+  alert(`✅ ${res} — Our School ${us}–${them} ${opp}`);
+}
+
+// ── 5. ARTS ────────────────────────────────────────────────────────────────
+function renderArts(){
+  const gallery=SD.arts?.gallery||[];
+  const sel=$('art-stu-sel');sel.innerHTML='<option value="">— Choose student —</option>';
+  SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});
+  let html=`<div class="art-card" onclick="openM('add-artwork-modal')"><div class="art-prev" style="background:#f1f5f9;color:var(--sub);font-size:2rem;">➕</div><div class="art-info"><div class="art-title">Add Artwork</div><div class="art-stu">Tap to add</div></div></div>`;
+  gallery.slice().reverse().forEach((a,i)=>{
+    const ic=a.medium==='Drawing'?'✏️':a.medium==='Painting'?'🎨':a.medium==='Sculpture'?'🗿':'🖼️';
+    html+=`<div class="art-card" onclick="viewArtwork(${gallery.length-1-i})"><div class="art-prev">${ic}</div><div class="art-info"><div class="art-title">${esc(a.title)}</div><div class="art-stu">by ${esc(a.studentName)}</div></div></div>`;
+  });
+  $('art-gallery').innerHTML=html;
+}
+
+async function saveArtwork(){
+  const si=$('art-stu-sel').value,title=$('art-title').value.trim(),medium=$('art-medium').value,desc=$('art-desc').value.trim();
+  if(!si||!title)return alert('Select student and enter title.');
+  const s=SD.students[parseInt(si)];if(!s)return;
+  if(!SD.arts)SD.arts={gallery:[]};
+  SD.arts.gallery.unshift({studentName:s.name,title,medium,desc,createdAt:new Date().toISOString()});
+  await SQ.push('arts',SD.arts);closeM('add-artwork-modal');
+  $('art-title').value='';$('art-desc').value='';renderArts();
+}
+
+function viewArtwork(idx){const a=SD.arts?.gallery?.[idx];if(!a)return;alert(`🎨 "${a.title}"\n\nArtist: ${a.studentName}\nMedium: ${a.medium}\n\n${a.desc||'(No description)')`);}
+
+function planExhibition(){
+  const title=prompt('Exhibition title:');if(!title)return;
+  const date=prompt('Planned date:');if(!date)return;
+  alert(`✅ Exhibition planned: "${title}" on ${date}\n\nGo to Comms to notify parents.`);
+}
+
+// ── 6. MUSIC ───────────────────────────────────────────────────────────────
+function renderMusic(){
+  const logs=SD.music?.practiceLogs||[];
+  $('practice-logs').innerHTML=logs.length===0?'<p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:0.75rem;">No logs yet.</p>':logs.slice(0,5).map(l=>`<div class="plog"><div style="font-size:0.7rem;color:var(--sub);">${new Date(l.date).toLocaleDateString('en-NG')}</div><div style="font-weight:600;font-size:0.82rem;">${esc(l.studentName)} · ${esc(l.activity)}</div><div style="font-size:0.75rem;color:var(--sub);">${l.duration||''} ${l.notes?'— '+l.notes:''}</div></div>`).join('');
+  const sel1=$('prac-stu'),sel2=$('lesson-stu');
+  [sel1,sel2].forEach(sel=>{if(!sel)return;sel.innerHTML='<option value="">— Choose student —</option>';SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});});
+  renderInstrumentList();
+}
+
+function renderInstrumentList(){
+  const inst=SD.music?.instruments||[];
+  const c=$('instrument-list');if(!c)return;
+  c.innerHTML=inst.length===0?'<p style="color:var(--sub);font-size:0.82rem;text-align:center;padding:0.75rem;">No instruments added.</p>':inst.map((x,i)=>`<div class="inst-row"><div><strong style="font-size:0.85rem;">${esc(x.name)}</strong></div><div style="display:flex;align-items:center;gap:0.5rem;"><span class="chip ${x.status==='available'?'chip-ok':'chip-warn'}">${x.status}</span><button class="btn-sm btn-ghost" style="color:var(--text);" onclick="toggleInstrument(${i})">${x.status==='available'?'Mark In Use':'Mark Available'}</button></div></div>`).join('');
+}
+
+async function toggleInstrument(idx){
+  if(!SD.music)SD.music={practiceLogs:[],instruments:[]};
+  SD.music.instruments[idx].status=SD.music.instruments[idx].status==='available'?'in use':'available';
+  await SQ.push('music',SD.music);renderInstrumentList();
+}
+
+function addInstrument(){
+  const name=prompt('Instrument name:');if(!name)return;
+  if(!SD.music)SD.music={practiceLogs:[],instruments:[]};
+  SD.music.instruments.push({name,status:'available'});
+  SQ.push('music',SD.music);renderInstrumentList();
+}
+
+async function savePractice(){
+  const si=$('prac-stu').value,act=$('prac-act').value.trim(),dur=$('prac-dur').value,notes=$('prac-notes').value.trim();
+  if(!si||!act)return alert('Select student and enter activity.');
+  const s=SD.students[parseInt(si)];if(!s)return;
+  if(!SD.music)SD.music={practiceLogs:[],instruments:[]};
+  if(!SD.music.practiceLogs)SD.music.practiceLogs=[];
+  SD.music.practiceLogs.unshift({studentName:s.name,activity:act,duration:dur,notes,date:new Date().toISOString()});
+  await SQ.push('music',SD.music);closeM('log-practice-modal');
+  $('prac-act').value='';$('prac-notes').value='';renderMusic();
+}
+
+async function bookLesson(){
+  const si=$('lesson-stu').value,dt=$('lesson-date').value,inst=$('lesson-inst').value,time=$('lesson-time').value;
+  if(!si||!dt)return alert('Select student and date.');
+  const s=SD.students[parseInt(si)];
+  alert(`✅ Lesson booked!\n\nStudent: ${s.name}\nInstrument: ${inst}\nDate: ${dt}\nTime: ${time}`);
+  closeM('book-lesson-modal');
+}
+
+// ── 7. HEALTH ─────────────────────────────────────────────────────────────
+function renderHealth(){
+  const incidents=SD.health||[];
+  $('h-visits').textContent=incidents.length;
+  $('h-open').textContent=incidents.filter(x=>!x.resolved).length;
+  const sel=$('inc-stu');sel.innerHTML='<option value="">— Choose student —</option>';
+  SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});
+  $('health-list').innerHTML=incidents.length===0?'<p style="text-align:center;color:var(--sub);padding:1.5rem;">No incidents logged yet.</p>':incidents.slice().reverse().map((inc,i)=>`<div class="incident-row"><div><div style="font-weight:700;font-size:0.85rem;">${esc(inc.studentName)}</div><div style="font-size:0.75rem;color:var(--sub);">${esc(inc.type)} · ${esc(inc.action)} · ${inc.date}</div></div><span class="chip ${inc.resolved?'chip-ok':'chip-bad'}">${inc.resolved?'Resolved':'Open'}</span></div>`).join('');
+}
+
+async function logIncident(){
+  const si=$('inc-stu').value,type=$('inc-type').value.trim(),action=$('inc-action').value,notes=$('inc-notes').value.trim();
+  if(!si||!type)return alert('Select student and enter incident type.');
+  const s=SD.students[parseInt(si)];if(!s)return;
+  if(!SD.health)SD.health=[];
+  SD.health.unshift({studentName:s.name,type,action,notes,date:new Date().toLocaleDateString('en-NG'),resolved:false});
+  await SQ.push('health',SD.health);closeM('log-incident-modal');
+  $('inc-type').value='';$('inc-notes').value='';renderHealth();
+}
+
+// ── 8. ALUMNI ─────────────────────────────────────────────────────────────
+function renderAlumni(){
+  const alumni=SD.alumni||[];
+  $('al-count').textContent=alumni.length;
+  $('al-donations').textContent=fmt(alumni.reduce((t,a)=>t+(a.donation||0),0));
+  $('alumni-list').innerHTML=alumni.length===0?'<p style="text-align:center;color:var(--sub);padding:1.5rem;">No alumni added yet.</p>':alumni.map((a,i)=>`<div class="alumni-row"><div><div style="font-weight:700;font-size:0.85rem;">${esc(a.name)}</div><div style="font-size:0.75rem;color:var(--sub);">${a.year||'—'} · ${esc(a.job||'—')}</div></div><button class="btn-wa btn-sm" onclick="callAlumni('${a.phone||''}')">📲</button></div>`).join('');
+}
+
+async function addAlumni(){
+  const name=$('al-name').value.trim(),year=$('al-year').value,phone=$('al-phone').value.trim().replace(/\D/g,''),job=$('al-job').value.trim();
+  if(!name)return alert('Enter name.');
+  if(!SD.alumni)SD.alumni=[];
+  SD.alumni.unshift({name,year,phone,job,addedAt:new Date().toISOString()});
+  await SQ.push('alumni',SD.alumni);closeM('add-alumni-modal');
+  $('al-name').value='';$('al-year').value='';$('al-phone').value='';$('al-job').value='';renderAlumni();
+}
+
+function callAlumni(phone){if(!phone)return alert('No phone for this alumni.');window.open(`https://wa.me/${phone.replace(/\D/g,'')}`,'_blank');}
+
+function sendFundraisingAppeal(){
+  const sn=SD.config.schoolName||'our School';
+  const msg=`📢 *Alumni Fundraising Appeal*\n\nDear Alumni of ${sn},\n\nWe are reaching out to our valued alumni to request support for improving school facilities.\n\nEvery contribution makes a difference for current students.\n\nKindly contact us to discuss how you can contribute.\n\nWith gratitude,\nSchool Management`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+}
+
+// ── 9. EXPENSES ────────────────────────────────────────────────────────────
+function renderExpenses(){
+  const exp=SD.expenses||[];let total=0;exp.forEach(e=>total+=e.amount||0);
+  $('exp-total').textContent=fmt(total);
+  $('exp-list').innerHTML=exp.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No expenses logged yet.</p>':exp.map((e,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);"><div><div style="font-weight:600;font-size:0.85rem;">${esc(e.description)}</div><div style="font-size:0.7rem;color:var(--sub);">${esc(e.category)} · ${e.date}</div></div><div style="display:flex;align-items:center;gap:0.5rem;"><span style="font-weight:700;font-family:'DM Mono',monospace;">${fmt(e.amount)}</span><button class="btn-danger btn-sm" onclick="deleteExpense(${i})">🗑️</button></div></div>`).join('');
+}
+
+async function addExpense(){
+  const cat=$('exp-cat').value,desc=$('exp-desc').value.trim(),amt=parseFloat($('exp-amt').value);
+  if(!desc||!amt)return alert('Fill description and amount.');
+  if(!SD.expenses)SD.expenses=[];
+  SD.expenses.unshift({category:cat,description:desc,amount:amt,date:new Date().toISOString().split('T')[0],by:userRole});
+  await SQ.push('expenses',SD.expenses);closeM('add-expense-modal');
+  $('exp-desc').value='';$('exp-amt').value='';renderExpenses();
+}
+
+async function deleteExpense(idx){if(!confirm('Delete?'))return;SD.expenses.splice(idx,1);await SQ.push('expenses',SD.expenses);renderExpenses();}
+
+// ── 10. FINANCE AI ─────────────────────────────────────────────────────────
+function checkFinance(){
+  const fr=SD.financialRecords;
+  if(fr&&fr.recordCount>0){$('finance-empty').style.display='none';showFinanceAnalysis(fr);}
+  else{$('finance-empty').style.display='block';$('finance-analysis').style.display='none';}
+}
+
+function handleFinanceUpload(e){
+  const f=e.target.files[0];if(!f)return;
+  const btn=$('finance-empty').querySelector('.btn-brand');btn.textContent='⏳ Reading...';btn.disabled=true;
+  const r=new FileReader();
+  r.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+    const records=lines.slice(1).map(l=>{const c=l.split(',').map(x=>x.replace(/"/g,'').trim());return{date:c[0]||'',desc:c[1]||'',amount:parseFloat(c[2])||0,type:(c[3]||'expense').toLowerCase()};}).filter(r=>r.desc&&!isNaN(r.amount));
+    const income=records.filter(r=>r.type==='income'||r.amount>0).reduce((s,r)=>s+Math.abs(r.amount),0);
+    const expenses=records.filter(r=>r.type==='expense'||r.amount<0).reduce((s,r)=>s+Math.abs(r.amount),0);
+    const large=records.filter(r=>Math.abs(r.amount)>500000).length;
+    const fr={fileName:f.name,recordCount:records.length,totalIncome:income,totalExpenses:expenses,largeTransactions:large,uploadedAt:new Date().toISOString()};
+    SD.financialRecords=fr;localStorage.setItem(`p_${schoolId}_financialRecords`,JSON.stringify(fr));
+    await SQ.push('financialRecords',fr);
+    showFinanceAnalysis(fr);
+    btn.textContent='📤 Upload Financial Data CSV';btn.disabled=false;e.target.value='';
+  };
+  r.onerror=()=>{alert('File read failed. Please try again.');btn.textContent='📤 Upload Financial Data CSV';btn.disabled=false;};
+  r.readAsText(f);
+}
+
+function showFinanceAnalysis(fr){
+  $('finance-empty').style.display='none';$('finance-analysis').style.display='block';
+  $('ai-projection').textContent=fmt(Math.round(fr.totalIncome*1.08));
+  $('ai-anomalies').textContent=fr.largeTransactions.toString();
+  const net=fr.totalIncome-fr.totalExpenses;
+  $('ai-recommendation').innerHTML=`<strong>💡 AI Insight:</strong><br>${net>=0?`Revenue exceeds expenses by ${fmt(net)}. Consider setting aside 10% (${fmt(Math.round(net*0.1))}) as a school reserve before term ends.`:`Expenses exceed income by ${fmt(Math.abs(net))}. Review staff salary ratio and utilities — those are typically the two largest controllable costs in Nigerian private schools.`}`;
+}
+
+async function askFinanceAI(){
+  const q=$('ai-question').value.trim();if(!q)return;
+  const area=$('ai-chat-area');
+  area.innerHTML+=`<div style="background:var(--s2);border-radius:9px;padding:0.6rem;margin-bottom:0.4rem;font-size:0.82rem;"><strong>You:</strong> ${esc(q)}</div>`;
+  area.innerHTML+=`<div id="ai-typing" style="color:var(--sub);font-size:0.8rem;padding:0.4rem;">🤖 Thinking...</div>`;
+  $('ai-question').value='';
+  try{
+    const fr=SD.financialRecords||{};
+    const context=`School financial data: Income ₦${fr.totalIncome||0}, Expenses ₦${fr.totalExpenses||0}, Records: ${fr.recordCount||0}. Current students: ${SD.students.length}, Collected: ₦${SD.students.reduce((t,s)=>t+(s.paid||0),0)}, Outstanding: ₦${SD.students.reduce((t,s)=>t+((s.totalFee||0)-(s.paid||0)),0)}.`;
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:`You are a financial advisor for a Nigerian private school. Be practical and concise. Context: ${context}\n\nQuestion: ${q}`}]})});
+    const data=await res.json();
+    const reply=data.content?.[0]?.text||'Unable to get response.';
+    document.getElementById('ai-typing')?.remove();
+    area.innerHTML+=`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:0.6rem;margin-bottom:0.4rem;font-size:0.82rem;"><strong>🤖 AI:</strong> ${esc(reply)}</div>`;
+  }catch(e){document.getElementById('ai-typing')?.remove();area.innerHTML+=`<div style="color:var(--sub);font-size:0.78rem;padding:0.4rem;">Finance AI requires internet. Connect and try again.</div>`;}
+}
+
+// ── 11. COMMS ─────────────────────────────────────────────────────────────
+function renderComms(){
+  const pages=SD.socialPages||[];
+  $('social-pages').innerHTML=pages.length===0?'<p style="font-size:0.8rem;color:var(--sub);text-align:center;padding:0.75rem;">No pages added yet.</p>':pages.map((p,i)=>{
+    const icons={facebook:'📘',instagram:'📸',twitter:'🐦',youtube:'📺',tiktok:'🎵',whatsapp:'💬',telegram:'✈️'};
+    return`<div class="social-item"><div><span style="font-size:1.2rem;margin-right:6px;">${icons[p.platform]||'🌐'}</span><strong style="font-size:0.85rem;">${esc(p.name)}</strong><div style="font-size:0.7rem;color:var(--sub);">${p.platform}</div></div><div style="display:flex;gap:0.35rem;"><button class="btn-brand btn-sm" onclick="window.open('${esc(p.url||'#')}','_blank')">🔗</button><button class="btn-danger btn-sm" onclick="removeSocialPage(${i})">🗑️</button></div></div>`;
+  }).join('');
+}
+
+async function addSocialPage(){
+  const plat=$('soc-platform').value,name=$('soc-name').value.trim(),url=$('soc-url').value.trim();
+  if(!plat||!name)return alert('Select platform and enter page name.');
+  if(!SD.socialPages)SD.socialPages=[];
+  SD.socialPages.push({platform:plat,name,url:url||'#',addedAt:new Date().toISOString()});
+  await SQ.push('socialPages',SD.socialPages);
+  $('soc-platform').value='';$('soc-name').value='';$('soc-url').value='';renderComms();
+}
+
+async function removeSocialPage(idx){if(!confirm('Remove?'))return;SD.socialPages.splice(idx,1);await SQ.push('socialPages',SD.socialPages);renderComms();}
+
+function logComm(type,preview){
+  if(!SD.commsLog)SD.commsLog=[];
+  SD.commsLog.unshift({type,preview,sentAt:new Date().toISOString(),sentBy:userRole});
+  SQ.push('commsLog',SD.commsLog);
+}
+
+function broadcastFeeReminder(){
+  const overdue=SD.students.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
+  const sn=SD.config.schoolName||'School';
+  const msg=`Dear Parent,\n\n*${sn}* would like to remind you that outstanding term fees are now due.\n\nKindly ensure prompt payment to avoid disruption to your ward's education.\n\nThank you.\n– ${sn}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+  logComm('Fee Reminder',`Broadcast to ${overdue.length} overdue parents`);
+}
+
+function broadcastEvent(){
+  const ev=prompt('Event name (e.g. Inter-house Sports Day):');if(!ev)return;
+  const date=prompt('Date of event (e.g. Saturday 24 May 2026):');if(!date)return;
+  const sn=SD.config.schoolName||'School';
+  const msg=`Dear Parent,\n\n*${sn}* cordially invites you to:\n\n📅 *${ev}*\n🗓️ Date: ${date}\n📍 Venue: School Premises\n\nYour presence and support is warmly welcomed.\n\n– ${sn}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+  logComm('Event Notice',`${ev} — ${date}`);
+}
+
+function broadcastAnnouncement(){
+  const subj=prompt('Announcement subject:');if(!subj)return;
+  const body=prompt('Message:');if(!body)return;
+  const sn=SD.config.schoolName||'School';
+  const msg=`📢 *Announcement from ${sn}*\n\n*${subj}*\n\n${body}\n\n– ${sn}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+  logComm('Announcement',subj);
+}
+
+function viewMessageHistory(){
+  const logs=SD.commsLog||[];
+  const c=$('comms-history-list');
+  c.innerHTML=logs.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No messages sent yet.</p>':logs.slice(0,30).map(l=>`<div class="comm-log"><div style="display:flex;justify-content:space-between;"><strong style="font-size:0.85rem;">${esc(l.type)}</strong><span style="font-size:0.7rem;color:var(--sub);">${new Date(l.sentAt).toLocaleDateString('en-NG')}</span></div><div style="font-size:0.78rem;color:var(--sub);margin-top:2px;">${esc(l.preview||'')}</div></div>`).join('');
+  openM('comms-history-modal');
+}
+
+// ── 12. ANALYTICS ─────────────────────────────────────────────────────────
+function renderAnalytics(){
+  const s=SD.students||[];const exp=SD.expenses||[];
+  const totalFee=s.reduce((t,x)=>t+(x.totalFee||0),0);
+  const totalCol=s.reduce((t,x)=>t+(x.paid||0),0);
+  const totalExp=exp.reduce((t,e)=>t+(e.amount||0),0);
+  const paid=s.filter(x=>(x.totalFee||0)<=(x.paid||0)).length;
+  const partial=s.filter(x=>x.paid>0&&(x.totalFee||0)>(x.paid||0)).length;
+  const unpaid=s.filter(x=>!x.paid||x.paid===0).length;
+  const byClass={};s.forEach(x=>{const c=x.class||'Unknown';byClass[c]=(byClass[c]||0)+1;});
+  const byExpCat={};exp.forEach(e=>{const c=e.category||'Other';byExpCat[c]=(byExpCat[c]||(0))+(e.amount||0);});
+  $('analytics-content').innerHTML=`
+    <div class="stats"><div class="stat"><div class="sn" style="color:var(--money);">${paid}</div><div class="sl">Fully Paid</div></div>
+    <div class="stat"><div class="sn" style="color:var(--warn);">${partial}</div><div class="sl">Partial</div></div>
+    <div class="stat"><div class="sn" style="color:var(--danger);">${unpaid}</div><div class="sl">Unpaid</div></div>
+    <div class="stat"><div class="sn">${s.length}</div><div class="sl">Total</div></div></div>
+    <div class="card"><div class="ct">💰 Financial Summary</div>
+    ${[['Expected',totalFee,''],['Collected',totalCol,'var(--money)'],['Outstanding',totalFee-totalCol,'var(--danger)'],['Expenses',totalExp,'var(--warn)'],['Net Balance',totalCol-totalExp,totalCol-totalExp>=0?'var(--money)':'var(--danger)']].map(([label,val,col])=>`<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.85rem;"><span>${label}</span><strong${col?` style="color:${col};"`:''} style="font-family:'DM Mono',monospace;">${fmt(val)}</strong></div>`).join('')}</div>
+    <div class="card"><div class="ct">🎓 Students by Class</div>
+    ${Object.entries(byClass).sort((a,b)=>b[1]-a[1]).map(([cls,cnt])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;"><span>${esc(cls)}</span><div style="display:flex;align-items:center;gap:0.5rem;"><div style="width:${Math.round((cnt/s.length)*80)}px;height:8px;background:var(--brand);border-radius:4px;"></div><span style="font-weight:700;">${cnt}</span></div></div>`).join('')}</div>
+    <div class="card"><div class="ct">📉 Expenses by Category</div>
+    ${Object.entries(byExpCat).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>`<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;"><span>${esc(cat)}</span><strong style="font-family:'DM Mono',monospace;">${fmt(amt)}</strong></div>`).join('')}</div>
+    <button class="btn-brand" onclick="exportCSV()">📥 Export Students CSV</button>`;
+}
+
+function exportCSV(){
+  const rows=[['Name','Class','Phone','Total Fee','Paid','Outstanding'],...SD.students.map(s=>[s.name,s.class||'',s.phone||'',s.totalFee||0,s.paid||0,(s.totalFee||0)-(s.paid||0)])];
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download=`students-${new Date().toISOString().split('T')[0]}.csv`;a.click();
+}
+
+// ── 13. SECURITY ──────────────────────────────────────────────────────────
+function securitySearch(){
+  const q=($('sec-search')?.value||'').toLowerCase().trim();
+  const c=$('security-results');
+  if(!q){c.innerHTML='';return;}
+  const matches=SD.students.filter(s=>s.name.toLowerCase().includes(q)||(s.phone||'').includes(q)||(s.class||'').toLowerCase().includes(q));
+  if(!matches.length){c.innerHTML='<p style="color:var(--sub);font-size:0.85rem;padding:0.5rem;">No student found.</p>';return;}
+  c.innerHTML=matches.map(s=>`<div class="sec-result"><div style="font-weight:700;font-size:0.9rem;">${esc(s.name)}</div>
+    <div style="font-size:0.75rem;color:var(--sub);margin-top:3px;">Class: ${esc(s.class||'—')} · Guardian: ${s.phone||'—'}</div>
+    ${s.swot?.threats&&s.swot.threats.toLowerCase().includes('allerg')?`<div class="allergy-alert">⚠️ ALLERGY ALERT: ${esc(s.swot.threats)}</div>`:''}
+  </div>`).join('');
+}
+
+// ── 14. SUPPORT ───────────────────────────────────────────────────────────
+function renderSupport(){
+  const agent=SD.config.agent;
+  if(agent&&agent.name){
+    $('agent-contact').innerHTML=`<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;"><div style="width:48px;height:48px;background:var(--brand);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem;flex-shrink:0;">${agent.name.charAt(0).toUpperCase()}</div><div><div style="font-weight:700;font-size:1rem;">${esc(agent.name)}</div><div style="font-size:0.78rem;color:var(--sub);">Your assigned agent</div></div></div>
+      <div style="display:flex;align-items:center;gap:0.65rem;padding:0.5rem 0;border-bottom:1px solid var(--border);"><span style="font-size:1.2rem;">📱</span><div style="flex:1;"><div style="font-size:0.65rem;color:var(--sub);text-transform:uppercase;">WhatsApp</div><div style="font-weight:600;">${agent.phone||'—'}</div></div><button class="btn-wa btn-sm" onclick="window.open('https://wa.me/${(agent.phone||'').replace(/\\D/g,'')}?text=Hello ${encodeURIComponent(agent.name)}, I need help with my Educational Bloom portal.','_blank')">📞 Call</button></div>`;
+  }
+}
+
+// ── 15. SETTINGS ──────────────────────────────────────────────────────────
+function loadSettings(){
+  const c=SD.config||{};
+  $('set-name').value=c.schoolName||'';$('set-phone').value=c.whatsapp||'';$('set-email').value=c.principalEmail||'';
+  $('set-fee').value=c.fee||50000;$('set-term').value=c.currentTerm||'Term 1';$('set-session').value=c.session||'2025/2026';
+  $('set-subjects').value=(c.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education']).join(', ');
+  const isPrem=c.plan==='premium';
+  $('settings-plan').textContent=isPrem?'Premium ✨':'Basic';
+  $('settings-staff-limit').textContent=isPrem?'Unlimited':'3';
+  $('settings-ai').textContent=isPrem?'Full Advisor':'Basic';
+}
+
+async function saveSettings(){
+  const subs=$('set-subjects').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const newEmail=$('set-email').value.trim().toLowerCase();
+  const newPwd=$('set-pwd')?.value.trim()||'';
+  SD.config={...SD.config,schoolName:$('set-name').value.trim(),whatsapp:$('set-phone').value.trim(),principalEmail:newEmail,fee:parseFloat($('set-fee').value)||50000,currentTerm:$('set-term').value,session:$('set-session').value,subjects:subs};
+  await SQ.push('config',SD.config);
+  // If email or password updated, sync to staff record for Principal
+  if(newEmail||newPwd){
+    const staff=SD.staff||[];
+    const principal=staff.find(s=>s.role==='Principal');
+    if(principal){
+      if(newEmail) principal.email=newEmail;
+      if(newPwd){
+        if(newPwd.length<4){alert('Password must be at least 4 characters.');return;}
+        principal.password=newPwd;
+        // Update saved auth so Remember Me still works
+        const auth=JSON.parse(localStorage.getItem('p_auth')||sessionStorage.getItem('p_auth')||'{}');
+        auth.email=newEmail||auth.email;
+        const stored=localStorage.getItem('p_auth')?localStorage:sessionStorage;
+        stored.setItem('p_auth',JSON.stringify(auth));
+        if($('set-pwd'))$('set-pwd').value=''; // clear password field after save
+      }
+      await SQ.push('staff',staff);
+    }
+  }
+  $('hdr-school').textContent=SD.config.schoolName||schoolId;$('hdr-term').textContent=SD.config.currentTerm;
+  renderBanner();alert('✅ Settings saved!');
+}
+
+// ── 16. OPPORTUNITIES ─────────────────────────────────────────────────────
+function renderOpps(){
+  const isPrem=SD.config.plan==='premium';
+  const cat=$('opp-cat')?.value||'';const dl=$('opp-deadline')?.value||'';
+  let opps=[...SD.opportunities];
+  if(cat)opps=opps.filter(o=>o.type===cat);
+  if(dl){const cut=new Date();cut.setDate(cut.getDate()+parseInt(dl));opps=opps.filter(o=>new Date(o.deadline)<=cut);}
+  $('opp-premium-cta').style.display=isPrem?'none':'block';
+  const c=$('opps-list');
+  if(!opps.length){c.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No opportunities match your filters.</p>';return;}
+  const badgeCls={scholarship:'ob-s',grant:'ob-g',internship:'ob-i',competition:'ob-c'};
+  c.innerHTML=opps.map(o=>{
+    const dl=Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24));
+    const dlCls=dl<=7?'dl-urgent':dl<=30?'dl-soon':'dl-ok';
+    const dlTxt=dl<=0?'Closed':`${dl}d left`;
+    const locked=!isPrem;
+    return`<div class="opp-card ${locked?'locked':''}" onclick="${isPrem?`viewOpp('${o.id}')`:''}" style="${locked?'cursor:default;':''}">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.4rem;">
+        <div style="font-weight:700;font-size:0.88rem;flex:1;margin-right:0.5rem;">${esc(o.title)}</div>
+        <span class="opp-badge ${badgeCls[o.type]||'ob-s'}">${o.type}</span>
+      </div>
+      <div style="font-size:0.75rem;color:var(--sub);margin-bottom:0.35rem;">${esc(o.provider)}</div>
+      <div style="display:flex;gap:0.4rem;align-items:center;">
+        <span class="${dlCls}">⏰ ${dlTxt}</span>
+        ${o.amount?`<span style="font-weight:700;color:var(--money);font-size:0.78rem;">💰 ${esc(o.amount)}</span>`:''}
+      </div>
+      ${isPrem?`<div style="font-size:0.78rem;color:var(--sub);margin-top:0.4rem;">${esc(o.desc||'')}</div><div style="margin-top:0.5rem;"><button class="btn-brand btn-sm" onclick="event.stopPropagation();alert('Apply at: ${esc(o.url||'See provider website')}')">📝 Apply Now</button></div>`:'<div style="font-size:0.73rem;color:var(--sub);margin-top:0.35rem;">✨ Upgrade to Premium to see details and apply</div>'}
+    </div>`;
+  }).join('');
+}
+
+function viewOpp(id){const o=SD.opportunities.find(x=>x.id===id);if(!o)return;alert(`${o.title}\n\nProvider: ${o.provider}\nDeadline: ${o.deadline}\nValue: ${o.amount||'—'}\n\n${o.desc||''}\n\nApply at: ${o.url||'See provider website'}`);}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  SQ.ping();
+  const saved=localStorage.getItem('p_auth')||sessionStorage.getItem('p_auth');
+  if(saved){
+    try{
+      const auth=JSON.parse(saved);schoolId=auth.schoolId;userRole=auth.role;
+      SD.config=loadLocal('config',{});SD.students=loadLocal('students',[]);SD.staff=loadLocal('staff',[]);
+      SD.expenses=loadLocal('expenses',[]);SD.attendance=loadLocal('attendance',{});
+      SD.sports=loadLocal('sports',{teams:{},custom:[]});SD.arts=loadLocal('arts',{gallery:[]});
+      SD.music=loadLocal('music',{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]});
+      SD.health=loadLocal('health',[]);SD.alumni=loadLocal('alumni',[]);
+      SD.socialPages=loadLocal('socialPages',[]);SD.commsLog=loadLocal('commsLog',[]);
+      SD.opportunities=loadLocal('opportunities',defaultOpps());SD.financialRecords=loadLocal('financialRecords',null);
+      $('login').style.display='none';$('app').style.display='block';
+      $('hdr-school').textContent=SD.config.schoolName||schoolId;
+      $('hdr-role').textContent=userRole;$('hdr-term').textContent=SD.config.currentTerm||'Term 1';
+      const isPrem=SD.config.plan==='premium';
+      $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
+      $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
+      renderBanner();go('revenue');
+      if(db&&navigator.onLine){
+        db.collection('schools').doc(schoolId).get().then(doc=>{
+          if(!doc.exists)return;const d=doc.data();Object.assign(SD,d);
+          Object.keys(d).forEach(k=>localStorage.setItem(`p_${schoolId}_${k}`,JSON.stringify(d[k])));
+          renderBanner();if($('sec-revenue').classList.contains('on'))renderRevenue();
+        }).catch(()=>{});
+      }
+      return;
+    }catch(e){}
+  }
+  $('login').style.display='flex';$('app').style.display='none';
+});
