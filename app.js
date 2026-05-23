@@ -326,17 +326,51 @@ async function handleBulkPayment(e){
   const r=new FileReader();
   r.onload=async ev=>{
     const lines=ev.target.result.split(/\r?\n/).filter(x=>x.trim());
-    let matched=0,skipped=0;
+    let matched=0,skipped=0,noMatch=0;
+
+    // Score how well two name strings match (word overlap, 0–1)
+    const nameScore=(a,b)=>{
+      const wa=a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(Boolean);
+      const wb=b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(Boolean);
+      if(!wa.length||!wb.length)return 0;
+      // Count shared words
+      const shared=wa.filter(w=>w.length>1&&wb.includes(w)).length;
+      // Also check if any word from one is a prefix of a word in the other
+      let prefixBonus=0;
+      wa.forEach(w=>{if(w.length>2&&wb.some(v=>v.startsWith(w)||w.startsWith(v)))prefixBonus+=0.5;});
+      return(shared+prefixBonus)/Math.max(wa.length,wb.length);
+    };
+
     for(let i=1;i<lines.length;i++){
       const cols=lines[i].split(',').map(c=>c.trim());
       if(cols.length<2||!cols[0]||!cols[1])continue;
-      const nm=cols[0].toLowerCase(),amt=parseFloat(cols[1]);
+      const csvName=cols[0];
+      const amt=parseFloat(cols[1].replace(/[^0-9.]/g,''));
       if(isNaN(amt)||amt<=0)continue;
-      const hits=SD.students.filter(s=>s.name.toLowerCase().includes(nm)||nm.includes(s.name.toLowerCase()));
-      if(hits.length===1){hits[0].paid=(hits[0].paid||0)+amt;matched++;}else skipped++;
+
+      // Score every student
+      const scored=SD.students.map((s,idx)=>({s,idx,score:nameScore(csvName,s.name)}))
+        .filter(x=>x.score>0.3)
+        .sort((a,b)=>b.score-a.score);
+
+      if(!scored.length){noMatch++;continue;}
+
+      const best=scored[0];
+      // Ambiguous only if two candidates have equal top score AND both >0.5
+      const isAmbiguous=scored.length>1&&scored[1].score>=best.score&&best.score>0.5;
+      if(isAmbiguous){skipped++;continue;}
+
+      best.s.paid=(best.s.paid||0)+amt;
+      if(!best.s.paymentHistory)best.s.paymentHistory=[];
+      best.s.paymentHistory.unshift({amount:amt,method:'Bank Statement',date:new Date().toISOString().split('T')[0],by:'CSV Import'});
+      matched++;
     }
+
     await SQ.push('students',SD.students);
-    $('bulk-feedback').textContent=`✅ ${matched} matched and updated · ⚠️ ${skipped} skipped (ambiguous)`;
+    let msg=`✅ ${matched} matched and updated`;
+    if(skipped)msg+=` · ⚠️ ${skipped} ambiguous`;
+    if(noMatch)msg+=` · ❓ ${noMatch} not found`;
+    $('bulk-feedback').textContent=msg;
     renderRevenue();
   };
   r.readAsText(f);
