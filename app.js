@@ -1,7 +1,12 @@
 // ── Firebase ───────────────────────────────────────────────────────────────
 const FB={apiKey:"AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o",authDomain:"educationbloom-699ed.firebaseapp.com",projectId:"educationbloom-699ed",storageBucket:"educationbloom-699ed.firebasestorage.app",messagingSenderId:"33750392965",appId:"1:33750392965:web:2b3da887ede996ea8389ec"};
 let db=null;
-try{firebase.initializeApp(FB);db=firebase.firestore();}catch(e){console.warn('FB:',e);}
+try{
+  // If already initialized (e.g. hot reload), reuse existing app
+  const fbApp=firebase.apps.length?firebase.app():firebase.initializeApp(FB);
+  db=firebase.firestore(fbApp);
+  console.log('✅ Firebase ready');
+}catch(e){console.error('❌ Firebase init failed:',e.message);}
 
 // ── State ──────────────────────────────────────────────────────────────────
 let schoolId=null,userRole=null;
@@ -27,13 +32,15 @@ const SQ={
     this.flush();
   },
   ping(){
-    const ok=navigator.onLine&&!!db;
+    const netOk=navigator.onLine;
+    const syncOk=netOk&&!!db;
     const el=$('sync');
     if(el){
-      el.className='sdot '+(ok?this.q.length?'sd-sync':'sd-on':'sd-off');
-      el.textContent=ok?this.q.length?'● Syncing':'● Online':'● Offline';
+      // Show Online if internet is available — even if Firestore is unavailable
+      el.className='sdot '+(netOk?this.q.length?'sd-sync':'sd-on':'sd-off');
+      el.textContent=netOk?this.q.length?'● Syncing':'● Online':'● Offline';
     }
-    if(ok&&this.q.length)this.flush();
+    if(syncOk&&this.q.length)this.flush();
   },
   async flush(){
     if(!db||!navigator.onLine||!this.q.length||this._syncing)return;
@@ -719,7 +726,7 @@ async function saveArtwork(){
   $('art-title').value='';$('art-desc').value='';renderArts();
 }
 
-function viewArtwork(idx){const a=SD.arts?.gallery?.[idx];if(!a)return;alert(`🎨 "${a.title}"\n\nArtist: ${a.studentName}\nMedium: ${a.medium}\n\n${a.desc||'(No description)')`);}
+function viewArtwork(idx){const a=SD.arts?.gallery?.[idx];if(!a)return;const desc=a.desc||'(No description)';alert('\uD83C\uDFA8 "'+a.title+'"\n\nArtist: '+a.studentName+'\nMedium: '+a.medium+'\n\n'+desc);}
 
 function planExhibition(){
   const title=prompt('Exhibition title:');if(!title)return;
@@ -1078,8 +1085,6 @@ function viewOpp(id){const o=SD.opportunities.find(x=>x.id===id);if(!o)return;al
 // App opens straight to dashboard. No login barrier.
 // Data loads from localStorage (offline) or Firestore (online) automatically.
 document.addEventListener('DOMContentLoaded',()=>{
-  SQ.ping();
-
   // Try to restore a previous session from localStorage
   const saved=localStorage.getItem('p_auth')||sessionStorage.getItem('p_auth');
   if(saved){
@@ -1120,6 +1125,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const isPrem=SD.config.plan==='premium';
   $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
   $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
+  SQ.ping(); // now schoolId is set — correct Online/Offline status
   renderBanner();go('revenue');
 
   // Background: push queued writes + pull fresh data silently
