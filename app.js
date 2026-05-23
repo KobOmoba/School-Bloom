@@ -406,22 +406,104 @@ async function deleteStudent(idx){
   closeM('student-modal');renderStudentList();renderBanner();
 }
 
+// ── Universal student import: CSV, TXT, JPG, PNG, JPEG, WEBP ─────────────
 function handleCSV(e){
   const f=e.target.files[0];if(!f)return;
+  const name=(f.name||'').toLowerCase();
+  const type=(f.type||'').toLowerCase();
+  const isImage=type.startsWith('image/')||/\.(jpg|jpeg|png|webp|bmp)$/.test(name);
+  if(isImage){importStudentsFromImage(f);}
+  else{importStudentsFromText(f);}
+  e.target.value='';
+}
+
+function importStudentsFromText(f){
   const r=new FileReader();
   r.onload=async ev=>{
-    const lines=ev.target.result.split(/\r?\n/).filter(x=>x.trim());
-    if(lines.length<2){alert('Invalid CSV.');return;}
+    const raw=ev.target.result;
+    // Detect if it's a structured CSV (has commas + header row)
+    const lines=raw.split(/\r?\n/).filter(x=>x.trim());
+    const isStructured=lines.length>1&&lines[0].toLowerCase().includes('name')&&lines[0].includes(',');
     let count=0;
-    for(let i=1;i<lines.length;i++){
-      const c=lines[i].split(',').map(x=>x.trim());
-      if(c[0]&&c[1]){SD.students.push({name:c[0],phone:c[1].replace(/\D/g,''),class:c[2]||'JSS1',totalFee:parseFloat(c[3])||SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;}
+    if(isStructured){
+      // Full CSV: Name, Phone, Class, Fee
+      for(let i=1;i<lines.length;i++){
+        const c=lines[i].split(',').map(x=>x.trim());
+        if(c[0]&&c[1]){SD.students.push({name:c[0],phone:c[1].replace(/\D/g,''),class:c[2]||'JSS1',totalFee:parseFloat(c[3])||SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;}
+      }
+    } else {
+      // Plain name list (one name per line, numbered lists OK)
+      const names=extractStudentNames(raw);
+      names.forEach(nm=>{SD.students.push({name:nm,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;});
     }
     await SQ.push('students',SD.students);
-    $('csv-fb').textContent=`✅ Imported ${count} students.`;
+    $('csv-fb').textContent=`✅ Imported ${count} student${count!==1?'s':''}.${isStructured?'':' Add phone numbers in student profiles.'}`;
     renderStudentList();renderBanner();renderRevenue();
   };
+  r.onerror=()=>alert('Could not read file.');
   r.readAsText(f);
+}
+
+async function importStudentsFromImage(f){
+  $('csv-fb').textContent='📸 Reading photo… loading OCR (first time ~30s)';
+  const loadTesseract=()=>new Promise((resolve,reject)=>{
+    if(window.Tesseract){resolve();return;}
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=resolve;s.onerror=reject;
+    document.head.appendChild(s);
+  });
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    try{
+      await loadTesseract();
+      const{data:{text}}=await Tesseract.recognize(ev.target.result,'eng',{
+        logger:m=>{if(m.status==='recognizing text')$('csv-fb').textContent='📸 Reading photo… '+Math.round((m.progress||0)*100)+'%';}
+      });
+      const names=extractStudentNames(text);
+      let count=0;
+      names.forEach(nm=>{SD.students.push({name:nm,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;});
+      await SQ.push('students',SD.students);
+      $('csv-fb').textContent=`✅ Found ${count} student${count!==1?'s':''} from photo. Add phone numbers in profiles.`;
+      renderStudentList();renderBanner();renderRevenue();
+    }catch(err){
+      $('csv-fb').textContent='❌ Photo reading failed. Try a clearer image or use CSV.';
+      console.error('OCR error:',err);
+    }
+  };
+  reader.onerror=()=>alert('Could not read image.');
+  reader.readAsDataURL(f);
+}
+
+function extractStudentNames(raw){
+  const rawLines=raw.split(/\r?\n/);
+  const names=[];
+  let current=null;
+  rawLines.forEach(line=>{
+    const t=line.trim();
+    if(!t){if(current!==null){names.push(current);current=null;}return;}
+    // CSV line — take first column
+    if(t.includes(',')&&!/^\d+[.)\s]/.test(t)&&!/^[-*•]/.test(t)){
+      if(current!==null){names.push(current);current=null;}
+      const col=t.split(',')[0].replace(/"/g,'').trim();
+      if(col)names.push(col);return;
+    }
+    if(/^\d+[.)\s]/.test(t)||/^[-*•]/.test(t)){
+      if(current!==null)names.push(current);
+      current=t;
+    } else {
+      if(current!==null){
+        const words=t.replace(/[^a-zA-Z\s]/g,'').trim();
+        if(words.length>1&&t.length<40){current=current+' '+t;}
+        else{names.push(current);current=t;}
+      } else {current=t;}
+    }
+  });
+  if(current!==null)names.push(current);
+  // Clean: strip leading numbers/bullets, filter short/junk entries
+  return names.map(n=>{
+    return n.replace(/^[\d]+[.)\s]+/,'').replace(/^[-*•]\s*/,'').replace(/\s+/g,' ').trim();
+  }).filter(n=>n.length>2&&/[a-zA-Z]{2,}/.test(n));
 }
 
 // ── STUDENT PROFILE ────────────────────────────────────────────────────────
