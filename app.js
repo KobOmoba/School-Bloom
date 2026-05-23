@@ -398,18 +398,31 @@ function sendAllReminders(){
 
 // ── Fix garbled student names already in storage ──────────────────────────
 async function fixGarbledNames(){
-  const garbledPattern=/[^a-zA-Z0-9\s'\-\.,()/₦@+:]/;
-  let fixed=0;
-  SD.students.forEach(s=>{
-    if(garbledPattern.test(s.name)){
-      const cleaned=s.name.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
-      if(cleaned.length>1){s.name=cleaned;fixed++;}
-    }
+  const before=SD.students.length;
+  // Remove students whose names are clearly UI text / OCR junk
+  SD.students=SD.students.filter(s=>{
+    const n=(s.name||'').trim();
+    if(n.length<3)return false;
+    if(isUIText(n))return false;
+    // Keep if has at least one proper word (3+ letters, no digits)
+    const words=n.split(/\s+/);
+    return words.some(w=>w.length>=3&&/^[a-zA-Z]+$/.test(w));
   });
-  if(fixed===0){alert('No garbled names found — all names look clean already! ✅');return;}
+  // Also clean any remaining garbled chars from names we kept
+  let cleaned=0;
+  SD.students.forEach(s=>{
+    const orig=s.name;
+    s.name=s.name.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+    if(s.name!==orig)cleaned++;
+  });
+  const removed=before-SD.students.length;
+  if(removed===0&&cleaned===0){
+    alert('No junk entries found — all names look clean already! ✅\n\nIf names still look wrong, delete those students and re-import from a CSV file instead of a photo.');
+    return;
+  }
   await SQ.push('students',SD.students);
-  renderStudentList();
-  alert(`✅ Cleaned ${fixed} garbled name${fixed!==1?'s':''}. Please review student profiles to correct any names that still look wrong.`);
+  renderStudentList();renderBanner();renderRevenue();
+  alert(`✅ Removed ${removed} junk entr${removed!==1?'ies':'y'}, cleaned ${cleaned} name${cleaned!==1?'s':''}.\n\nReview remaining names and delete any that still look wrong.`);
 }
 function renderStudentList(){
   const q=($('stu-search')?.value||'').toLowerCase();
@@ -555,10 +568,47 @@ async function importStudentsFromImage(f){
   reader.readAsDataURL(f);
 }
 
+// ── Known UI phrases to reject from OCR output ───────────────────────────
+const UI_BLACKLIST=[
+  'educational bloom','school portal','kobomoba','github','send whatsapp',
+  'reminders to all','revenue','students','expenses','analytics','settings',
+  'support','finance','comms','alumni','health','music','arts','sports',
+  'staff','security','opportunities','outstanding','collection rate',
+  'collection progress','overdue','unpaid','paid','partial','basic','premium',
+  'online','offline','syncing','principal','term','session','exit','login',
+  'add student','import','fix names','upload','download','export','search',
+  'all classes','owes','owes:','fee','fees','phone','class','name',
+  'jsst','jsss','jss','sss','ss ','primary','nursery','kg ',
+  'send ai','view students','bulk payment','bank statement',
+  'no students','loading','saving','please wait','tap to','click to',
+  'details','share','use as wallpaper','wallpaper'
+];
+
+function isUIText(str){
+  const low=str.toLowerCase();
+  // Reject if matches any blacklist phrase
+  if(UI_BLACKLIST.some(b=>low.includes(b)))return true;
+  // Reject if contains digits (phone numbers, amounts, dates)
+  if(/\d/.test(str))return true;
+  // Reject if contains currency symbols or common UI chars
+  if(/[₦$@#%^&*()_+=\[\]{}|<>?/\\~`]/.test(str))return true;
+  // Reject very short (1 word under 3 chars)
+  const words=str.trim().split(/\s+/).filter(Boolean);
+  if(words.length===1&&words[0].length<4)return true;
+  // Reject if more than 8 words (likely a sentence, not a name)
+  if(words.length>8)return true;
+  // Reject if any single word is suspiciously long (>20 chars, likely OCR junk)
+  if(words.some(w=>w.length>20))return true;
+  // Reject ALL-CAPS strings longer than 20 chars (likely UI labels)
+  if(str===str.toUpperCase()&&str.replace(/\s/g,'').length>15)return true;
+  return false;
+}
+
 function extractStudentNames(raw){
   const rawLines=raw.split(/\r?\n/);
   const names=[];
   let current=null;
+
   rawLines.forEach(line=>{
     const t=line.trim();
     if(!t){if(current!==null){names.push(current);current=null;}return;}
@@ -580,10 +630,19 @@ function extractStudentNames(raw){
     }
   });
   if(current!==null)names.push(current);
-  // Clean: strip leading numbers/bullets, filter short/junk entries
-  return names.map(n=>{
-    return n.replace(/^[\d]+[.)\s]+/,'').replace(/^[-*•]\s*/,'').replace(/\s+/g,' ').trim();
-  }).filter(n=>n.length>2&&/[a-zA-Z]{2,}/.test(n));
+
+  // Clean and filter strictly
+  return names
+    .map(n=>n.replace(/^[\d]+[.)\s]+/,'').replace(/^[-*•]\s*/,'').replace(/\s+/g,' ').trim())
+    .filter(n=>{
+      if(n.length<4)return false;
+      if(!/[a-zA-Z]{2,}/.test(n))return false;
+      if(isUIText(n))return false;
+      // Must have at least one word that looks like a proper name (capitalised, 3+ letters)
+      const words=n.split(/\s+/).filter(Boolean);
+      const hasProperWord=words.some(w=>w.length>=3&&/^[A-Za-z]/.test(w)&&!/^(the|and|for|with|from|this|that|into|onto|over|under|about|send|view|add|fix|use|tap|all|see|not|can|will|has|have|been|were|your|our|their|its)$/i.test(w));
+      return hasProperWord;
+    });
 }
 
 // ── STUDENT PROFILE ────────────────────────────────────────────────────────
