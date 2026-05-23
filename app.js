@@ -399,30 +399,27 @@ function sendAllReminders(){
 // ── Fix garbled student names already in storage ──────────────────────────
 async function fixGarbledNames(){
   const before=SD.students.length;
-  // Remove students whose names are clearly UI text / OCR junk
+
+  // Step 1: remove entries that don't look like valid names
+  SD.students=SD.students.filter(s=>looksLikeValidName((s.name||'').trim()));
+
+  // Step 2: remove duplicates (same normalised name)
+  const seen=new Set();
   SD.students=SD.students.filter(s=>{
-    const n=(s.name||'').trim();
-    if(n.length<3)return false;
-    if(isUIText(n))return false;
-    // Keep if has at least one proper word (3+ letters, no digits)
-    const words=n.split(/\s+/);
-    return words.some(w=>w.length>=3&&/^[a-zA-Z]+$/.test(w));
+    const key=(s.name||'').toLowerCase().replace(/[^a-z]/g,'');
+    if(seen.has(key))return false;
+    seen.add(key);
+    return true;
   });
-  // Also clean any remaining garbled chars from names we kept
-  let cleaned=0;
-  SD.students.forEach(s=>{
-    const orig=s.name;
-    s.name=s.name.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
-    if(s.name!==orig)cleaned++;
-  });
+
   const removed=before-SD.students.length;
-  if(removed===0&&cleaned===0){
-    alert('No junk entries found — all names look clean already! ✅\n\nIf names still look wrong, delete those students and re-import from a CSV file instead of a photo.');
+  if(removed===0){
+    alert('Nothing to clean — all names look valid and there are no duplicates! ✅');
     return;
   }
   await SQ.push('students',SD.students);
   renderStudentList();renderBanner();renderRevenue();
-  alert(`✅ Removed ${removed} junk entr${removed!==1?'ies':'y'}, cleaned ${cleaned} name${cleaned!==1?'s':''}.\n\nReview remaining names and delete any that still look wrong.`);
+  alert(`✅ Removed ${removed} entr${removed!==1?'ies':'y'} (junk + duplicates).\n\nIf any real student was removed, add them back manually with ➕ Add Student.`);
 }
 function renderStudentList(){
   const q=($('stu-search')?.value||'').toLowerCase();
@@ -520,10 +517,13 @@ function importStudentsFromText(f){
       }
     } else {
       const names=extractStudentNames(raw);
+      const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
       names.forEach(nm=>{
-        const safe=cleanName(nm);
-        if(safe.length>1){
+        const safe=nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+        const key=safe.toLowerCase().replace(/[^a-z]/g,'');
+        if(safe.length>1&&!existingKeys.has(key)){
           SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+          existingKeys.add(key);
           count++;
         }
       });
@@ -552,9 +552,15 @@ async function importStudentsFromImage(f){
       });
       const names=extractStudentNames(text);
       let count=0;
+      const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
       names.forEach(nm=>{
         const safe=nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
-        if(safe.length>1){SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;}
+        const key=safe.toLowerCase().replace(/[^a-z]/g,'');
+        if(safe.length>1&&!existingKeys.has(key)){
+          SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+          existingKeys.add(key);
+          count++;
+        }
       });
       await SQ.push('students',SD.students);
       $('csv-fb').textContent=`✅ Found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
@@ -568,81 +574,106 @@ async function importStudentsFromImage(f){
   reader.readAsDataURL(f);
 }
 
-// ── Known UI phrases to reject from OCR output ───────────────────────────
+// ── Name validation helpers ──────────────────────────────────────────────
 const UI_BLACKLIST=[
   'educational bloom','school portal','kobomoba','github','send whatsapp',
   'reminders to all','revenue','students','expenses','analytics','settings',
   'support','finance','comms','alumni','health','music','arts','sports',
   'staff','security','opportunities','outstanding','collection rate',
   'collection progress','overdue','unpaid','paid','partial','basic','premium',
-  'online','offline','syncing','principal','term','session','exit','login',
+  'online','offline','syncing','principal','term ','session','exit','login',
   'add student','import','fix names','upload','download','export','search',
   'all classes','owes','owes:','fee','fees','phone','class','name',
-  'jsst','jsss','jss','sss','ss ','primary','nursery','kg ',
   'send ai','view students','bulk payment','bank statement',
   'no students','loading','saving','please wait','tap to','click to',
-  'details','share','use as wallpaper','wallpaper'
+  'details','share','wallpaper','use as'
 ];
 
-function isUIText(str){
-  const low=str.toLowerCase();
-  // Reject if matches any blacklist phrase
-  if(UI_BLACKLIST.some(b=>low.includes(b)))return true;
-  // Reject if contains digits (phone numbers, amounts, dates)
-  if(/\d/.test(str))return true;
-  // Reject if contains currency symbols or common UI chars
-  if(/[₦$@#%^&*()_+=\[\]{}|<>?/\\~`]/.test(str))return true;
-  // Reject very short (1 word under 3 chars)
-  const words=str.trim().split(/\s+/).filter(Boolean);
-  if(words.length===1&&words[0].length<4)return true;
-  // Reject if more than 8 words (likely a sentence, not a name)
-  if(words.length>8)return true;
-  // Reject if any single word is suspiciously long (>20 chars, likely OCR junk)
-  if(words.some(w=>w.length>20))return true;
-  // Reject ALL-CAPS strings longer than 20 chars (likely UI labels)
-  if(str===str.toUpperCase()&&str.replace(/\s/g,'').length>15)return true;
-  return false;
+// Nigerian name prefixes that appear on this list — these are valid
+const VALID_PREFIXES=/^(mc\.?|cp\.?|ceb\.?|lsses?\.?|lses?\.?|sps\.?|spvenevang\.?|spsupevang\.?|snrldr\.?|honsnrevang\.?|evang\.?|hon\.?|snr\.?|ldr\.?|ven\.?|sup\.?|rev\.?|pastor|deacon|deaconess|bro\.?|sis\.?|mr\.?|mrs\.?|miss|dr\.?|prof\.?)\s/i;
+
+function looksLikeValidName(str){
+  const t=str.trim();
+  if(!t||t.length<4)return false;
+
+  // Must have at least one letter
+  if(!/[a-zA-Z]/.test(t))return false;
+
+  // Reject if contains digits
+  if(/\d/.test(t))return false;
+
+  // Reject obvious UI/junk phrases
+  const low=t.toLowerCase();
+  if(UI_BLACKLIST.some(b=>low.includes(b)))return false;
+
+  // Split into words
+  const words=t.split(/\s+/).filter(Boolean);
+
+  // Too many words = sentence, not a name
+  if(words.length>6)return false;
+
+  // Reject if too few chars total after stripping non-alpha
+  const alpha=t.replace(/[^a-zA-Z]/g,'');
+  if(alpha.length<4)return false;
+
+  // Check for gibberish: if >40% of consecutive chars are consonant clusters
+  // (real names rarely have more than 3 consonants in a row)
+  const consonantRun=(t.match(/[^aeiouAEIOU\s.,'\-]{5,}/g)||[]);
+  if(consonantRun.length>0)return false;
+
+  // Must have at least one word with 3+ real letters
+  const hasRealWord=words.some(w=>{
+    const a=w.replace(/[^a-zA-Z]/g,'');
+    return a.length>=3;
+  });
+  if(!hasRealWord)return false;
+
+  // If it starts with a known Nigerian title prefix, trust it
+  if(VALID_PREFIXES.test(t))return true;
+
+  // Must have at least one capitalised word of 3+ letters (proper name)
+  const hasProperNoun=words.some(w=>w.length>=3&&/^[A-Z]/.test(w)&&/[a-z]/.test(w));
+  return hasProperNoun;
 }
 
 function extractStudentNames(raw){
-  const rawLines=raw.split(/\r?\n/);
-  const names=[];
-  let current=null;
+  // Split on newlines and process each line independently
+  const lines=raw.split(/\r?\n/);
+  const candidates=[];
 
-  rawLines.forEach(line=>{
+  lines.forEach(line=>{
     const t=line.trim();
-    if(!t){if(current!==null){names.push(current);current=null;}return;}
-    // CSV line — take first column
-    if(t.includes(',')&&!/^\d+[.)\s]/.test(t)&&!/^[-*•]/.test(t)){
-      if(current!==null){names.push(current);current=null;}
+    if(!t)return;
+
+    // CSV: take only first column
+    if(t.includes(',')&&!/^\d+[.)\s]/.test(t)){
       const col=t.split(',')[0].replace(/"/g,'').trim();
-      if(col)names.push(col);return;
+      if(col)candidates.push(col);
+      return;
     }
-    if(/^\d+[.)\s]/.test(t)||/^[-*•]/.test(t)){
-      if(current!==null)names.push(current);
-      current=t;
-    } else {
-      if(current!==null){
-        const words=t.replace(/[^a-zA-Z\s]/g,'').trim();
-        if(words.length>1&&t.length<40){current=current+' '+t;}
-        else{names.push(current);current=t;}
-      } else {current=t;}
+
+    // Strip leading number/bullet: "1. Name" or "• Name"
+    const stripped=t
+      .replace(/^\d+[.):\s]+/,'')
+      .replace(/^[-*•]\s*/,'')
+      .trim();
+
+    if(stripped)candidates.push(stripped);
+  });
+
+  // Deduplicate and validate
+  const seen=new Set();
+  const result=[];
+  candidates.forEach(raw=>{
+    const n=raw.replace(/\s+/g,' ').trim();
+    const key=n.toLowerCase().replace(/[^a-z]/g,'');
+    if(!key||seen.has(key))return;
+    if(looksLikeValidName(n)){
+      seen.add(key);
+      result.push(n);
     }
   });
-  if(current!==null)names.push(current);
-
-  // Clean and filter strictly
-  return names
-    .map(n=>n.replace(/^[\d]+[.)\s]+/,'').replace(/^[-*•]\s*/,'').replace(/\s+/g,' ').trim())
-    .filter(n=>{
-      if(n.length<4)return false;
-      if(!/[a-zA-Z]{2,}/.test(n))return false;
-      if(isUIText(n))return false;
-      // Must have at least one word that looks like a proper name (capitalised, 3+ letters)
-      const words=n.split(/\s+/).filter(Boolean);
-      const hasProperWord=words.some(w=>w.length>=3&&/^[A-Za-z]/.test(w)&&!/^(the|and|for|with|from|this|that|into|onto|over|under|about|send|view|add|fix|use|tap|all|see|not|can|will|has|have|been|were|your|our|their|its)$/i.test(w));
-      return hasProperWord;
-    });
+  return result;
 }
 
 // ── STUDENT PROFILE ────────────────────────────────────────────────────────
