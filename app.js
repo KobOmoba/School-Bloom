@@ -361,6 +361,22 @@ function sendAllReminders(){
 }
 
 // ── 2. STUDENTS (central hub) ──────────────────────────────────────────────
+
+// ── Fix garbled student names already in storage ──────────────────────────
+async function fixGarbledNames(){
+  const garbledPattern=/[^a-zA-Z0-9\s'\-\.,()/₦@+:]/;
+  let fixed=0;
+  SD.students.forEach(s=>{
+    if(garbledPattern.test(s.name)){
+      const cleaned=s.name.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+      if(cleaned.length>1){s.name=cleaned;fixed++;}
+    }
+  });
+  if(fixed===0){alert('No garbled names found — all names look clean already! ✅');return;}
+  await SQ.push('students',SD.students);
+  renderStudentList();
+  alert(`✅ Cleaned ${fixed} garbled name${fixed!==1?'s':''}. Please review student profiles to correct any names that still look wrong.`);
+}
 function renderStudentList(){
   const q=($('stu-search')?.value||'').toLowerCase();
   const cls=$('stu-class')?.value||'';
@@ -418,30 +434,57 @@ function handleCSV(e){
 }
 
 function importStudentsFromText(f){
-  const r=new FileReader();
-  r.onload=async ev=>{
-    const raw=ev.target.result;
-    // Detect if it's a structured CSV (has commas + header row)
+  // Try reading as UTF-8 first; if result looks garbled, retry as Latin-1
+  const tryRead=(encoding)=>new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=ev=>resolve(ev.target.result);
+    r.onerror=reject;
+    r.readAsText(f,encoding);
+  });
+
+  const looksGarbled=str=>{
+    // Count replacement chars and high non-latin unicode symbols
+    const bad=(str.match(/[\uFFFD\u0080-\u009F\u00C2-\u00C3]/g)||[]).length;
+    return bad>5||(bad/Math.max(str.length,1))>0.02;
+  };
+
+  const cleanName=n=>n
+    .replace(/[^a-zA-Z\s'\-\.]/g,'')   // keep only letters, space, apostrophe, hyphen, dot
+    .replace(/\s+/g,' ')
+    .trim();
+
+  (async()=>{
+    let raw=await tryRead('UTF-8');
+    if(looksGarbled(raw)){
+      // Retry with Windows-1252 / Latin-1
+      raw=await tryRead('windows-1252');
+    }
     const lines=raw.split(/\r?\n/).filter(x=>x.trim());
     const isStructured=lines.length>1&&lines[0].toLowerCase().includes('name')&&lines[0].includes(',');
     let count=0;
     if(isStructured){
-      // Full CSV: Name, Phone, Class, Fee
       for(let i=1;i<lines.length;i++){
         const c=lines[i].split(',').map(x=>x.trim());
-        if(c[0]&&c[1]){SD.students.push({name:c[0],phone:c[1].replace(/\D/g,''),class:c[2]||'JSS1',totalFee:parseFloat(c[3])||SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;}
+        const nm=cleanName(c[0]||'');
+        if(nm&&nm.length>1&&c[1]){
+          SD.students.push({name:nm,phone:c[1].replace(/\D/g,''),class:c[2]||'',totalFee:parseFloat(c[3])||SD.config.fee||50000,paid:0,scores:{},swot:{}});
+          count++;
+        }
       }
     } else {
-      // Plain name list (one name per line, numbered lists OK)
       const names=extractStudentNames(raw);
-      names.forEach(nm=>{SD.students.push({name:nm,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;});
+      names.forEach(nm=>{
+        const safe=cleanName(nm);
+        if(safe.length>1){
+          SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+          count++;
+        }
+      });
     }
     await SQ.push('students',SD.students);
-    $('csv-fb').textContent=`✅ Imported ${count} student${count!==1?'s':''}.${isStructured?'':' Add phone numbers in student profiles.'}`;
+    $('csv-fb').textContent=`✅ Imported ${count} student${count!==1?'s':''}.${isStructured?'':' Add phone/class in profiles.'}`;
     renderStudentList();renderBanner();renderRevenue();
-  };
-  r.onerror=()=>alert('Could not read file.');
-  r.readAsText(f);
+  })().catch(()=>alert('Could not read file. Try saving it as UTF-8 CSV.'));
 }
 
 async function importStudentsFromImage(f){
@@ -462,9 +505,12 @@ async function importStudentsFromImage(f){
       });
       const names=extractStudentNames(text);
       let count=0;
-      names.forEach(nm=>{SD.students.push({name:nm,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;});
+      names.forEach(nm=>{
+        const safe=nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+        if(safe.length>1){SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});count++;}
+      });
       await SQ.push('students',SD.students);
-      $('csv-fb').textContent=`✅ Found ${count} student${count!==1?'s':''} from photo. Add phone numbers in profiles.`;
+      $('csv-fb').textContent=`✅ Found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
       renderStudentList();renderBanner();renderRevenue();
     }catch(err){
       $('csv-fb').textContent='❌ Photo reading failed. Try a clearer image or use CSV.';
