@@ -2156,54 +2156,62 @@ async function finishScriptScan(){
   if(n>0) alert(`✅ ${n} script${n!==1?'s':''} saved to student profiles.`);
 }
 
-// ── Boot — No Login, Direct Access ────────────────────────────────────────
-// App opens straight to dashboard. No login barrier.
-// Data loads from localStorage (offline) or Firestore (online) automatically.
+// ── Boot ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded',()=>{
-  // Try to restore a previous session from localStorage
-  const saved=localStorage.getItem('p_auth')||sessionStorage.getItem('p_auth');
+  // Restore any saved session (localStorage = "Remember me", sessionStorage = tab-only)
+  const saved = localStorage.getItem('p_auth') || sessionStorage.getItem('p_auth');
   if(saved){
     try{
-      const auth=JSON.parse(saved);
-      schoolId=auth.schoolId;userRole=auth.role||'Principal';
+      const auth = JSON.parse(saved);
+      // Reject the old 'LOCAL' demo fallback — force real login
+      if(auth.schoolId && auth.schoolId !== 'LOCAL'){
+        schoolId  = auth.schoolId;
+        userRole  = auth.role || 'Principal';
+      }
     }catch(e){}
   }
 
-  // If no schoolId yet, use a default so the app still works
-  if(!schoolId){
-    schoolId='LOCAL';
-    userRole='Principal';
+  // If we have a valid schoolId AND cached data — launch straight in (offline-first)
+  if(schoolId){
+    const lc = localStorage.getItem(`p_${schoolId}_config`);
+    const ls = localStorage.getItem(`p_${schoolId}_staff`);
+    if(lc && ls){
+      // Full cache present — load and go
+      SD.config   = loadLocal('config',   {schoolName:'Educational Bloom',plan:'basic',fee:50000,currentTerm:'Term 1',session:'2025/2026'});
+      SD.students = loadLocal('students', []);
+      SD.staff    = loadLocal('staff',    [{name:'Principal',email:'',password:'',role:'Principal',phone:''}]);
+      SD.expenses = loadLocal('expenses', []);
+      SD.attendance  = loadLocal('attendance',  {});
+      SD.sports      = loadLocal('sports',      {teams:{},custom:[]});
+      SD.arts        = loadLocal('arts',        {gallery:[]});
+      SD.music       = loadLocal('music',       {practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]});
+      SD.health      = loadLocal('health',   []);
+      SD.alumni      = loadLocal('alumni',   []);
+      SD.socialPages = loadLocal('socialPages', []);
+      SD.commsLog    = loadLocal('commsLog', []);
+      SD.opportunities    = loadLocal('opportunities',    defaultOpps());
+      SD.financialRecords = loadLocal('financialRecords', null);
+
+      $('login').style.display = 'none';
+      $('app').style.display   = 'block';
+      const isPrem = SD.config.plan === 'premium';
+      $('hdr-school').textContent  = SD.config.schoolName || schoolId;
+      $('hdr-role').textContent    = userRole;
+      $('hdr-term').textContent    = SD.config.currentTerm || 'Term 1';
+      $('planBadge').textContent   = isPrem ? 'PREMIUM ✨' : 'BASIC';
+      $('planBadge').className     = 'plan-badge ' + (isPrem ? 'plan-premium' : 'plan-basic');
+      SQ.ping();
+      renderBanner();
+      go('revenue');
+      setTimeout(()=>SQ.flush(),   500);
+      setTimeout(()=>SQ.silentPull(), 2000);
+      return; // ← skip login screen entirely
+    }
   }
 
-  // Load all data from localStorage instantly
-  SD.config=loadLocal('config',{schoolName:'Educational Bloom',plan:'basic',fee:50000,currentTerm:'Term 1',session:'2025/2026'});
-  SD.students=loadLocal('students',[]);
-  SD.staff=loadLocal('staff',[{name:'Principal',email:'',password:'',role:'Principal',phone:''}]);
-  SD.expenses=loadLocal('expenses',[]);
-  SD.attendance=loadLocal('attendance',{});
-  SD.sports=loadLocal('sports',{teams:{},custom:[]});
-  SD.arts=loadLocal('arts',{gallery:[]});
-  SD.music=loadLocal('music',{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]});
-  SD.health=loadLocal('health',[]);
-  SD.alumni=loadLocal('alumni',[]);
-  SD.socialPages=loadLocal('socialPages',[]);
-  SD.commsLog=loadLocal('commsLog',[]);
-  SD.opportunities=loadLocal('opportunities',defaultOpps());
-  SD.financialRecords=loadLocal('financialRecords',null);
-
-  // Show app immediately — no login screen
-  $('login').style.display='none';
-  $('app').style.display='block';
-  $('hdr-school').textContent=SD.config.schoolName||'Educational Bloom';
-  $('hdr-role').textContent=userRole;
-  $('hdr-term').textContent=SD.config.currentTerm||'Term 1';
-  const isPrem=SD.config.plan==='premium';
-  $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
-  $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
-  SQ.ping(); // now schoolId is set — correct Online/Offline status
-  renderBanner();go('revenue');
-
-  // Background: push queued writes + pull fresh data silently
-  setTimeout(()=>SQ.flush(),500);
-  setTimeout(()=>SQ.silentPull(),2000);
+  // No valid session or no local cache — show login
+  // (first-time user, or cache was cleared, or new device)
+  $('login').style.display = 'flex';
+  $('app').style.display   = 'none';
+  SQ.ping();
 });
