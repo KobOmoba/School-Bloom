@@ -387,11 +387,26 @@ function sendReminder(idx){
 function sendAllReminders(){
   const overdue=SD.students.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
   if(!overdue.length)return alert('No overdue students!');
+  // Use guided bulk sequence if students have phone numbers
+  const withPhone=overdue.filter(s=>s.phone);
+  if(withPhone.length>0){startBulkWA();return;}
+  // Fallback: broadcast message for parents without individual numbers
   const sn=SD.config.schoolName||'School';
   const total=overdue.reduce((t,s)=>t+(s.totalFee||0)-(s.paid||0),0);
-  const msg=`Dear Parents of ${sn},\n\nThis is a reminder that some students have outstanding fee balances for this term.\n\nTotal outstanding: *${fmt(total)}*\n*${overdue.length} students* are yet to complete payment.\n\nKindly ensure your ward's fees are paid promptly to avoid disruption.\n\nThank you.\n– ${sn}`;
+  const msg=`Dear Parents of ${sn},
+
+This is a reminder that *${overdue.length} students* have outstanding fee balances this term.
+
+Total outstanding: *${fmt(total)}*
+
+Kindly ensure prompt payment.
+
+– ${sn}`;
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
   logComm('Fee Reminder Broadcast',`Sent to ${overdue.length} overdue parents. Total: ${fmt(total)}`);
+}
+// (old sendAllReminders replaced)
+function _sendAllReminders_REPLACED(){
 }
 
 // ── 2. STUDENTS (central hub) ──────────────────────────────────────────────
@@ -1332,6 +1347,250 @@ function renderOpps(){
 }
 
 function viewOpp(id){const o=SD.opportunities.find(x=>x.id===id);if(!o)return;alert(`${o.title}\n\nProvider: ${o.provider}\nDeadline: ${o.deadline}\nValue: ${o.amount||'—'}\n\n${o.desc||''}\n\nApply at: ${o.url||'See provider website'}`);}
+
+
+// ── Class Attendance Screen ─────────────────────────────────────────────
+// Replaces the per-student attendance tab with a class-wide roll call view.
+
+function openClassAttendance(){
+  // Show modal, populate class picker, render
+  openM('class-att-modal');
+  const sel = $('ca-class-sel');
+  const classes = [...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">— Select Class —</option>' +
+    classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  $('ca-date').value = new Date().toISOString().split('T')[0];
+  $('ca-list').innerHTML = '<p style="color:var(--sub);font-size:0.82rem;text-align:center;padding:1.5rem;">Select a class above.</p>';
+  $('ca-summary').textContent = '';
+}
+
+function renderClassRoll(){
+  const cls = $('ca-class-sel').value;
+  const date = $('ca-date').value;
+  if(!cls||!date){ $('ca-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">Pick a class and date.</p>'; return; }
+  const students = SD.students.filter(s=>s.class===cls);
+  if(!students.length){ $('ca-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">No students in this class.</p>'; return; }
+  const att = SD.attendance[date]||{};
+  const present = students.filter(s=>att[s.name]==='Present').length;
+  $('ca-summary').textContent = `${present}/${students.length} Present`;
+
+  $('ca-list').innerHTML = students.map((s,i)=>{
+    const status = att[s.name]||'';
+    const pCls = status==='Present'?'ca-btn-active-p':'';
+    const aCls = status==='Absent'?'ca-btn-active-a':'';
+    const lCls = status==='Late'?'ca-btn-active-l':'';
+    return `<div class="ca-row" id="ca-row-${i}">
+      <div class="ca-name">${esc(s.name)}</div>
+      <div class="ca-btns">
+        <button class="ca-btn ca-p ${pCls}" onclick="markClassAtt(${SD.students.indexOf(s)},'${date}','Present',${i})">✅</button>
+        <button class="ca-btn ca-a ${aCls}" onclick="markClassAtt(${SD.students.indexOf(s)},'${date}','Absent',${i})">❌</button>
+        <button class="ca-btn ca-l ${lCls}" onclick="markClassAtt(${SD.students.indexOf(s)},'${date}','Late',${i})">⏰</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function markClassAtt(stuIdx, date, status, rowIdx){
+  const s = SD.students[stuIdx]; if(!s) return;
+  if(!SD.attendance[date]) SD.attendance[date]={};
+  SD.attendance[date][s.name] = status;
+  // Update just this row's buttons (no full re-render needed — stays fast)
+  const row = document.getElementById('ca-row-'+rowIdx);
+  if(row){
+    row.querySelectorAll('.ca-btn').forEach(b=>{
+      b.classList.remove('ca-btn-active-p','ca-btn-active-a','ca-btn-active-l');
+    });
+    const cls = status==='Present'?'ca-btn-active-p':status==='Absent'?'ca-btn-active-a':'ca-btn-active-l';
+    const idx = ['Present','Absent','Late'].indexOf(status);
+    const btns = row.querySelectorAll('.ca-btn');
+    if(btns[idx]) btns[idx].classList.add(cls);
+  }
+  // Update summary
+  const clsName = $('ca-class-sel').value;
+  const students = SD.students.filter(s=>s.class===clsName);
+  const att = SD.attendance[date]||{};
+  const present = students.filter(s=>att[s.name]==='Present').length;
+  $('ca-summary').textContent = `${present}/${students.length} Present`;
+  // Debounced save — batch writes to avoid 40 individual Firestore calls
+  clearTimeout(window._attSaveTimer);
+  window._attSaveTimer = setTimeout(()=>SQ.push('attendance',SD.attendance), 1200);
+}
+
+async function markAllPresent(){
+  const cls = $('ca-class-sel').value; const date = $('ca-date').value;
+  if(!cls||!date) return;
+  if(!SD.attendance[date]) SD.attendance[date]={};
+  SD.students.filter(s=>s.class===cls).forEach(s=>{ SD.attendance[date][s.name]='Present'; });
+  await SQ.push('attendance',SD.attendance);
+  renderClassRoll();
+}
+
+async function saveClassAttendance(){
+  await SQ.push('attendance',SD.attendance);
+  closeM('class-att-modal');
+  alert('✅ Attendance saved for ' + ($('ca-class-sel').value||'class') + ' on ' + $('ca-date').value);
+}
+
+// ── Subject Score Entry Screen ──────────────────────────────────────────
+// Enter scores for all students in a class for one subject at once.
+
+function openSubjectScores(){
+  openM('subj-scores-modal');
+  const classes = [...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
+  const subs = SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  $('ss-class-sel').innerHTML = '<option value="">— Select Class —</option>' +
+    classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  $('ss-subj-sel').innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  $('ss-list').innerHTML = '<p style="color:var(--sub);font-size:0.82rem;text-align:center;padding:1.5rem;">Select a class and subject above.</p>';
+}
+
+function renderSubjectScoreList(){
+  const cls = $('ss-class-sel').value;
+  const sub = $('ss-subj-sel').value;
+  const term = SD.config.currentTerm||'Term 1';
+  if(!cls||!sub){ $('ss-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">Pick a class and subject.</p>'; return; }
+  const students = SD.students.filter(s=>s.class===cls);
+  if(!students.length){ $('ss-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">No students in this class.</p>'; return; }
+  $('ss-list').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 70px 70px 60px;gap:4px;padding:0.4rem 0;border-bottom:2px solid var(--border);font-size:0.72rem;font-weight:700;color:var(--sub);">
+      <span>Student</span><span style="text-align:center;">CA/40</span><span style="text-align:center;">Exam/60</span><span style="text-align:center;">Total</span>
+    </div>
+    ${students.map((s,i)=>{
+      const stuIdx = SD.students.indexOf(s);
+      const v = (s.scores||{})[sub]||{ca:'',exam:''};
+      const tot = ((v.ca||0)*1)+((v.exam||0)*1);
+      const g = tot>0?gradeScore(tot).g:'—';
+      const gCls = tot>0?'g'+g:'';
+      return `<div class="ss-row" id="ss-row-${i}">
+        <div style="font-size:0.8rem;font-weight:600;padding-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div>
+        <input type="number" min="0" max="40" value="${v.ca||''}" placeholder="CA"
+          class="ss-inp" id="ss-ca-${i}"
+          oninput="updateSSTotal(${stuIdx},'${esc(sub)}','ca',this.value,${i})"
+          style="text-align:center;margin:0;padding:0.35rem 0.2rem;font-size:0.82rem;">
+        <input type="number" min="0" max="60" value="${v.exam||''}" placeholder="Exam"
+          class="ss-inp" id="ss-ex-${i}"
+          oninput="updateSSTotal(${stuIdx},'${esc(sub)}','exam',this.value,${i})"
+          style="text-align:center;margin:0;padding:0.35rem 0.2rem;font-size:0.82rem;">
+        <div id="ss-tot-${i}" class="ss-tot ${gCls}" style="text-align:center;font-weight:700;font-size:0.85rem;padding-top:6px;">${tot||'—'}</div>
+      </div>`;
+    }).join('')}`;
+}
+
+function updateSSTotal(stuIdx,sub,type,val,rowIdx){
+  const s = SD.students[stuIdx]; if(!s) return;
+  if(!s.scores) s.scores={};
+  if(!s.scores[sub]) s.scores[sub]={ca:0,exam:0};
+  const num = Math.min(type==='ca'?40:60, Math.max(0,parseFloat(val)||0));
+  s.scores[sub][type] = num;
+  const tot = (s.scores[sub].ca||0)+(s.scores[sub].exam||0);
+  const el = document.getElementById('ss-tot-'+rowIdx);
+  if(el){
+    const g = gradeScore(tot);
+    el.textContent = tot||'—';
+    el.className = 'ss-tot g'+g.g;
+  }
+  clearTimeout(window._scoreSaveTimer);
+  window._scoreSaveTimer = setTimeout(()=>SQ.push('students',SD.students), 2000);
+}
+
+async function saveSubjectScores(){
+  await SQ.push('students',SD.students);
+  const sub = $('ss-subj-sel').value;
+  const cls = $('ss-class-sel').value;
+  closeM('subj-scores-modal');
+  alert(`✅ ${sub} scores saved for ${cls}!`);
+}
+
+// ── Bulk WhatsApp Sequence ───────────────────────────────────────────────
+// Opens messages one at a time for each overdue parent.
+// Teacher taps "Send" in WhatsApp, returns, taps "Next" — 60 parents done
+// in 60 taps with no navigation, vs 180 taps before.
+
+let _waBulkQueue = [];
+let _waBulkIdx = 0;
+
+function startBulkWA(){
+  const overdue = SD.students.filter(s=>(s.totalFee||0)-(s.paid||0)>0&&s.phone);
+  if(!overdue.length) return alert('No overdue students with phone numbers.');
+  _waBulkQueue = overdue;
+  _waBulkIdx = 0;
+  openM('bulk-wa-modal');
+  renderBulkWAStep();
+}
+
+function renderBulkWAStep(){
+  const total = _waBulkQueue.length;
+  if(_waBulkIdx >= total){ closeBulkWA(); return; }
+  const s = _waBulkQueue[_waBulkIdx];
+  const owe = (s.totalFee||0)-(s.paid||0);
+  const sn = SD.config.schoolName||'School';
+  const msg = `Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
+  $('bwa-progress').textContent = `${_waBulkIdx+1} of ${total}`;
+  $('bwa-pct').style.width = Math.round(((_waBulkIdx)/total)*100)+'%';
+  $('bwa-name').textContent = s.name;
+  $('bwa-owe').textContent = fmt(owe);
+  $('bwa-phone').textContent = s.phone;
+  $('bwa-open-btn').onclick = ()=>{
+    window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
+  };
+}
+
+function nextBulkWA(){
+  _waBulkIdx++;
+  renderBulkWAStep();
+}
+
+function closeBulkWA(){
+  closeM('bulk-wa-modal');
+  const done = Math.min(_waBulkIdx, _waBulkQueue.length);
+  logComm('Bulk WhatsApp',`Sent to ${done} parents individually`);
+  if(done>0) alert(`✅ Done! ${done} reminder${done!==1?'s':''} sent.`);
+  _waBulkQueue=[];_waBulkIdx=0;
+}
+
+// ── Bulk Report Card Send ────────────────────────────────────────────────
+let _rcBulkQueue = [];
+let _rcBulkIdx = 0;
+
+function startBulkReportCards(){
+  const cls = prompt('Enter class name to send report cards (e.g. JSS1):');
+  if(!cls) return;
+  const students = SD.students.filter(s=>s.class===cls&&s.phone);
+  if(!students.length) return alert(`No students with phone numbers found in "${cls}".`);
+  _rcBulkQueue = students;
+  _rcBulkIdx = 0;
+  openM('bulk-rc-modal');
+  renderBulkRCStep();
+}
+
+function renderBulkRCStep(){
+  const total = _rcBulkQueue.length;
+  if(_rcBulkIdx >= total){ closeBulkRC(); return; }
+  const s = _rcBulkQueue[_rcBulkIdx];
+  const subs = SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const sc = s.scores||{};
+  let lines = `📋 *REPORT CARD — ${SD.config.schoolName||'School'}*\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Term:* ${SD.config.currentTerm||'Term 1'}\n\n`;
+  let total2=0,n=0;
+  subs.forEach(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);total2+=t;n++;lines+=`${sub}: ${t}/100 (${gradeScore(t).g})\n`;});
+  const avg=n>0?Math.round(total2/n):0;
+  lines+=`\n*Average: ${avg}% (${gradeScore(avg).g})*`;
+  $('brc-progress').textContent=`${_rcBulkIdx+1} of ${total}`;
+  $('brc-pct').style.width=Math.round((_rcBulkIdx/total)*100)+'%';
+  $('brc-name').textContent=s.name;
+  $('brc-phone').textContent=s.phone;
+  $('brc-open-btn').onclick=()=>{
+    window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(lines)}`,'_blank');
+  };
+}
+
+function nextBulkRC(){ _rcBulkIdx++; renderBulkRCStep(); }
+
+function closeBulkRC(){
+  closeM('bulk-rc-modal');
+  const done=Math.min(_rcBulkIdx,_rcBulkQueue.length);
+  if(done>0) alert(`✅ Done! ${done} report card${done!==1?'s':''} sent.`);
+  _rcBulkQueue=[];_rcBulkIdx=0;
+}
 
 // ── Boot — No Login, Direct Access ────────────────────────────────────────
 // App opens straight to dashboard. No login barrier.
