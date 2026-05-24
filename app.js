@@ -782,7 +782,11 @@ async function markAtt(idx,date,status){
 
 // SCORES TAB
 function buildScores(s,idx){
-  const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+      'Social Studies','Civic Education','Cultural & Creative Arts',
+      'Computer Science','Physical & Health Education','Agricultural Science',
+      'National Values Education','French Language','Home Economics',
+      'Business Studies','Religious Studies'];
   const sc=s.scores||{};const term=SD.config.currentTerm||'Term 1';
   return`<div class="card"><div class="ct">📚 ${esc(term)} Scores</div>
     <p style="font-size:0.75rem;color:var(--sub);margin-bottom:0.65rem;">CA max 40 · Exam max 60 · Total 100</p>
@@ -807,7 +811,11 @@ async function saveScores(idx){await SQ.push('students',SD.students);alert('✅ 
 
 // REPORT CARD TAB
 function buildReport(s){
-  const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+      'Social Studies','Civic Education','Cultural & Creative Arts',
+      'Computer Science','Physical & Health Education','Agricultural Science',
+      'National Values Education','French Language','Home Economics',
+      'Business Studies','Religious Studies'];
   const sc=s.scores||{};const term=SD.config.currentTerm||'Term 1';const session=SD.config.session||'2025/2026';
   const sn=SD.config.schoolName||'Educational Bloom School';
   let total=0,n=0;
@@ -843,7 +851,11 @@ function printRC(){
 }
 
 function sendRC(idx){
-  const s=SD.students[idx];const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const s=SD.students[idx];const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+      'Social Studies','Civic Education','Cultural & Creative Arts',
+      'Computer Science','Physical & Health Education','Agricultural Science',
+      'National Values Education','French Language','Home Economics',
+      'Business Studies','Religious Studies'];
   const sc=s.scores||{};let lines=`📋 *REPORT CARD — ${SD.config.schoolName||'School'}*\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Term:* ${SD.config.currentTerm||'Term 1'}\n\n*SCORES*\n`;
   subs.forEach(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);lines+=`${sub}: ${t}/100 (${gradeScore(t).g})\n`;});
   if(s.phone)window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(lines)}`,'_blank');
@@ -1279,7 +1291,9 @@ function loadSettings(){
   const c=SD.config||{};
   $('set-name').value=c.schoolName||'';$('set-phone').value=c.whatsapp||'';$('set-email').value=c.principalEmail||'';
   $('set-fee').value=c.fee||50000;$('set-term').value=c.currentTerm||'Term 1';$('set-session').value=c.session||'2025/2026';
-  $('set-subjects').value=(c.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education']).join(', ');
+  const defaultSubs=['English Language','Mathematics','Basic Science & Technology','Social Studies','Civic Education','Cultural & Creative Arts','Computer Science','Physical & Health Education','Agricultural Science','National Values Education','French Language','Home Economics','Business Studies','Religious Studies'];
+  $('set-subjects').value=(c.subjects||defaultSubs).join(', ');
+  renderSubjectChips();
   const isPrem=c.plan==='premium';
   $('settings-plan').textContent=isPrem?'Premium ✨':'Basic';
   $('settings-staff-limit').textContent=isPrem?'Unlimited':'3';
@@ -1463,7 +1477,11 @@ async function saveClassAttendance(){
 function openSubjectScores(){
   openM('subj-scores-modal');
   const classes = [...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
-  const subs = SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const subs = SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+      'Social Studies','Civic Education','Cultural & Creative Arts',
+      'Computer Science','Physical & Health Education','Agricultural Science',
+      'National Values Education','French Language','Home Economics',
+      'Business Studies','Religious Studies'];
   $('ss-class-sel').innerHTML = '<option value="">— Select Class —</option>' +
     classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   $('ss-subj-sel').innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
@@ -1602,7 +1620,11 @@ function renderBulkRCStep(){
   const total = _rcBulkQueue.length;
   if(_rcBulkIdx >= total){ closeBulkRC(); return; }
   const s = _rcBulkQueue[_rcBulkIdx];
-  const subs = SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const subs = SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+      'Social Studies','Civic Education','Cultural & Creative Arts',
+      'Computer Science','Physical & Health Education','Agricultural Science',
+      'National Values Education','French Language','Home Economics',
+      'Business Studies','Religious Studies'];
   const sc = s.scores||{};
   let lines = `📋 *REPORT CARD — ${SD.config.schoolName||'School'}*\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Term:* ${SD.config.currentTerm||'Term 1'}\n\n`;
   let total2=0,n=0;
@@ -1635,7 +1657,11 @@ function closeBulkRC(){
 function openScoreOCR(){
   openM('score-ocr-modal');
   const classes=[...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
-  const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+      'Social Studies','Civic Education','Cultural & Creative Arts',
+      'Computer Science','Physical & Health Education','Agricultural Science',
+      'National Values Education','French Language','Home Economics',
+      'Business Studies','Religious Studies'];
   $('socr-class').innerHTML='<option value="">— Select Class —</option>'+classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   $('socr-subj').innerHTML=subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
   $('socr-status').textContent='';
@@ -1847,6 +1873,287 @@ async function socrSaveScores(){
   await SQ.push('students',SD.students);
   closeM('score-ocr-modal');
   alert(`✅ ${sub} scores saved for ${saved} student${saved!==1?'s':''}!\n\nGo to Students → open any profile → Scores tab to verify.`);
+}
+
+
+// ── Subject Manager ─────────────────────────────────────────────────────
+const PRESET_SUBJECTS={
+  primary:['English Language','Mathematics','Basic Science & Technology','Social Studies',
+    'National Values Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','French Language',
+    'Yoruba Language','Igbo Language','Hausa Language','Home Economics',
+    'Civic Education','Security Education','Business Studies','Religious Studies'],
+  jss:['English Language','Mathematics','Basic Science','Basic Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Studies',
+    'Agricultural Science','Home Economics','Business Studies','French Language',
+    'Yoruba Language','Igbo Language','Hausa Language','Physical & Health Education',
+    'Religious Studies','Security Education'],
+  sss:['English Language','Mathematics','Further Mathematics','Physics','Chemistry',
+    'Biology','Agricultural Science','Economics','Government','Literature in English',
+    'Geography','Commerce','Accounting','Civic Education','Computer Studies',
+    'French Language','Yoruba Language','Igbo Language','Hausa Language',
+    'Physical Education','Visual Arts','Music','Home Economics']
+};
+
+function renderSubjectChips(){
+  const subs=SD.config.subjects||[];
+  const c=$('subj-chips');if(!c)return;
+  c.innerHTML=subs.map((s,i)=>
+    `<span class="subj-chip">${esc(s)}<button onclick="removeSubject(${i})" class="chip-del">×</button></span>`
+  ).join('');
+}
+
+function removeSubject(idx){
+  if(!SD.config.subjects)return;
+  SD.config.subjects.splice(idx,1);
+  renderSubjectChips();
+  $('set-subjects').value=SD.config.subjects.join(', ');
+}
+
+function addSubjectFromInput(){
+  const inp=$('new-subj-inp');if(!inp)return;
+  const name=inp.value.trim();if(!name)return;
+  if(!SD.config.subjects)SD.config.subjects=[];
+  if(SD.config.subjects.includes(name)){inp.value='';return;}
+  SD.config.subjects.push(name);
+  renderSubjectChips();
+  $('set-subjects').value=SD.config.subjects.join(', ');
+  inp.value='';
+}
+
+function loadPresetSubjects(level){
+  const list=PRESET_SUBJECTS[level];if(!list)return;
+  SD.config.subjects=[...list];
+  renderSubjectChips();
+  $('set-subjects').value=SD.config.subjects.join(', ');
+}
+
+
+// ── Individual Script Scanner ────────────────────────────────────────────
+// Teacher marks a paper, points camera at it.
+// App reads the student name + score from that single script.
+// Loops: scan → confirm → next script → scan → confirm → next...
+
+let _scriptQueue = [];   // queued results waiting to save
+let _scriptSubject = ''; // which subject we're scanning for
+
+function openScriptScan(){
+  openM('script-scan-modal');
+  const subs = SD.config.subjects || ['English Language','Mathematics'];
+  $('scan-subj').innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  $('scan-status').textContent = '';
+  $('scan-result').innerHTML = '';
+  $('scan-queue-count').textContent = '';
+  $('scan-img-input').value = '';
+  _scriptQueue = [];
+  _scriptSubject = subs[0] || '';
+}
+
+function scanSubjChanged(){
+  _scriptSubject = $('scan-subj').value;
+}
+
+function triggerScriptScan(){
+  _scriptSubject = $('scan-subj').value;
+  if(!_scriptSubject){ alert('Select a subject first.'); return; }
+  $('scan-img-input').click();
+}
+
+async function handleScriptImage(e){
+  const f = e.target.files[0]; if(!f) return;
+  e.target.value = '';
+
+  $('scan-status').innerHTML = '<span style="color:var(--sub);">📸 Reading script…</span>';
+  $('scan-result').innerHTML = '';
+
+  // Load Tesseract if needed
+  await new Promise((res,rej)=>{
+    if(window.Tesseract){res();return;}
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=res; s.onerror=rej;
+    document.head.appendChild(s);
+  });
+
+  const imgData = await new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=ev=>res(ev.target.result);
+    r.onerror=rej;
+    r.readAsDataURL(f);
+  });
+
+  try{
+    const {data:{text}} = await Tesseract.recognize(imgData,'eng',{
+      logger:m=>{
+        if(m.status==='recognizing text')
+          $('scan-status').innerHTML=`<span style="color:var(--sub);">📸 Reading… ${Math.round((m.progress||0)*100)}%</span>`;
+      }
+    });
+
+    $('scan-status').innerHTML = '<span style="color:var(--sub);">🔍 Finding name and score…</span>';
+    const result = parseScriptOCR(text);
+    renderScriptResult(result);
+
+  }catch(err){
+    $('scan-status').innerHTML = '<span style="color:var(--danger);">❌ Could not read. Try better lighting.</span>';
+    console.error(err);
+  }
+}
+
+function parseScriptOCR(raw){
+  const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const sub = _scriptSubject;
+
+  // ── Try to find student name ──────────────────────────────────────────
+  // Look for "Name:" label, or the line that best matches a known student
+  let detectedName = null;
+  let bestStudent = null;
+  let bestSim = 0;
+
+  const nameSim = (a,b) => {
+    const wa=a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
+    const wb=b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
+    if(!wa.length||!wb.length) return 0;
+    const shared=wa.filter(w=>wb.includes(w)).length;
+    let prefix=0;
+    wa.forEach(w=>{if(w.length>2&&wb.some(v=>v.startsWith(w)||w.startsWith(v)))prefix+=0.4;});
+    return (shared+prefix)/Math.max(wa.length,wb.length);
+  };
+
+  // Check every line against all students
+  lines.forEach(line=>{
+    // Strip "Name:", "Student:", "Pupil:" labels
+    const cleaned = line.replace(/^(name|student|pupil|candidate)[:\s]*/i,'').trim();
+    if(cleaned.length < 3) return;
+    SD.students.forEach(s=>{
+      const sim = nameSim(cleaned, s.name);
+      if(sim > bestSim){ bestSim=sim; bestStudent=s; detectedName=cleaned; }
+    });
+  });
+
+  // ── Try to find score ─────────────────────────────────────────────────
+  // Look for patterns like: "Total: 78", "Score: 45/60", "78/100", "CA: 32  Exam: 51"
+  let ca = null, exam = null, total = null;
+
+  const allNums = raw.match(/\b\d{1,3}\b/g)||[];
+  const scores = allNums.map(Number).filter(n=>n<=100&&n>=0);
+
+  // Pattern 1: explicit CA and Exam labels
+  const caMatch = raw.match(/\b(ca|continuous\s*assessment)[:\s]*(\d{1,2})/i);
+  const exMatch = raw.match(/\b(exam|examination|test)[:\s]*(\d{1,2})/i);
+  if(caMatch) ca = Math.min(40, parseInt(caMatch[2]));
+  if(exMatch) exam = Math.min(60, parseInt(exMatch[2]));
+
+  // Pattern 2: "Total: 78" or "78/100"
+  if(ca===null && exam===null){
+    const totMatch = raw.match(/\b(total|score|mark)[:\s]*(\d{1,3})\s*(?:\/\s*100)?/i);
+    if(totMatch) total = Math.min(100, parseInt(totMatch[2]));
+  }
+
+  // Pattern 3: two numbers ≤40 then ≤60 (typical table row)
+  if(ca===null && exam===null && total===null){
+    for(let i=0; i<scores.length-1; i++){
+      if(scores[i]<=40 && scores[i+1]<=60){ ca=scores[i]; exam=scores[i+1]; break; }
+    }
+  }
+
+  // Pattern 4: single number ≤100 as total
+  if(ca===null && exam===null && total===null && scores.length>=1){
+    total = scores.find(n=>n>0) || null;
+  }
+
+  return {
+    detectedName,
+    bestStudent,
+    bestSim: Math.round(bestSim*100),
+    ca, exam, total,
+    sub
+  };
+}
+
+function renderScriptResult(r){
+  const hasScore = r.ca!==null || r.exam!==null || r.total!==null;
+  const hasStudent = r.bestStudent && r.bestSim >= 30;
+
+  $('scan-status').innerHTML = '';
+
+  // Student picker
+  const stuOptions = SD.students.map((s,i)=>
+    `<option value="${i}" ${r.bestStudent&&SD.students.indexOf(r.bestStudent)===i?'selected':''}>${esc(s.name)} (${s.class||'—'})</option>`
+  ).join('');
+
+  const computedTotal = r.ca!==null && r.exam!==null ? (r.ca+r.exam) :
+                        r.total!==null ? r.total : '—';
+
+  $('scan-result').innerHTML = `
+    <div style="background:var(--s2);border-radius:12px;padding:0.85rem;margin-bottom:0.65rem;">
+      <div style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;">
+        ${hasStudent?`Matched at ${r.bestSim}% confidence`:'⚠️ Name not recognised — select manually'}
+      </div>
+      <label style="font-size:0.78rem;">Student</label>
+      <select id="scan-stu-sel" style="margin:0 0 0.5rem;font-size:0.82rem;">
+        <option value="">— Select student —</option>
+        ${stuOptions}
+      </select>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.5rem;">
+        <div>
+          <label style="font-size:0.72rem;">CA /40</label>
+          <input type="number" min="0" max="40" id="scan-ca"
+            value="${r.ca!==null?r.ca:''}" placeholder="—"
+            inputmode="numeric" style="text-align:center;margin:0;font-size:0.9rem;">
+        </div>
+        <div>
+          <label style="font-size:0.72rem;">Exam /60</label>
+          <input type="number" min="0" max="60" id="scan-exam"
+            value="${r.exam!==null?r.exam:''}" placeholder="—"
+            inputmode="numeric" style="text-align:center;margin:0;font-size:0.9rem;">
+        </div>
+        <div>
+          <label style="font-size:0.72rem;">Total</label>
+          <div style="font-size:1.4rem;font-weight:900;text-align:center;color:var(--money);padding-top:4px;">${computedTotal}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:0.4rem;">
+        <button class="btn-money" style="flex:1;" onclick="confirmScript()">✅ Confirm & Queue</button>
+        <button class="btn-ghost btn-sm" onclick="$('scan-result').innerHTML='';$('scan-status').textContent=''">✖ Discard</button>
+      </div>
+    </div>`;
+}
+
+async function confirmScript(){
+  const stuSel = $('scan-stu-sel');
+  const idx = parseInt(stuSel?.value);
+  if(isNaN(idx)||idx<0){ alert('Select the student first.'); return; }
+  const s = SD.students[idx]; if(!s) return;
+  const ca = parseFloat($('scan-ca')?.value);
+  const ex = parseFloat($('scan-exam')?.value);
+  if(isNaN(ca)&&isNaN(ex)){ alert('Enter at least one score.'); return; }
+  if(!s.scores) s.scores={};
+  s.scores[_scriptSubject]={
+    ca: Math.min(40,Math.max(0,isNaN(ca)?0:ca)),
+    exam: Math.min(60,Math.max(0,isNaN(ex)?0:ex))
+  };
+  _scriptQueue.push({name:s.name, sub:_scriptSubject, ca:isNaN(ca)?0:ca, exam:isNaN(ex)?0:ex});
+
+  // Save to state immediately, debounce Firestore
+  clearTimeout(window._scriptSaveTimer);
+  window._scriptSaveTimer = setTimeout(()=>SQ.push('students',SD.students), 1500);
+
+  $('scan-result').innerHTML = '';
+  $('scan-status').innerHTML = `<span style="color:var(--money);">✅ ${esc(s.name)} saved — scan next paper</span>`;
+  $('scan-queue-count').textContent = `${_scriptQueue.length} saved this session`;
+  // Auto-trigger camera again after short delay for fluid scanning
+  setTimeout(()=>{ $('scan-img-input').click(); }, 600);
+}
+
+async function finishScriptScan(){
+  if(_scriptQueue.length>0) await SQ.push('students',SD.students);
+  const n = _scriptQueue.length;
+  closeM('script-scan-modal');
+  _scriptQueue=[]; _scriptSubject='';
+  if(n>0) alert(`✅ ${n} script${n!==1?'s':''} saved to student profiles.`);
 }
 
 // ── Boot — No Login, Direct Access ────────────────────────────────────────
