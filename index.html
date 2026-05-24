@@ -45,6 +45,11 @@
 .bwa-owe-big{font-size:1.3rem;font-weight:900;color:var(--danger);text-align:center;margin-bottom:0.15rem;}
 .bwa-phone-sm{font-size:0.75rem;color:var(--sub);text-align:center;margin-bottom:0.75rem;}
 
+
+/* ── Subject Chips ──────────────────────────────────────── */
+.subj-chip{display:inline-flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--border);border-radius:20px;padding:3px 10px 3px 10px;font-size:0.74rem;font-weight:600;color:var(--text);}
+.chip-del{background:none;border:none;color:var(--danger);font-size:1rem;cursor:pointer;padding:0;line-height:1;margin-left:2px;font-weight:700;}
+
 </style>
 <script>
 // Eye toggle — defined here so it works even if app.js has an error
@@ -156,6 +161,7 @@ function toggleEye(inputId, btn) {
         <button class="btn-brand btn-sm" style="background:var(--money);" onclick="openClassAttendance()">📅 Attendance</button>
         <button class="btn-brand btn-sm" style="background:#7c3aed;" onclick="openSubjectScores()">📚 Scores</button>
         <button class="btn-brand btn-sm" style="background:#0891b2;" onclick="openScoreOCR()">📸 Scan Scores</button>
+        <button class="btn-brand btn-sm" style="background:#059669;" onclick="openScriptScan()">📝 Scan Scripts</button>
         <button class="btn-ghost btn-sm" style="color:var(--text);" onclick="$('csv-up').click()">📁 Import (CSV / Photo)</button>
         <button class="btn-ghost btn-sm" style="color:var(--danger);" onclick="fixGarbledNames()">🔧 Fix Names</button>
         <input type="file" id="csv-up" accept=".csv,.txt,.jpg,.jpeg,.png,.webp" style="display:none;" onchange="handleCSV(event)">
@@ -395,8 +401,18 @@ function toggleEye(inputId, btn) {
         <label>Current Term</label>
         <select id="set-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
         <label>Academic Session</label><input type="text" id="set-session" placeholder="e.g. 2025/2026">
-        <label>Subjects (comma-separated)</label>
-        <textarea id="set-subjects" rows="3" placeholder="English, Mathematics, Basic Science, Social Studies, Civic Education"></textarea>
+        <label>Subjects</label>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;flex-wrap:wrap;">
+          <button class="btn-ghost btn-sm" onclick="loadPresetSubjects('primary')" style="font-size:0.72rem;">📚 Primary</button>
+          <button class="btn-ghost btn-sm" onclick="loadPresetSubjects('jss')" style="font-size:0.72rem;">📚 JSS</button>
+          <button class="btn-ghost btn-sm" onclick="loadPresetSubjects('sss')" style="font-size:0.72rem;">📚 SSS</button>
+        </div>
+        <div id="subj-chips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:0.5rem;min-height:28px;"></div>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
+          <input type="text" id="new-subj-inp" placeholder="Add subject…" style="flex:1;margin:0;font-size:0.82rem;" onkeydown="if(event.key==='Enter'){event.preventDefault();addSubjectFromInput();}">
+          <button class="btn-brand btn-sm" onclick="addSubjectFromInput()">+ Add</button>
+        </div>
+        <textarea id="set-subjects" rows="2" placeholder="Subjects list (auto-updated above)" style="font-size:0.72rem;color:var(--sub);"></textarea>
         <button class="btn-brand" onclick="saveSettings()">💾 Save Settings</button>
       </div>
       <div class="card" style="border-left:4px solid var(--warn);">
@@ -728,6 +744,42 @@ function toggleEye(inputId, btn) {
       💾 Save These Scores
     </button>
     <button class="btn-ghost btn-sm" style="margin-top:0.4rem;" onclick="closeM('score-ocr-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- Individual Script Scanner Modal -->
+<div id="script-scan-modal" class="modal">
+  <div class="mbox" style="max-height:94vh;overflow-y:auto;">
+    <div class="mhdr">📝 Scan Marked Scripts</div>
+    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.65rem;">
+      After marking each paper — point your camera at it. The app reads the student name and score, you confirm, then scan the next one.
+    </p>
+
+    <!-- Subject selector — stays fixed while scanning the whole pile -->
+    <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.65rem;background:var(--s2);padding:0.6rem;border-radius:10px;">
+      <span style="font-size:0.78rem;font-weight:700;color:var(--sub);white-space:nowrap;">Subject:</span>
+      <select id="scan-subj" onchange="scanSubjChanged()" style="flex:1;margin:0;font-size:0.85rem;font-weight:700;"></select>
+    </div>
+
+    <!-- Camera button — big, easy to tap repeatedly -->
+    <input type="file" id="scan-img-input" accept="image/*" capture="environment"
+      style="display:none;" onchange="handleScriptImage(event)">
+    <button class="btn-brand" onclick="triggerScriptScan()"
+      style="font-size:1rem;padding:0.85rem;margin-bottom:0.6rem;">
+      📷 Scan Next Paper
+    </button>
+
+    <!-- Status line -->
+    <div id="scan-status" style="font-size:0.8rem;min-height:1.4rem;margin-bottom:0.4rem;text-align:center;"></div>
+    <div id="scan-queue-count" style="font-size:0.72rem;color:var(--sub);text-align:center;margin-bottom:0.4rem;"></div>
+
+    <!-- Result card — shown after each scan -->
+    <div id="scan-result"></div>
+
+    <!-- Finish button -->
+    <button class="btn-ghost btn-sm" style="margin-top:0.5rem;width:100%;" onclick="finishScriptScan()">
+      ✅ Done Scanning — Save All &amp; Close
+    </button>
   </div>
 </div>
 </body>
