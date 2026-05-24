@@ -1425,6 +1425,32 @@ async function markAllPresent(){
   renderClassRoll();
 }
 
+async function markAllAbsent(){
+  const cls = $('ca-class-sel').value; const date = $('ca-date').value;
+  if(!cls||!date) return;
+  if(!confirm(`Mark ALL students in ${cls} as Absent on ${date}?`)) return;
+  if(!SD.attendance[date]) SD.attendance[date]={};
+  SD.students.filter(s=>s.class===cls).forEach(s=>{ SD.attendance[date][s.name]='Absent'; });
+  await SQ.push('attendance',SD.attendance);
+  renderClassRoll();
+}
+
+function notifyAbsentParents(){
+  const cls = $('ca-class-sel').value; const date = $('ca-date').value;
+  if(!cls||!date) return;
+  const att = SD.attendance[date]||{};
+  const absent = SD.students.filter(s=>s.class===cls&&att[s.name]==='Absent'&&s.phone);
+  if(!absent.length){ alert('No absent students with phone numbers for this class/date.'); return; }
+  // Use same guided bulk sequence, but for absence notifications
+  _waBulkQueue = absent.map(s=>({...s, _isAbsence:true, _date:date}));
+  _waBulkIdx = 0;
+  openM('bulk-wa-modal');
+  // Temporarily override the render to show absence message
+  _waBulkIsAbsence = true;
+  renderBulkWAStep();
+}
+let _waBulkIsAbsence = false;
+
 async function saveClassAttendance(){
   await SQ.push('attendance',SD.attendance);
   closeM('class-att-modal');
@@ -1464,11 +1490,11 @@ function renderSubjectScoreList(){
       return `<div class="ss-row" id="ss-row-${i}">
         <div style="font-size:0.8rem;font-weight:600;padding-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div>
         <input type="number" min="0" max="40" value="${v.ca||''}" placeholder="CA"
-          class="ss-inp" id="ss-ca-${i}"
+          class="ss-inp" id="ss-ca-${i}" inputmode="numeric" enterkeyhint="next"
           oninput="updateSSTotal(${stuIdx},'${esc(sub)}','ca',this.value,${i})"
           style="text-align:center;margin:0;padding:0.35rem 0.2rem;font-size:0.82rem;">
         <input type="number" min="0" max="60" value="${v.exam||''}" placeholder="Exam"
-          class="ss-inp" id="ss-ex-${i}"
+          class="ss-inp" id="ss-ex-${i}" inputmode="numeric" enterkeyhint="next"
           oninput="updateSSTotal(${stuIdx},'${esc(sub)}','exam',this.value,${i})"
           style="text-align:center;margin:0;padding:0.35rem 0.2rem;font-size:0.82rem;">
         <div id="ss-tot-${i}" class="ss-tot ${gCls}" style="text-align:center;font-weight:700;font-size:0.85rem;padding-top:6px;">${tot||'—'}</div>
@@ -1522,13 +1548,21 @@ function renderBulkWAStep(){
   const total = _waBulkQueue.length;
   if(_waBulkIdx >= total){ closeBulkWA(); return; }
   const s = _waBulkQueue[_waBulkIdx];
-  const owe = (s.totalFee||0)-(s.paid||0);
   const sn = SD.config.schoolName||'School';
-  const msg = `Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
+  let msg, oweDisplay;
+  if(_waBulkIsAbsence){
+    const dt = s._date||new Date().toISOString().split('T')[0];
+    msg = `Dear Parent,\n\nThis is to inform you that *${s.name}* was marked *ABSENT* today (${dt}) at *${sn}*.\n\nKindly ensure your ward attends school or contact us if there is a valid reason.\n\nThank you.\n– ${sn}`;
+    oweDisplay = '📍 Absent today';
+  } else {
+    const owe = (s.totalFee||0)-(s.paid||0);
+    msg = `Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
+    oweDisplay = fmt(owe);
+  }
   $('bwa-progress').textContent = `${_waBulkIdx+1} of ${total}`;
-  $('bwa-pct').style.width = Math.round(((_waBulkIdx)/total)*100)+'%';
+  $('bwa-pct').style.width = Math.round((_waBulkIdx/total)*100)+'%';
   $('bwa-name').textContent = s.name;
-  $('bwa-owe').textContent = fmt(owe);
+  $('bwa-owe').textContent = oweDisplay;
   $('bwa-phone').textContent = s.phone;
   $('bwa-open-btn').onclick = ()=>{
     window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
@@ -1543,9 +1577,10 @@ function nextBulkWA(){
 function closeBulkWA(){
   closeM('bulk-wa-modal');
   const done = Math.min(_waBulkIdx, _waBulkQueue.length);
-  logComm('Bulk WhatsApp',`Sent to ${done} parents individually`);
-  if(done>0) alert(`✅ Done! ${done} reminder${done!==1?'s':''} sent.`);
-  _waBulkQueue=[];_waBulkIdx=0;
+  const type = _waBulkIsAbsence?'Absence Notifications':'Fee Reminders';
+  logComm('Bulk WhatsApp '+type,`Sent to ${done} parents`);
+  if(done>0) alert(`✅ Done! ${done} message${done!==1?'s':''} sent.`);
+  _waBulkQueue=[];_waBulkIdx=0;_waBulkIsAbsence=false;
 }
 
 // ── Bulk Report Card Send ────────────────────────────────────────────────
