@@ -632,7 +632,11 @@ function toggleEye(inputId, btn) {
     </div>
     <div class="ca-summary-bar">
       <span id="ca-summary" style="font-weight:700;font-size:0.85rem;color:var(--money);"></span>
-      <button class="ca-mark-all" onclick="markAllPresent()">✅ Mark All Present</button>
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+        <button class="ca-mark-all" onclick="markAllPresent()">✅ All Present</button>
+        <button class="ca-mark-all" style="color:var(--danger);" onclick="markAllAbsent()">❌ All Absent</button>
+        <button class="ca-mark-all" style="color:var(--warn);" onclick="notifyAbsentParents()">📲 Notify Absent</button>
+      </div>
     </div>
     <div id="ca-list"></div>
     <button class="btn-brand" style="margin-top:0.75rem;" onclick="saveClassAttendance()">💾 Save Attendance</button>
