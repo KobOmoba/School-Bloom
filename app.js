@@ -1627,6 +1627,228 @@ function closeBulkRC(){
   _rcBulkQueue=[];_rcBulkIdx=0;
 }
 
+
+// ── Score Sheet OCR ─────────────────────────────────────────────────────
+// Teacher picks subject + class, uploads photo of score sheet.
+// OCR reads the table, fuzzy-matches student names, fills CA + Exam scores.
+
+function openScoreOCR(){
+  openM('score-ocr-modal');
+  const classes=[...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
+  const subs=SD.config.subjects||['English','Mathematics','Basic Science','Social Studies','Civic Education'];
+  $('socr-class').innerHTML='<option value="">— Select Class —</option>'+classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  $('socr-subj').innerHTML=subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  $('socr-status').textContent='';
+  $('socr-preview').innerHTML='';
+  $('socr-save-btn').style.display='none';
+  $('socr-img-input').value='';
+  window._socrParsed=[];
+}
+
+function socrPickPhoto(){
+  $('socr-img-input').click();
+}
+
+async function socrHandleImage(e){
+  const f=e.target.files[0]; if(!f)return;
+  const cls=$('socr-class').value;
+  const sub=$('socr-subj').value;
+  if(!cls||!sub){alert('Select class and subject first.');e.target.value='';return;}
+  
+  $('socr-status').innerHTML='<span style="color:var(--sub);">📸 Loading OCR engine… (first time ~30s)</span>';
+  $('socr-preview').innerHTML='';
+  $('socr-save-btn').style.display='none';
+
+  // Load Tesseract
+  await new Promise((resolve,reject)=>{
+    if(window.Tesseract){resolve();return;}
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=resolve; s.onerror=reject;
+    document.head.appendChild(s);
+  });
+
+  // Read image
+  const imgData=await new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=ev=>res(ev.target.result);
+    r.onerror=rej;
+    r.readAsDataURL(f);
+  });
+
+  $('socr-status').innerHTML='<span style="color:var(--sub);">📸 Reading score sheet… 0%</span>';
+  
+  try{
+    const {data:{text}}=await Tesseract.recognize(imgData,'eng',{
+      logger:m=>{
+        if(m.status==='recognizing text')
+          $('socr-status').innerHTML=`<span style="color:var(--sub);">📸 Reading… ${Math.round((m.progress||0)*100)}%</span>`;
+      }
+    });
+
+    $('socr-status').innerHTML='<span style="color:var(--sub);">🔍 Matching names to student list…</span>';
+    
+    const results=parseScoreSheet(text, cls, sub);
+    window._socrParsed=results;
+    renderSocrPreview(results, sub);
+
+  }catch(err){
+    $('socr-status').innerHTML='<span style="color:var(--danger);">❌ Could not read image. Try better lighting or a flatter photo.</span>';
+    console.error('Score OCR error:',err);
+  }
+  e.target.value='';
+}
+
+function parseScoreSheet(raw, cls, sub){
+  // Get students in this class for name matching
+  const classStudents=SD.students.filter(s=>s.class===cls);
+  
+  // Name similarity score (word overlap, same as bulk payment matcher)
+  const nameSim=(a,b)=>{
+    const wa=a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
+    const wb=b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
+    if(!wa.length||!wb.length)return 0;
+    const shared=wa.filter(w=>wb.includes(w)).length;
+    let prefix=0;
+    wa.forEach(w=>{if(w.length>2&&wb.some(v=>v.startsWith(w)||w.startsWith(v)))prefix+=0.4;});
+    return(shared+prefix)/Math.max(wa.length,wb.length);
+  };
+
+  const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const results=[];
+  const matched=new Set();
+
+  lines.forEach(line=>{
+    // Extract all numbers from this line
+    const nums=line.match(/\b\d{1,3}\b/g);
+    if(!nums||nums.length<1)return;
+
+    // Extract the text part (remove numbers, punctuation, S/N)
+    const textPart=line
+      .replace(/^\s*\d+[\.\):\s]+/,'')   // strip leading S/N like "1." or "1)"
+      .replace(/\b\d{1,3}\b/g,' ')       // remove numbers
+      .replace(/[\/\\|%\-_=]/g,' ')      // remove table chars
+      .replace(/\s+/g,' ')
+      .trim();
+
+    if(textPart.length<3)return;
+
+    // Find best matching student in this class
+    let best=null, bestScore=0;
+    classStudents.forEach(s=>{
+      const score=nameSim(textPart, s.name);
+      if(score>bestScore){bestScore=score;best=s;}
+    });
+
+    if(!best||bestScore<0.3)return;
+    if(matched.has(best.name))return; // don't double-match
+    matched.add(best.name);
+
+    const stuIdx=SD.students.indexOf(best);
+
+    // Parse scores from numbers found
+    // Strategy: find numbers ≤40 (likely CA) and ≤60 (likely Exam)
+    // Filter out obvious non-scores (S/N like 1,2,3 at start)
+    const scores=nums.map(Number).filter(n=>n<=100&&n>=0);
+    
+    let ca=null, exam=null;
+    // Try to identify CA (≤40) and Exam (≤60)
+    // Look for two numbers where first≤40 and second≤60
+    for(let i=0;i<scores.length-1;i++){
+      if(scores[i]<=40&&scores[i+1]<=60){
+        ca=scores[i]; exam=scores[i+1]; break;
+      }
+    }
+    // If only one number found and ≤100, treat as total — infer if possible
+    if(ca===null&&exam===null&&scores.length>=1){
+      const total=scores.find(n=>n<=100);
+      if(total!==undefined){
+        // Can't split — flag for manual review
+        results.push({stuIdx,name:best.name,ca:null,exam:null,total,raw:line,
+          status:'review', note:'Only total found — enter CA/Exam manually'});
+        return;
+      }
+    }
+    if(ca===null&&exam===null)return;
+
+    results.push({stuIdx,name:best.name,ca,exam,
+      total:(ca||0)+(exam||0),raw:line,status:'ok',sim:Math.round(bestScore*100)});
+  });
+
+  return results;
+}
+
+function renderSocrPreview(results, sub){
+  const ok=results.filter(r=>r.status==='ok');
+  const review=results.filter(r=>r.status==='review');
+  const total=ok.length+review.length;
+
+  $('socr-status').innerHTML=`<strong style="color:var(--money);">✅ ${ok.length} matched</strong>`+
+    (review.length?` · <span style="color:var(--warn);">⚠️ ${review.length} need review</span>`:'')+
+    (total===0?'<span style="color:var(--danger);">No scores detected. Try a clearer photo or enter manually.</span>':'');
+
+  if(!total){$('socr-save-btn').style.display='none';return;}
+
+  $('socr-preview').innerHTML=`
+    <div style="font-size:0.72rem;color:var(--sub);margin-bottom:0.5rem;">Review before saving — tap any field to edit:</div>
+    <div style="display:grid;grid-template-columns:1fr 55px 55px 50px;gap:3px;padding:0.3rem 0;border-bottom:2px solid var(--border);font-size:0.68rem;font-weight:700;color:var(--sub);">
+      <span>Student</span><span style="text-align:center;">CA/40</span><span style="text-align:center;">Exam/60</span><span style="text-align:center;">Total</span>
+    </div>
+    ${results.map((r,i)=>{
+      const rowCls=r.status==='review'?'background:#fffbeb;':'';
+      return`<div style="display:grid;grid-template-columns:1fr 55px 55px 50px;gap:3px;padding:0.3rem 0;border-bottom:1px solid var(--border);align-items:center;${rowCls}">
+        <div style="font-size:0.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          ${esc(r.name)}${r.status==='review'?'<span style="color:var(--warn);font-size:0.65rem;"> ⚠️</span>':''}
+        </div>
+        <input type="number" min="0" max="40" value="${r.ca!==null?r.ca:''}" inputmode="numeric"
+          placeholder="CA" id="socr-ca-${i}"
+          oninput="socrUpdateTotal(${i})"
+          style="text-align:center;margin:0;padding:0.3rem 0.15rem;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;${r.ca===null?'border-color:var(--warn);':''}">
+        <input type="number" min="0" max="60" value="${r.exam!==null?r.exam:''}" inputmode="numeric"
+          placeholder="Exam" id="socr-ex-${i}"
+          oninput="socrUpdateTotal(${i})"
+          style="text-align:center;margin:0;padding:0.3rem 0.15rem;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;${r.exam===null?'border-color:var(--warn);':''}">
+        <div id="socr-tot-${i}" style="text-align:center;font-weight:700;font-size:0.82rem;color:${(r.ca||0)+(r.exam||0)>=70?'var(--money)':'var(--text)'};">
+          ${r.ca!==null&&r.exam!==null?(r.ca+r.exam):'—'}
+        </div>
+      </div>`;
+    }).join('')}`;
+
+  $('socr-save-btn').style.display='block';
+}
+
+function socrUpdateTotal(i){
+  const ca=parseFloat(document.getElementById('socr-ca-'+i)?.value)||0;
+  const ex=parseFloat(document.getElementById('socr-ex-'+i)?.value)||0;
+  const tot=ca+ex;
+  const el=document.getElementById('socr-tot-'+i);
+  if(el){ el.textContent=tot||'—'; el.style.color=tot>=70?'var(--money)':'var(--text)'; }
+}
+
+async function socrSaveScores(){
+  const sub=$('socr-subj').value;
+  const results=window._socrParsed||[];
+  if(!results.length)return;
+
+  let saved=0;
+  results.forEach((r,i)=>{
+    const ca=parseFloat(document.getElementById('socr-ca-'+i)?.value);
+    const ex=parseFloat(document.getElementById('socr-ex-'+i)?.value);
+    if(isNaN(ca)&&isNaN(ex))return;
+    const s=SD.students[r.stuIdx]; if(!s)return;
+    if(!s.scores)s.scores={};
+    s.scores[sub]={
+      ca:Math.min(40,Math.max(0,isNaN(ca)?0:ca)),
+      exam:Math.min(60,Math.max(0,isNaN(ex)?0:ex))
+    };
+    saved++;
+  });
+
+  await SQ.push('students',SD.students);
+  closeM('score-ocr-modal');
+  alert(`✅ ${sub} scores saved for ${saved} student${saved!==1?'s':''}!\n\nGo to Students → open any profile → Scores tab to verify.`);
+}
+
 // ── Boot — No Login, Direct Access ────────────────────────────────────────
 // App opens straight to dashboard. No login barrier.
 // Data loads from localStorage (offline) or Firestore (online) automatically.
