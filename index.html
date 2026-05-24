@@ -155,6 +155,7 @@ function toggleEye(inputId, btn) {
         <button class="btn-brand btn-sm" onclick="openM('add-student-modal')">➕ Add Student</button>
         <button class="btn-brand btn-sm" style="background:var(--money);" onclick="openClassAttendance()">📅 Attendance</button>
         <button class="btn-brand btn-sm" style="background:#7c3aed;" onclick="openSubjectScores()">📚 Scores</button>
+        <button class="btn-brand btn-sm" style="background:#0891b2;" onclick="openScoreOCR()">📸 Scan Scores</button>
         <button class="btn-ghost btn-sm" style="color:var(--text);" onclick="$('csv-up').click()">📁 Import (CSV / Photo)</button>
         <button class="btn-ghost btn-sm" style="color:var(--danger);" onclick="fixGarbledNames()">🔧 Fix Names</button>
         <input type="file" id="csv-up" accept=".csv,.txt,.jpg,.jpeg,.png,.webp" style="display:none;" onchange="handleCSV(event)">
@@ -647,6 +648,7 @@ function toggleEye(inputId, btn) {
 <div id="subj-scores-modal" class="modal">
   <div class="mbox" style="max-height:92vh;overflow-y:auto;">
     <div class="mhdr">📚 Enter Scores by Subject</div>
+    <button class="btn-outline btn-sm" style="margin-bottom:0.5rem;" onclick="closeM('subj-scores-modal');openScoreOCR()">📸 Switch to Photo Scan instead</button>
     <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem;">
       <select id="ss-class-sel" onchange="renderSubjectScoreList()" style="flex:1;margin:0;font-size:0.82rem;"></select>
       <select id="ss-subj-sel" onchange="renderSubjectScoreList()" style="flex:1;margin:0;font-size:0.82rem;"></select>
@@ -691,6 +693,41 @@ function toggleEye(inputId, btn) {
       <button class="btn-brand" style="flex:1;" onclick="nextBulkRC()">Next ▶</button>
       <button class="btn-ghost btn-sm" onclick="closeBulkRC()">Done</button>
     </div>
+  </div>
+</div>
+
+<!-- Score Sheet OCR Modal -->
+<div id="score-ocr-modal" class="modal">
+  <div class="mbox" style="max-height:94vh;overflow-y:auto;">
+    <div class="mhdr">📸 Scan Score Sheet</div>
+    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.75rem;">
+      Photograph a class score sheet. The app reads the names and scores and fills them in automatically.
+    </p>
+
+    <!-- Step 1: Pick class + subject -->
+    <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem;">
+      <select id="socr-class" style="flex:1;margin:0;font-size:0.82rem;"></select>
+      <select id="socr-subj" style="flex:1;margin:0;font-size:0.82rem;"></select>
+    </div>
+
+    <!-- Step 2: Photo button -->
+    <input type="file" id="socr-img-input" accept="image/*" capture="environment"
+      style="display:none;" onchange="socrHandleImage(event)">
+    <button class="btn-brand" onclick="socrPickPhoto()" style="margin-bottom:0.5rem;">
+      📷 Take Photo / Choose Image
+    </button>
+
+    <!-- Status + progress -->
+    <div id="socr-status" style="font-size:0.8rem;margin-bottom:0.5rem;min-height:1.2rem;"></div>
+
+    <!-- Preview table — editable before saving -->
+    <div id="socr-preview"></div>
+
+    <!-- Save button (hidden until results ready) -->
+    <button id="socr-save-btn" class="btn-money" style="display:none;margin-top:0.75rem;" onclick="socrSaveScores()">
+      💾 Save These Scores
+    </button>
+    <button class="btn-ghost btn-sm" style="margin-top:0.4rem;" onclick="closeM('score-ocr-modal')">Cancel</button>
   </div>
 </div>
 </body>
