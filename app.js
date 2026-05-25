@@ -1726,83 +1726,113 @@ async function socrHandleImage(e){
 }
 
 function parseScoreSheet(raw, cls, sub){
-  // Get students in this class for name matching
-  const classStudents=SD.students.filter(s=>s.class===cls);
-  
-  // Name similarity score (word overlap, same as bulk payment matcher)
-  const nameSim=(a,b)=>{
-    const wa=a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
-    const wb=b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
-    if(!wa.length||!wb.length)return 0;
-    const shared=wa.filter(w=>wb.includes(w)).length;
-    let prefix=0;
-    wa.forEach(w=>{if(w.length>2&&wb.some(v=>v.startsWith(w)||w.startsWith(v)))prefix+=0.4;});
-    return(shared+prefix)/Math.max(wa.length,wb.length);
+  const classStudents = SD.students.filter(s => s.class === cls);
+  const term = parseInt($('socr-term')?.value || '1');
+
+  // ── Enhanced fuzzy name matcher ──────────────────────────────────────
+  const nameSim = (a, b) => {
+    const wa = a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
+    const wb = b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
+    if(!wa.length||!wb.length) return 0;
+    let score = 0;
+    wa.forEach(w => {
+      if(wb.includes(w)){ score+=1.0; return; }
+      const pfx = w.slice(0,4);
+      if(wb.some(v=>v.startsWith(pfx)||v.slice(0,4)===pfx)){ score+=0.7; return; }
+      // Edit-distance ≤ 2
+      wb.forEach(v=>{
+        if(w.length>=4&&v.length>=4){
+          let diffs=0;
+          for(let i=0;i<Math.min(w.length,v.length);i++) if(w[i]!==v[i]) diffs++;
+          diffs+=Math.abs(w.length-v.length);
+          if(diffs<=2) score+=0.5;
+        }
+      });
+    });
+    return score / Math.max(wa.length, wb.length);
   };
 
-  const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const results=[];
-  const matched=new Set();
-
-  lines.forEach(line=>{
-    // Extract all numbers from this line
-    const nums=line.match(/\b\d{1,3}\b/g);
-    if(!nums||nums.length<1)return;
-
-    // Extract the text part (remove numbers, punctuation, S/N)
-    const textPart=line
-      .replace(/^\s*\d+[\.\):\s]+/,'')   // strip leading S/N like "1." or "1)"
-      .replace(/\b\d{1,3}\b/g,' ')       // remove numbers
-      .replace(/[\/\\|%\-_=]/g,' ')      // remove table chars
-      .replace(/\s+/g,' ')
-      .trim();
-
-    if(textPart.length<3)return;
-
-    // Find best matching student in this class
-    let best=null, bestScore=0;
-    classStudents.forEach(s=>{
-      const score=nameSim(textPart, s.name);
-      if(score>bestScore){bestScore=score;best=s;}
+  // ── Smart score-triple finder ─────────────────────────────────────────
+  // Finds (ca, exam, total) where ca+exam≈total, prioritises largest totals
+  // Handles multi-term sheets (picks the Nth best match for term N)
+  const findTriples = nums => {
+    const valid = nums.map(Number).filter(n=>!isNaN(n)&&n>0&&n<=100);
+    const seen = new Set();
+    const triples = [];
+    for(let i=0;i<valid.length;i++)
+      for(let j=0;j<valid.length;j++){
+        if(i===j) continue;
+        for(let k=0;k<valid.length;k++){
+          if(k===i||k===j) continue;
+          const [a,b,c]=[valid[i],valid[j],valid[k]];
+          if(Math.abs(a+b-c)<=3 && c>=40 && c<=100 && b>=15 && b<=65 && a>=5 && a<=50){
+            const key=`${a},${b},${c}`;
+            if(!seen.has(key)){ seen.add(key); triples.push([a,b,c]); }
+          }
+        }
+      }
+    // Deduplicate by total, keep highest exam for each total
+    const byTotal = {};
+    triples.forEach(([a,b,c])=>{
+      if(!byTotal[c]||b>byTotal[c][1]) byTotal[c]=[a,b,c];
     });
+    // Sort by total descending
+    return Object.values(byTotal).sort((x,y)=>y[2]-x[2]);
+  };
 
-    if(!best||bestScore<0.3)return;
-    if(matched.has(best.name))return; // don't double-match
+  const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const results = [];
+  const matched = new Set();
+
+  lines.forEach(line => {
+    const nums = line.match(/\b\d{1,3}\b/g);
+    if(!nums||nums.length<2) return;
+
+    // Text part = remove numbers + row markers
+    const textPart = line
+      .replace(/^\s*\d+[\.\):\s]+/,'')
+      .replace(/\b\d{1,3}\b/g,' ')
+      .replace(/[\/\\|%\-_=]/g,' ')
+      .replace(/\s+/g,' ').trim();
+
+    if(textPart.length < 3) return;
+
+    // Find best student match
+    let best = null, bestScore = 0;
+    classStudents.forEach(s => {
+      const sim = nameSim(textPart, s.name);
+      if(sim > bestScore){ bestScore=sim; best=s; }
+    });
+    if(!best || bestScore < 0.35) return;
+    if(matched.has(best.name)) return;
     matched.add(best.name);
 
-    const stuIdx=SD.students.indexOf(best);
+    const stuIdx = SD.students.indexOf(best);
+    const triples = findTriples(nums.map(Number));
 
-    // Parse scores from numbers found
-    // Strategy: find numbers ≤40 (likely CA) and ≤60 (likely Exam)
-    // Filter out obvious non-scores (S/N like 1,2,3 at start)
-    const scores=nums.map(Number).filter(n=>n<=100&&n>=0);
-    
-    let ca=null, exam=null;
-    // Try to identify CA (≤40) and Exam (≤60)
-    // Look for two numbers where first≤40 and second≤60
-    for(let i=0;i<scores.length-1;i++){
-      if(scores[i]<=40&&scores[i+1]<=60){
-        ca=scores[i]; exam=scores[i+1]; break;
-      }
+    if(!triples.length){
+      // Fallback: any two numbers ≤40/≤60 
+      const ns = nums.map(Number).filter(n=>n>0&&n<=100);
+      const ca  = ns.find(n=>n<=40)||null;
+      const ex  = ns.find(n=>n>ca&&n<=60)||null;
+      results.push({stuIdx,name:best.name,ca,exam:ex,
+        total:ca&&ex?ca+ex:null,raw:line,status:'review',
+        note:'Scores unclear — check manually',sim:Math.round(bestScore*100)});
+      return;
     }
-    // If only one number found and ≤100, treat as total — infer if possible
-    if(ca===null&&exam===null&&scores.length>=1){
-      const total=scores.find(n=>n<=100);
-      if(total!==undefined){
-        // Can't split — flag for manual review
-        results.push({stuIdx,name:best.name,ca:null,exam:null,total,raw:line,
-          status:'review', note:'Only total found — enter CA/Exam manually'});
-        return;
-      }
-    }
-    if(ca===null&&exam===null)return;
 
-    results.push({stuIdx,name:best.name,ca,exam,
-      total:(ca||0)+(exam||0),raw:line,status:'ok',sim:Math.round(bestScore*100)});
+    // Pick the triple for the requested term (1st biggest = term 1, 2nd = term 2, etc.)
+    const termTriple = triples[term-1] || triples[0];
+    const [ca, exam, total] = termTriple;
+
+    results.push({stuIdx,name:best.name,ca,exam,total,
+      raw:line,status:'ok',sim:Math.round(bestScore*100),
+      altTriples: triples.slice(0,3)});
   });
 
   return results;
 }
+
 
 function renderSocrPreview(results, sub){
   const ok=results.filter(r=>r.status==='ok');
@@ -1826,21 +1856,36 @@ function renderSocrPreview(results, sub){
         <div style="font-size:0.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
           ${esc(r.name)}${r.status==='review'?'<span style="color:var(--warn);font-size:0.65rem;"> ⚠️</span>':''}
         </div>
-        <input type="number" min="0" max="40" value="${r.ca!==null?r.ca:''}" inputmode="numeric"
+        <input type="number" min="0" max="50" value="${r.ca!==null?r.ca:''}" inputmode="numeric"
           placeholder="CA" id="socr-ca-${i}"
           oninput="socrUpdateTotal(${i})"
           style="text-align:center;margin:0;padding:0.3rem 0.15rem;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;${r.ca===null?'border-color:var(--warn);':''}">
-        <input type="number" min="0" max="60" value="${r.exam!==null?r.exam:''}" inputmode="numeric"
+        <input type="number" min="0" max="65" value="${r.exam!==null?r.exam:''}" inputmode="numeric"
           placeholder="Exam" id="socr-ex-${i}"
           oninput="socrUpdateTotal(${i})"
           style="text-align:center;margin:0;padding:0.3rem 0.15rem;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;${r.exam===null?'border-color:var(--warn);':''}">
         <div id="socr-tot-${i}" style="text-align:center;font-weight:700;font-size:0.82rem;color:${(r.ca||0)+(r.exam||0)>=70?'var(--money)':'var(--text)'};">
           ${r.ca!==null&&r.exam!==null?(r.ca+r.exam):'—'}
         </div>
-      </div>`;
+      </div>
+      ${r.altTriples&&r.altTriples.length>1?`<div style="grid-column:1/-1;padding:0 0 0.3rem 0;display:flex;gap:4px;flex-wrap:wrap;">
+        <span style="font-size:0.65rem;color:var(--sub);">Other reads:</span>
+        ${r.altTriples.slice(1).map(([a,b,c],ti)=>
+          `<button onclick="socrPickAlt(${i},${a},${b})" style="font-size:0.65rem;padding:2px 6px;border:1px solid var(--border);border-radius:10px;background:var(--s2);cursor:pointer;">
+            CA:${a} Ex:${b} Tot:${c}</button>`).join('')}
+      </div>`:''}`;
     }).join('')}`;
 
   $('socr-save-btn').style.display='block';
+}
+
+
+function socrPickAlt(i, ca, exam){
+  const caEl  = document.getElementById('socr-ca-'+i);
+  const exEl  = document.getElementById('socr-ex-'+i);
+  if(caEl)  caEl.value  = ca;
+  if(exEl)  exEl.value  = exam;
+  socrUpdateTotal(i);
 }
 
 function socrUpdateTotal(i){
