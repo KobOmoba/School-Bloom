@@ -478,7 +478,11 @@ function toggleEye(inputId, btn) {
         <div style="font-weight:800;font-size:1rem;" id="prof-name">Student</div>
         <div style="font-size:0.75rem;opacity:0.85;" id="prof-meta">—</div>
       </div>
-      <button class="mclose" onclick="closeM('student-modal')">×</button>
+      <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;">
+        <button onclick="editStudent(activeIdx)" title="Edit student" style="background:none;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:0.82rem;color:inherit;">✏️</button>
+        <button onclick="deleteStudent(activeIdx)" title="Delete student" style="background:none;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:0.82rem;color:inherit;">🗑️</button>
+        <button class="mclose" onclick="closeM('student-modal')">×</button>
+      </div>
     </div>
     <div class="profile-tabs">
       <button class="ptab on" data-pt="fees" onclick="setTab('fees')">💰 Fees</button>
