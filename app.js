@@ -10,7 +10,7 @@ try{
 
 // ── State ──────────────────────────────────────────────────────────────────
 let schoolId=null,userRole=null;
-let SD={config:{},students:[],staff:[],expenses:[],attendance:{},sports:{teams:{},custom:[]},arts:{gallery:[]},music:{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]};
+let SD={config:{},students:[],staff:[],expenses:[],attendance:{},scores:{},affective:{},sports:{teams:{},custom:[]},arts:{gallery:[]},music:{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]};
 let activeIdx=null,activeTab='fees',currentSport='football';
 
 // ── Sync Queue — Offline-First ────────────────────────────────────────────
@@ -290,7 +290,7 @@ function go(tab){
   document.querySelectorAll('.nlink').forEach(b=>b.classList.remove('on'));
   $(`sec-${tab}`).classList.add('on');
   const btn=document.querySelector(`[data-t="${tab}"]`);if(btn)btn.classList.add('on');
-  const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps};
+  const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard};
   if(fn[tab])fn[tab]();
 }
 
@@ -782,6 +782,202 @@ async function markAtt(idx,date,status){
 
 // SCORES TAB
 function buildScores(s,idx){
+  const subs = SD.config.subjects || ['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const terms = ['Term 1','Term 2','Term 3'];
+  const curTerm = SD.config.currentTerm || 'Term 1';
+
+  // scores structure: SD.scores[term][studentId][subject] = {ca1,ca2,ca3,exam}
+  const sid = s.id || idx;
+  const gradeRow = (tot) => {
+    const {g,r} = gradeScore(tot);
+    const col = g==='A'?'var(--money)':g==='B'?'#2563eb':g==='C'?'var(--warn)':g==='D'?'orange':'var(--danger)';
+    return `<span style="font-weight:700;color:${col};font-size:0.8rem;">${g}</span>`;
+  };
+
+  const termTabs = terms.map(t =>
+    `<button class="chip ${t===curTerm?'active':''}" onclick="scorecardSetTerm('${t}',${idx})" 
+      style="padding:4px 10px;font-size:0.75rem;border-radius:20px;border:1px solid var(--border);
+      background:${t===curTerm?'var(--brand)':'var(--s2)'};color:${t===curTerm?'white':'var(--text)'};cursor:pointer;margin:0 2px;">${t}</button>`
+  ).join('');
+
+  const buildTermTable = (term) => {
+    const termData = (SD.scores[term]||{})[sid] || {};
+    let totalSum=0, subCount=0;
+    const rows = subs.map(sub => {
+      const v = termData[sub] || {ca1:0,ca2:0,ca3:0,exam:0};
+      const caT = (v.ca1||0)+(v.ca2||0)+(v.ca3||0);
+      const tot = caT + (v.exam||0);
+      if(tot>0){totalSum+=tot;subCount++;}
+      const {g,r} = gradeScore(tot);
+      return `<tr>
+        <td style="font-weight:600;font-size:0.76rem;max-width:90px;">${esc(sub)}</td>
+        <td><input type="number" min="0" max="10" value="${v.ca1||''}" placeholder="0"
+          onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)"
+          style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+        <td><input type="number" min="0" max="10" value="${v.ca2||''}" placeholder="0"
+          onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)"
+          style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+        <td><input type="number" min="0" max="10" value="${v.ca3||''}" placeholder="0"
+          onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)"
+          style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+        <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);">${caT||''}</td>
+        <td><input type="number" min="0" max="70" value="${v.exam||''}" placeholder="0"
+          onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)"
+          style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+        <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;
+          color:${tot>=70?'var(--money)':tot>=50?'var(--text)':'var(--danger)'};">${tot||''}</td>
+        <td>${tot>0?gradeRow(tot):''}</td>
+      </tr>`;
+    }).join('');
+    const avg = subCount ? Math.round(totalSum/subCount) : 0;
+    const {g:ag,r:ar} = gradeScore(avg);
+    return `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <table class="stbl" style="font-size:0.78rem;min-width:500px;">
+        <thead><tr>
+          <th>Subject</th><th style="font-size:0.7rem;">1st<br>CA/10</th>
+          <th style="font-size:0.7rem;">2nd<br>CA/10</th><th style="font-size:0.7rem;">3rd<br>CA/10</th>
+          <th style="font-size:0.7rem;">CA<br>Total</th><th style="font-size:0.7rem;">Exam<br>/70</th>
+          <th style="font-size:0.7rem;">Total<br>/100</th><th>Grd</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        ${subCount>0?`<tfoot><tr style="background:var(--s2);">
+          <td colspan="6" style="font-weight:700;font-size:0.8rem;">Class Average</td>
+          <td style="font-weight:800;color:var(--brand);">${avg}</td>
+          <td>${gradeRow(avg)}</td></tr></tfoot>`:''}
+      </table>
+    </div>`;
+  };
+
+  // Affective domain
+  const aff = ((SD.affective||{})[sid]||{})[curTerm] || {};
+  const affTraits = ['Punctuality','Neatness','Attentiveness','Honesty','Politeness','Relationship with others'];
+  const psyTraits = ['Handwriting','Sports Ability','Drawing & Craft','Class Participation'];
+  const ratingStars = (trait,val,type) =>
+    [5,4,3,2,1].map(n=>`<label style="cursor:pointer;font-size:1.1rem;color:${(val||0)>=n?'#f59e0b':'var(--border)'};"
+      onclick="updateAffective(${idx},'${curTerm}','${type}_${trait}',${n})">★</label>`).join('');
+
+  const affRows = affTraits.map(t=>
+    `<tr><td style="font-size:0.8rem;">${t}</td><td>${ratingStars(t,(aff['aff_'+t]||0),'aff')}</td></tr>`
+  ).join('');
+  const psyRows = psyTraits.map(t=>
+    `<tr><td style="font-size:0.8rem;">${t}</td><td>${ratingStars(t,(aff['psy_'+t]||0),'psy')}</td></tr>`
+  ).join('');
+
+  return `<div class="card" style="padding:0.75rem 0.5rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.65rem;flex-wrap:wrap;gap:0.4rem;">
+      <div class="ct" style="margin:0;">📚 Scores</div>
+      <div id="score-term-tabs-${idx}">${termTabs}</div>
+    </div>
+    <div id="score-table-${idx}">${buildTermTable(curTerm)}</div>
+    <button class="btn-brand" style="margin-top:0.5rem;width:100%;" onclick="saveScores(${idx})">💾 Save Scores</button>
+
+    <div class="ct" style="margin-top:1rem;">🌟 Behavioural Assessment (${curTerm})</div>
+    <p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.5rem;">Rate each trait ★★★★★ (5=Excellent, 1=Needs Work)</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
+      <div>
+        <div style="font-size:0.72rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;">AFFECTIVE DOMAIN</div>
+        <table class="stbl" style="font-size:0.78rem;">${affRows}</table>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;">PSYCHOMOTOR SKILLS</div>
+        <table class="stbl" style="font-size:0.78rem;">${psyRows}</table>
+      </div>
+    </div>
+    <button class="btn-ghost" style="margin-top:0.5rem;width:100%;" onclick="printReportCard(${idx},'${curTerm}')">🖨️ Print Report Card</button>
+  </div>`;
+}
+
+function scorecardSetTerm(term,idx){
+  // Switch term tab in student score view
+  const subs = SD.config.subjects || ['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const sid = SD.students[idx]?.id || idx;
+  const termData = (SD.scores[term]||{})[sid] || {};
+  // Rebuild table
+  buildScores(SD.students[idx], idx); // Easiest: re-render whole tab
+  const tabContent = document.getElementById('prof-tab-content');
+  if(tabContent) tabContent.innerHTML = buildScores(SD.students[idx], idx);
+  // Update tab button styles
+  ['Term 1','Term 2','Term 3'].forEach(t=>{
+    const btn = document.querySelector(`[onclick*="scorecardSetTerm('${t}'"]`);
+    if(btn){
+      btn.style.background = t===term ? 'var(--brand)' : 'var(--s2)';
+      btn.style.color = t===term ? 'white' : 'var(--text)';
+    }
+  });
+}
+
+
+// FEES TAB
+function buildFees(s,idx){
+  const owe=(s.totalFee||0)-(s.paid||0);
+  const pct=s.totalFee?Math.min(100,Math.round(((s.paid||0)/s.totalFee)*100)):0;
+  return`<div class="card" style="margin-bottom:0.65rem;"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.65rem;">
+    <div class="stat"><div class="sn" style="font-size:1rem;">${fmt(s.totalFee||0)}</div><div class="sl">Fee</div></div>
+    <div class="stat"><div class="sn" style="font-size:1rem;color:var(--money);">${fmt(s.paid||0)}</div><div class="sl">Paid</div></div>
+    <div class="stat"><div class="sn" style="font-size:1rem;color:var(--danger);">${fmt(owe)}</div><div class="sl">Owing</div></div>
+    </div><div class="prog-bg"><div class="prog-fill" style="width:${pct}%;"></div></div>
+    <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% paid</div></div>
+    <div class="card"><div class="ct">Record Payment</div>
+    <label>Amount (₦)</label><input type="number" id="pay-amt" placeholder="e.g. 25000">
+    <label>Method</label><select id="pay-method"><option>Bank Transfer</option><option>Cash</option><option>POS</option><option>Online</option></select>
+    <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
+    <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
+    ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
+    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${s.paymentHistory.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span>${p.date} · ${p.method}</span><strong style="color:var(--money);">${fmt(p.amount)}</strong></div>`).join('')}</div>`:''}
+    </div>`;
+}
+
+async function recordPayment(idx){
+  const amt=parseFloat($('pay-amt')?.value);if(!amt||amt<=0)return alert('Enter valid amount.');
+  SD.students[idx].paid=(SD.students[idx].paid||0)+amt;
+  if(!SD.students[idx].paymentHistory)SD.students[idx].paymentHistory=[];
+  SD.students[idx].paymentHistory.unshift({amount:amt,method:$('pay-method')?.value||'Cash',date:$('pay-date')?.value||new Date().toISOString().split('T')[0],by:userRole});
+  await SQ.push('students',SD.students);
+  $('pay-amt').value='';renderTab('fees');renderBanner();renderRevenue();
+  alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
+}
+
+// ATTENDANCE TAB
+function buildAttendance(s){
+  const days=[];for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()-i);days.push(d.toISOString().split('T')[0]);}
+  const att=SD.attendance||{};
+  const today=days[0];
+  const present=days.filter(d=>att[d]?.[s.name]==='Present').length;
+  const absent=days.filter(d=>att[d]?.[s.name]==='Absent').length;
+  const late=days.filter(d=>att[d]?.[s.name]==='Late').length;
+  const pct=days.length>0?Math.round((present/days.length)*100):0;
+  return`<div class="card" style="margin-bottom:0.65rem;"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;">
+    <div class="stat"><div class="sn" style="color:var(--money);">${present}</div><div class="sl">Present</div></div>
+    <div class="stat"><div class="sn" style="color:var(--danger);">${absent}</div><div class="sl">Absent</div></div>
+    <div class="stat"><div class="sn" style="color:var(--warn);">${late}</div><div class="sl">Late</div></div>
+    </div><div class="prog-bg" style="margin-top:0.65rem;"><div class="prog-fill" style="width:${pct}%;"></div></div>
+    <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% attendance (last 14 days)</div></div>
+    <div class="card"><div class="ct">📅 Mark Today (${today})</div>
+    <div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">
+      <button class="btn-money btn-sm" onclick="markAtt(${activeIdx},'${today}','Present')">✅ Present</button>
+      <button class="btn-danger btn-sm" onclick="markAtt(${activeIdx},'${today}','Absent')">❌ Absent</button>
+      <button style="background:var(--warn);color:white;width:auto;padding:0.32rem 0.7rem;font-size:0.73rem;display:inline-block;margin:0;border-radius:10px;font-weight:700;cursor:pointer;" onclick="markAtt(${activeIdx},'${today}','Late')">⏰ Late</button>
+    </div>
+    <div>${days.map(d=>{const st=att[d]?.[s.name]||null;const cls=st==='Present'?'chip-ok':st==='Absent'?'chip-bad':st==='Late'?'chip-warn':'';return`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;"><span>${d}</span>${st?`<span class="chip ${cls}">${st}</span>`:'<span style="color:var(--sub);font-size:0.7rem;">—</span>'}</div>`;}).join('')}</div></div>`;
+}
+
+async function markAtt(idx,date,status){
+  const s=SD.students[idx];if(!s)return;
+  if(!SD.attendance)SD.attendance={};
+  if(!SD.attendance[date])SD.attendance[date]={};
+  SD.attendance[date][s.name]=status;
+  await SQ.push('attendance',SD.attendance);
+  renderTab('attendance');
+}
+
+// SCORES TAB
+function buildScores(s,idx){
   const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
       'Social Studies','Civic Education','Cultural & Creative Arts',
       'Computer Science','Physical & Health Education','Agricultural Science',
@@ -801,1462 +997,327 @@ function buildScores(s,idx){
     <button class="btn-brand" onclick="saveScores(${idx})">💾 Save Scores</button></div>`;
 }
 
-async function updateScore(idx,sub,type,val){
-  if(!SD.students[idx].scores)SD.students[idx].scores={};
-  if(!SD.students[idx].scores[sub])SD.students[idx].scores[sub]={ca:0,exam:0};
-  SD.students[idx].scores[sub][type]=Math.min(type==='ca'?40:60,Math.max(0,parseFloat(val)||0));
+async function updateScore(idx,term,sub,field,val){
+  const sid = SD.students[idx]?.id || idx;
+  if(!SD.scores[term]) SD.scores[term]={};
+  if(!SD.scores[term][sid]) SD.scores[term][sid]={};
+  if(!SD.scores[term][sid][sub]) SD.scores[term][sid][sub]={ca1:0,ca2:0,ca3:0,exam:0};
+  SD.scores[term][sid][sub][field] = parseInt(val)||0;
 }
 
-async function saveScores(idx){await SQ.push('students',SD.students);alert('✅ Scores saved!');renderTab('scores');}
+function updateAffective(idx,term,key,val){
+  const sid = SD.students[idx]?.id || idx;
+  if(!SD.affective[sid]) SD.affective[sid]={};
+  if(!SD.affective[sid][term]) SD.affective[sid][term]={};
+  SD.affective[sid][term][key] = val;
+  saveLocal('affective', SD.affective);
+  SQ.push({key:'affective', data:SD.affective});
+}
 
-// REPORT CARD TAB
-function buildReport(s){
+
+// ══════════════════════════════════════════════════════════════════════════
+// SCORECARD / BROADSHEET MODULE
+// ══════════════════════════════════════════════════════════════════════════
+
+function getGrade(tot){
+  if(tot>=70)return{g:'A',r:'Excellent',col:'var(--money)'};
+  if(tot>=60)return{g:'B',r:'Very Good',col:'#2563eb'};
+  if(tot>=50)return{g:'C',r:'Good',col:'var(--warn)'};
+  if(tot>=40)return{g:'D',r:'Fair',col:'orange'};
+  return{g:'F',r:'Fail',col:'var(--danger)'};
+}
+
+function calcStudentTermStats(sid,term,subs){
+  const td=(SD.scores[term]||{})[sid]||{};
+  let total=0,count=0;const perSub={};
+  subs.forEach(sub=>{
+    const v=td[sub]||{ca1:0,ca2:0,ca3:0,exam:0};
+    const caT=(v.ca1||0)+(v.ca2||0)+(v.ca3||0);
+    const tot=caT+(v.exam||0);
+    perSub[sub]={caT,exam:v.exam||0,tot};
+    if(tot>0){total+=tot;count++;}
+  });
+  const avg=count?Math.round(total/count):0;
+  return{perSub,total,count,avg};
+}
+
+function calcCumulative(sid,subs){
+  const terms=['Term 1','Term 2','Term 3'];const cumSub={};
+  subs.forEach(sub=>{
+    let tSum=0,tCount=0;
+    terms.forEach(term=>{
+      const td=(SD.scores[term]||{})[sid]||{};
+      const v=td[sub]||{ca1:0,ca2:0,ca3:0,exam:0};
+      const tot=(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
+      if(tot>0){tSum+=tot;tCount++;}
+    });
+    cumSub[sub]=tCount?Math.round(tSum/tCount):0;
+  });
+  const totals=Object.values(cumSub).filter(v=>v>0);
+  const avg=totals.length?Math.round(totals.reduce((a,b)=>a+b,0)/totals.length):0;
+  return{cumSub,avg};
+}
+
+function renderScorecard(){
+  const el=document.getElementById('scorecard-content');
+  if(!el)return;
+  const classes=[...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
   const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
-      'Social Studies','Civic Education','Cultural & Creative Arts',
-      'Computer Science','Physical & Health Education','Agricultural Science',
-      'National Values Education','French Language','Home Economics',
-      'Business Studies','Religious Studies'];
-  const sc=s.scores||{};const term=SD.config.currentTerm||'Term 1';const session=SD.config.session||'2025/2026';
-  const sn=SD.config.schoolName||'Educational Bloom School';
-  let total=0,n=0;
-  const rows=subs.map(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);total+=t;n++;const{g,r}=gradeScore(t);return{sub,ca:v.ca||0,exam:v.exam||0,t,g,r};});
-  const avg=n>0?Math.round(total/n):0;const og=gradeScore(avg);
-  const cls=SD.students.filter(x=>x.class===s.class&&x.scores);
-  const pos=cls.map(x=>{let t=0,nn=0;subs.forEach(sub=>{const v=x.scores?.[sub]||{};t+=(v.ca||0)+(v.exam||0);nn++;});return{name:x.name,avg:nn>0?Math.round(t/nn):0};}).sort((a,b)=>b.avg-a.avg).findIndex(x=>x.name===s.name)+1;
-  return`<div class="rc" id="rc-out">
-    <div class="rc-hdr"><div class="rc-school">${esc(sn)}</div><div style="font-size:0.75rem;color:var(--sub);">Session: ${esc(session)} · ${esc(term)}</div>
-    <div style="font-size:0.82rem;margin-top:0.4rem;"><strong>Student:</strong> ${esc(s.name)} &nbsp;|&nbsp; <strong>Class:</strong> ${esc(s.class||'—')} &nbsp;|&nbsp; <strong>Position:</strong> ${pos>0?pos+'/'+cls.length:'—'}</div></div>
-    <table class="rct"><thead><tr><th>Subject</th><th>CA</th><th>Exam</th><th>Total</th><th>Grade</th><th>Remark</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr><td><strong>${esc(r.sub)}</strong></td><td>${r.ca}</td><td>${r.exam}</td><td><strong>${r.t}</strong></td><td class="g${r.g}"><strong>${r.g}</strong></td><td style="font-size:0.72rem;">${r.r}</td></tr>`).join('')}
-    </tbody></table>
-    <div class="rc-foot"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;text-align:center;margin-bottom:0.5rem;">
-      <div><strong>${n}</strong><div style="font-size:0.68rem;color:var(--sub);">Subjects</div></div>
-      <div><strong>${total}</strong><div style="font-size:0.68rem;color:var(--sub);">Total Score</div></div>
-      <div><strong class="g${og.g}">${avg}% (${og.g})</strong><div style="font-size:0.68rem;color:var(--sub);">Average</div></div>
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const activeClass=el.dataset.cls||(classes[0]||'');
+  const activeView=el.dataset.view||'Term 1';
+
+  const classButtons=classes.map(c=>
+    `<button onclick="scorecardSwitchClass('${esc(c)}')"
+      style="padding:5px 12px;border-radius:20px;font-size:0.78rem;border:1px solid var(--border);
+      cursor:pointer;background:${c===activeClass?'var(--brand)':'var(--s2)'};
+      color:${c===activeClass?'white':'var(--text)'};">${esc(c)}</button>`
+  ).join('');
+  const viewTabs=['Term 1','Term 2','Term 3','Cumulative'].map(v=>
+    `<button onclick="scorecardSwitchView('${v}')"
+      style="padding:5px 12px;border-radius:20px;font-size:0.78rem;border:1px solid var(--border);
+      cursor:pointer;background:${v===activeView?'var(--brand)':'var(--s2)'};
+      color:${v===activeView?'white':'var(--text)'};">${v==='Cumulative'?'📊 Cumulative':v}</button>`
+  ).join('');
+
+  const classStudents=SD.students.filter(s=>s.class===activeClass);
+  if(!classStudents.length){
+    el.innerHTML=`<div class="card"><div class="ct">📋 Scorecard</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:1rem;">${classButtons}</div>
+      <p style="color:var(--sub);">No students in this class yet.</p></div>`;
+    return;
+  }
+  const isCum=activeView==='Cumulative';
+  const studentStats=classStudents.map(s=>{
+    const sid=s.id||SD.students.indexOf(s);
+    if(isCum){const{cumSub,avg}=calcCumulative(sid,subs);return{s,sid,perSub:cumSub,avg};}
+    const{perSub,avg}=calcStudentTermStats(sid,activeView,subs);return{s,sid,perSub,avg};
+  });
+  const ranked=[...studentStats].sort((a,b)=>b.avg-a.avg);
+  const posMap={};ranked.forEach((r,i)=>posMap[r.sid]=i+1);
+
+  const subBest={};
+  subs.forEach(sub=>{
+    let best=null,bestScore=0;
+    studentStats.forEach(({s,sid,perSub})=>{
+      const v=isCum?perSub[sub]:(perSub[sub]?.tot||0);
+      if(v>bestScore){bestScore=v;best=s.name;}
+    });
+    if(bestScore>0)subBest[sub]={name:best,score:bestScore};
+  });
+
+  const subHeaders=subs.map(sub=>`<th style="font-size:0.6rem;writing-mode:vertical-lr;transform:rotate(180deg);padding:3px;min-width:26px;">${esc(sub)}</th>`).join('');
+  const rows=studentStats.sort((a,b)=>posMap[a.sid]-posMap[b.sid]).map(({s,sid,perSub,avg})=>{
+    const pos=posMap[sid];
+    const{g,col}=getGrade(avg);
+    const medal=pos===1?'🥇':pos===2?'🥈':pos===3?'🥉':'';
+    const subCells=subs.map(sub=>{
+      const v=isCum?perSub[sub]:(perSub[sub]?.tot||0);
+      const{col:sc}=getGrade(v||0);
+      return`<td style="text-align:center;font-size:0.74rem;font-weight:700;color:${v>0?sc:'var(--border)'};padding:3px 2px;">${v||'–'}</td>`;
+    }).join('');
+    return`<tr><td style="text-align:center;font-weight:700;font-size:0.72rem;color:${col};">${medal}${pos}</td>
+      <td style="font-size:0.74rem;font-weight:600;white-space:nowrap;min-width:110px;">${esc(s.name)}</td>
+      ${subCells}
+      <td style="text-align:center;font-weight:800;font-size:0.82rem;color:${col};">${avg||'–'}</td>
+      <td style="text-align:center;"><span style="font-weight:700;font-size:0.74rem;color:${col};">${avg>0?g:'–'}</span></td></tr>`;
+  }).join('');
+
+  const top3=ranked.filter(r=>r.avg>0).slice(0,3);
+  const honoursCards=top3.map((r,i)=>{
+    const medals=['🥇','🥈','🥉'];const labels=['Best Student','2nd','3rd'];
+    const{col}=getGrade(r.avg);
+    return`<div style="background:var(--s2);border-radius:10px;padding:0.5rem 0.7rem;border:1px solid var(--border);flex:1;min-width:90px;text-align:center;">
+      <div style="font-size:1.3rem;">${medals[i]}</div>
+      <div style="font-size:0.68rem;color:var(--sub);">${labels[i]}</div>
+      <div style="font-weight:800;font-size:0.8rem;">${esc(r.s.name)}</div>
+      <div style="font-weight:700;font-size:0.76rem;color:${col};">Avg: ${r.avg}</div></div>`;
+  }).join('');
+
+  el.dataset.cls=activeClass;el.dataset.view=activeView;
+  el.innerHTML=`<div class="card" style="padding:0.75rem 0.5rem;">
+    <div class="ct">📋 Scorecard / Broadsheet</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:0.5rem;">${classButtons}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:0.7rem;">${viewTabs}</div>
+    ${top3.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.7rem;">${honoursCards}</div>`:''}
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:8px;">
+      <table class="stbl" style="font-size:0.74rem;min-width:600px;border-collapse:collapse;">
+        <thead><tr style="background:var(--s1);">
+          <th style="font-size:0.68rem;min-width:28px;">#</th>
+          <th style="font-size:0.68rem;text-align:left;min-width:110px;">Name</th>
+          ${subHeaders}
+          <th style="font-size:0.68rem;min-width:36px;">Avg</th>
+          <th style="font-size:0.68rem;min-width:28px;">Grd</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>
-    <div style="font-size:0.8rem;"><strong>Remark:</strong> ${og.r}. ${avg>=70?'Keep up the excellent work!':avg>=50?'Good effort — work harder next term.':'More effort needed. Please study consistently.'}</div></div>
-    <div style="display:flex;justify-content:space-between;margin-top:0.75rem;font-size:0.72rem;color:var(--sub);"><span>Class Teacher: ___________</span><span>Principal: ___________</span></div>
-  </div>
-  <div style="display:flex;gap:0.4rem;margin-top:0.65rem;">
-    <button class="btn-brand" onclick="printRC()">🖨️ Print</button>
-    <button class="btn-wa" onclick="sendRC(${activeIdx})">📲 Send via WhatsApp</button>
+    ${Object.keys(subBest).length?`<div class="ct" style="margin-top:0.9rem;">🏆 Subject Champions</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:0.3rem;">
+      ${Object.entries(subBest).map(([sub,{name,score}])=>
+        `<div style="background:var(--s2);border-radius:7px;padding:3px 8px;font-size:0.7rem;border:1px solid var(--border);">
+          <span style="color:var(--sub);">${esc(sub)}:</span> <strong>${esc(name)}</strong> (${score})</div>`
+      ).join('')}
+    </div>`:''}
+    <div style="display:flex;gap:0.5rem;margin-top:0.7rem;flex-wrap:wrap;">
+      <button class="btn-ghost" onclick="printBroadsheet('${esc(activeClass)}','${activeView}')">🖨️ Print Broadsheet</button>
+      <button class="btn-brand" onclick="go('students')">📝 Enter Scores</button>
+    </div>
   </div>`;
 }
 
-function printRC(){
-  const c=$('rc-out');if(!c)return;
-  const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card</title><style>body{font-family:sans-serif;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{padding:7px;border:1px solid #ccc;font-size:12px;}th{background:#4f46e5;color:white;}.rc-school{font-size:16px;font-weight:800;color:#4f46e5;text-align:center;}.gA{color:#166534;font-weight:700;}.gB{color:#065f46;font-weight:700;}.gC{color:#92400e;font-weight:700;}.gF{color:#dc2626;font-weight:700;}</style></head><body>${c.innerHTML}<script>window.onload=()=>window.print();<\/script></body></html>`);
+function scorecardSwitchClass(cls){const el=document.getElementById('scorecard-content');if(!el)return;el.dataset.cls=cls;renderScorecard();}
+function scorecardSwitchView(view){const el=document.getElementById('scorecard-content');if(!el)return;el.dataset.view=view;renderScorecard();}
+
+function printReportCard(idx,term){
+  const s=SD.students[idx];if(!s)return;
+  const sid=s.id||idx;
+  const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const termData=(SD.scores[term]||{})[sid]||{};
+  const aff=((SD.affective||{})[sid]||{})[term]||{};
+  const cfg=SD.config;
+  const classStudents=SD.students.filter(st=>st.class===s.class);
+  const allAvgs=classStudents.map(st=>{
+    const stid=st.id||SD.students.indexOf(st);
+    const{avg}=calcStudentTermStats(stid,term,subs);
+    return{name:st.name,avg};
+  }).sort((a,b)=>b.avg-a.avg);
+  const myPos=(allAvgs.findIndex(r=>r.name===s.name)+1)||'–';
+
+  const rows=subs.map(sub=>{
+    const v=termData[sub]||{ca1:0,ca2:0,ca3:0,exam:0};
+    const caT=(v.ca1||0)+(v.ca2||0)+(v.ca3||0);
+    const tot=caT+(v.exam||0);
+    const{g}=getGrade(tot);
+    const subRanked=classStudents.map(st=>{
+      const stid=st.id||SD.students.indexOf(st);
+      const sv=(SD.scores[term]||{})[stid]||{};
+      const svs=sv[sub]||{};
+      const stot=(svs.ca1||0)+(svs.ca2||0)+(svs.ca3||0)+(svs.exam||0);
+      return{name:st.name,tot:stot};
+    }).sort((a,b)=>b.tot-a.tot);
+    const sPos=(subRanked.findIndex(r=>r.name===s.name)+1)||'–';
+    return`<tr><td>${sub}</td><td>${v.ca1||''}</td><td>${v.ca2||''}</td><td>${v.ca3||''}</td>
+      <td>${caT||''}</td><td>${v.exam||''}</td>
+      <td style="font-weight:700;color:${tot>=70?'green':tot>=50?'#333':'red'};">${tot||''}</td>
+      <td style="font-weight:700;">${tot>0?g:''}</td><td>${tot>0?sPos:''}</td></tr>`;
+  }).join('');
+
+  const totals=subs.map(sub=>{const v=termData[sub]||{};return(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);}).filter(v=>v>0);
+  const avg=totals.length?Math.round(totals.reduce((a,b)=>a+b,0)/totals.length):0;
+  const affTraits=['Punctuality','Neatness','Attentiveness','Honesty','Politeness','Relationship with others'];
+  const psyTraits=['Handwriting','Sports Ability','Drawing & Craft','Class Participation'];
+  const stars=n=>['','★','★★','★★★','★★★★','★★★★★'][n]||'–';
+  const affRows=affTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['aff_'+t]||0)}</td></tr>`).join('');
+  const psyRows=psyTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['psy_'+t]||0)}</td></tr>`).join('');
+  const daysPresent=Object.values(SD.attendance[s.name]||{}).filter(v=>v==='present').length;
+
+  const w=window.open('','_blank','width=800,height=1100');
+  if(!w)return alert('Please allow popups to print.');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card</title>
+  <style>body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#111;font-size:11.5px;}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:12px;}
+  .hdr h1{font-size:17px;margin:3px 0;}.hdr h2{font-size:12px;margin:2px 0;color:#555;}
+  .ig{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:10px;}
+  .sm{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:8px 0;}
+  .sb{border:1px solid #ccc;border-radius:4px;padding:5px;text-align:center;}
+  .sv{font-size:15px;font-weight:800;color:#2563eb;}
+  table{width:100%;border-collapse:collapse;margin-bottom:10px;}
+  th,td{border:1px solid #bbb;padding:3px 5px;}th{background:#f0f0f0;font-size:10.5px;}
+  .st{font-weight:700;font-size:11px;background:#e8e8e8;padding:3px 5px;margin:8px 0 3px;}
+  .rg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;}
+  .rb{border:1px solid #ccc;border-radius:4px;padding:6px;min-height:45px;}
+  .gk{display:flex;gap:5px;flex-wrap:wrap;font-size:9.5px;margin:5px 0;}
+  .gki{padding:2px 5px;border-radius:3px;}
+  @media print{button{display:none;}}</style>
+  </head><body>
+  <div class="hdr"><h1>${esc(cfg.schoolName||'School')}</h1>
+  <h2>Report Card — ${term} &nbsp;|&nbsp; ${cfg.session||''}</h2></div>
+  <div class="ig">
+    <div><b>Student:</b> ${esc(s.name)}</div><div><b>Class:</b> ${esc(s.class||'')}</div>
+    <div><b>Admission No:</b> ${esc(s.admissionNo||'–')}</div><div><b>Term:</b> ${term}</div>
+    <div><b>Days Opened:</b> ${cfg.daysOpened||'–'}</div><div><b>Days Present:</b> ${daysPresent}</div>
+  </div>
+  <div class="sm">
+    <div class="sb"><div class="sv">${avg||'–'}</div>Average</div>
+    <div class="sb"><div class="sv">${avg>0?getGrade(avg).g:'–'}</div>Grade</div>
+    <div class="sb"><div class="sv">${myPos}</div>Position</div>
+    <div class="sb"><div class="sv">${classStudents.length}</div>In Class</div>
+  </div>
+  <div class="st">ACADEMIC PERFORMANCE</div>
+  <table><thead><tr><th>Subject</th><th>1st CA</th><th>2nd CA</th><th>3rd CA</th>
+    <th>CA /30</th><th>Exam /70</th><th>Total /100</th><th>Grade</th><th>Pos.</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="gk"><b>Grades:</b>
+    <span class="gki" style="background:#d1fae5;">A 70-100 Excellent</span>
+    <span class="gki" style="background:#dbeafe;">B 60-69 Very Good</span>
+    <span class="gki" style="background:#fef9c3;">C 50-59 Good</span>
+    <span class="gki" style="background:#ffedd5;">D 40-49 Fair</span>
+    <span class="gki" style="background:#fee2e2;">F 0-39 Fail</span></div>
+  <div class="rg">
+    <div><div class="st">AFFECTIVE DOMAIN</div>
+    <table><thead><tr><th>Trait</th><th>Rating</th></tr></thead><tbody>${affRows}</tbody></table></div>
+    <div><div class="st">PSYCHOMOTOR SKILLS</div>
+    <table><thead><tr><th>Skill</th><th>Rating</th></tr></thead><tbody>${psyRows}</tbody></table></div>
+  </div>
+  <div class="rg" style="margin-top:6px;">
+    <div class="rb"><b>Class Teacher's Remark:</b><br><br>____________________</div>
+    <div class="rb"><b>Principal's Comment:</b><br><br>____________________</div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10.5px;">
+    <div>Teacher's Signature: ______________</div>
+    <div>Principal's Signature: ______________</div>
+    <div>Next Term Begins: ______________</div>
+    <div>Parent's Signature: ______________</div>
+  </div>
+  <div style="text-align:center;margin-top:10px;">
+    <button onclick="window.print()" style="padding:7px 18px;cursor:pointer;">🖨️ Print / Save PDF</button>
+  </div></body></html>`);
   w.document.close();
 }
 
-function sendRC(idx){
-  const s=SD.students[idx];const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
-      'Social Studies','Civic Education','Cultural & Creative Arts',
-      'Computer Science','Physical & Health Education','Agricultural Science',
-      'National Values Education','French Language','Home Economics',
-      'Business Studies','Religious Studies'];
-  const sc=s.scores||{};let lines=`📋 *REPORT CARD — ${SD.config.schoolName||'School'}*\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Term:* ${SD.config.currentTerm||'Term 1'}\n\n*SCORES*\n`;
-  subs.forEach(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);lines+=`${sub}: ${t}/100 (${gradeScore(t).g})\n`;});
-  if(s.phone)window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(lines)}`,'_blank');
-  else alert('No phone number for this student.');
-}
-
-// SWOT TAB
-function buildSWOT(s,idx){
-  const sw=s.swot||{};
-  return`<div class="card"><div class="ct">🧠 SWOT Analysis</div>
-    <label>💪 Strengths</label><textarea id="sw-s" rows="2" placeholder="e.g. Excellent in Mathematics, good team player">${esc(sw.strengths||'')}</textarea>
-    <label>🔍 Weaknesses</label><textarea id="sw-w" rows="2" placeholder="e.g. Needs improvement in writing">${esc(sw.weaknesses||'')}</textarea>
-    <label>🚀 Opportunities</label><textarea id="sw-o" rows="2" placeholder="e.g. Ready for STEM track, scholarship potential">${esc(sw.opportunities||'')}</textarea>
-    <label>⚠️ Considerations</label><textarea id="sw-t" rows="2" placeholder="e.g. Financial constraints">${esc(sw.threats||'')}</textarea>
-    <label>💰 Estimated Family Capacity</label><input type="text" id="sw-cap" value="${esc(sw.capacity||'')}" placeholder="e.g. ₦50,000–₦150,000/term">
-    <button class="btn-brand" onclick="saveSWOT(${idx})">💾 Save SWOT</button></div>`;
-}
-
-async function saveSWOT(idx){
-  SD.students[idx].swot={strengths:$('sw-s').value,weaknesses:$('sw-w').value,opportunities:$('sw-o').value,threats:$('sw-t').value,capacity:$('sw-cap').value};
-  await SQ.push('students',SD.students);alert('✅ SWOT saved!');
-}
-
-// ── 3. STAFF ───────────────────────────────────────────────────────────────
-function renderStaff(){
-  const staff=SD.staff||[];const isPrem=SD.config.plan==='premium';const limit=isPrem?'∞':3;
-  $('staff-count').textContent=`${staff.length}/${limit} used (${isPrem?'Premium':'Basic'})`;
-  $('staff-list').innerHTML=staff.map((s,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);font-size:0.85rem;">
-    <div><strong>${esc(s.name)}</strong> <span class="chip chip-ok" style="margin-left:4px;">${s.role}</span><div style="font-size:0.7rem;color:var(--sub);margin-top:2px;">${s.email}</div></div>
-    ${s.role!=='Principal'?`<button class="btn-danger btn-sm" onclick="removeStaff(${i})">🗑️</button>`:'<span style="font-size:0.68rem;color:var(--sub);">Owner</span>'}
-  </div>`).join('');
-  const atLimit=!isPrem&&staff.length>=3;
-  $('staff-upgrade').style.display=atLimit?'block':'none';
-  $('add-staff-modal').querySelector('.btn-brand').style.display=atLimit?'none':'block';
-}
-
-async function addStaff(){
-  const name=$('sf-name').value.trim(),email=$('sf-email').value.trim(),pwd=$('sf-pwd').value,role=$('sf-role').value;
-  if(!name||!email||!pwd)return alert('Fill all fields.');if(pwd.length<4)return alert('Password min 4 chars.');
-  if((SD.staff||[]).find(s=>s.email===email))return alert('Email already registered.');
-  const isPrem=SD.config.plan==='premium';
-  if(!isPrem&&(SD.staff||[]).length>=3){openM('upgrade-modal');return;}
-  if(!SD.staff)SD.staff=[];
-  SD.staff.push({name,email,password:pwd,role});
-  await SQ.push('staff',SD.staff);
-  closeM('add-staff-modal');$('sf-name').value='';$('sf-email').value='';$('sf-pwd').value='';
-  renderStaff();alert(`✅ ${name} added as ${role}.`);
-}
-
-async function removeStaff(idx){
-  if(!confirm(`Remove ${SD.staff[idx].name}?`))return;
-  SD.staff.splice(idx,1);await SQ.push('staff',SD.staff);renderStaff();
-}
-
-// ── 4. SPORTS ─────────────────────────────────────────────────────────────
-function loadSports(){
-  renderCustomSports();renderTeamList();populatePlayerSelect();
-}
-
-function selectSport(key,el){
-  currentSport=key;
-  document.querySelectorAll('.sport-card').forEach(c=>c.classList.remove('sel'));
-  el.classList.add('sel');
-  $('current-sport-label').textContent=el.querySelector('[style*="font-weight"]')?.textContent||key;
-  renderTeamList();
-}
-
-function renderCustomSports(){
-  const cs=SD.sports?.custom||[];
-  const c=$('custom-sports-grid');
-  if(!cs.length){c.innerHTML='';return;}
-  c.innerHTML=cs.map((s,i)=>`<div class="sport-card" onclick="selectCustomSport('cs_${i}','${esc(s.name)}',this)"><div style="font-size:1.3rem;">${s.icon||'🏅'}</div><div style="font-weight:700;font-size:0.85rem;">${esc(s.name)}</div><div style="font-size:0.7rem;color:var(--sub);">${esc(s.desc||'')}</div><button class="btn-danger btn-sm" style="margin-top:0.4rem;" onclick="event.stopPropagation();deleteCustomSport(${i})">🗑️</button></div>`).join('');
-}
-
-function selectCustomSport(key,name,el){
-  currentSport=key;document.querySelectorAll('.sport-card').forEach(c=>c.classList.remove('sel'));el.classList.add('sel');$('current-sport-label').textContent=name;renderTeamList();
-}
-
-async function addCustomSport(){
-  const name=$('cs-name').value.trim(),icon=$('cs-icon').value.trim()||'🏅',desc=$('cs-desc').value.trim();
-  if(!name)return alert('Enter sport name.');
-  if(!SD.sports)SD.sports={teams:{},custom:[]};if(!SD.sports.custom)SD.sports.custom=[];
-  SD.sports.custom.push({name,icon,desc});
-  await SQ.push('sports',SD.sports);closeM('custom-sport-modal');
-  $('cs-name').value='';$('cs-icon').value='';$('cs-desc').value='';renderCustomSports();
-}
-
-async function deleteCustomSport(idx){
-  if(!confirm('Delete this sport?'))return;
-  SD.sports.custom.splice(idx,1);await SQ.push('sports',SD.sports);renderCustomSports();
-}
-
-function renderTeamList(){
-  const team=SD.sports?.teams?.[currentSport]||[];
-  $('team-list').innerHTML=team.length===0?'<p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:0.75rem;">No players in this team yet.</p>':team.map((p,i)=>`<div class="team-row"><div class="team-av">${p.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div style="font-weight:700;font-size:0.85rem;">${esc(p.name)}</div><div style="font-size:0.7rem;color:var(--sub);">${p.pos||'Player'} · #${p.num||'?'}</div></div><button class="btn-danger btn-sm" onclick="removePlayer(${i})">🗑️</button></div>`).join('');
-}
-
-function populatePlayerSelect(){
-  const sel=$('player-sel');sel.innerHTML='<option value="">— Choose student —</option>';
-  SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});
-}
-
-async function addPlayer(){
-  const idx=$('player-sel').value,pos=$('player-pos').value.trim(),num=$('player-num').value;
-  if(!idx&&idx!==0)return alert('Select a student.');
-  const s=SD.students[parseInt(idx)];if(!s)return;
-  if(!SD.sports)SD.sports={teams:{},custom:[]};if(!SD.sports.teams)SD.sports.teams={};
-  if(!SD.sports.teams[currentSport])SD.sports.teams[currentSport]=[];
-  SD.sports.teams[currentSport].push({name:s.name,pos:pos||'Player',num:num||'?'});
-  await SQ.push('sports',SD.sports);closeM('add-player-modal');renderTeamList();
-}
-
-async function removePlayer(idx){
-  if(!confirm('Remove?'))return;
-  SD.sports.teams[currentSport].splice(idx,1);await SQ.push('sports',SD.sports);renderTeamList();
-}
-
-function recordMatchResult(){
-  const opp=prompt('Opponent school:');if(!opp)return;
-  const us=parseInt(prompt('Our score:')||'0'),them=parseInt(prompt(`${opp} score:`)||'0');
-  const res=us>them?'🏆 Win':us<them?'❌ Loss':'🤝 Draw';
-  const d=new Date().toLocaleDateString('en-NG',{weekday:'short',day:'numeric',month:'short'});
-  $('fixtures-list').insertAdjacentHTML('afterbegin',`<div class="fixture"><div style="font-size:0.72rem;color:var(--sub);">${d} · Result recorded</div><div style="font-weight:600;">Our School ${us}–${them} ${esc(opp)}</div><div style="font-size:0.78rem;color:var(--money);">${res} · ${$('current-sport-label').textContent}</div></div>`);
-  alert(`✅ ${res} — Our School ${us}–${them} ${opp}`);
-}
-
-// ── 5. ARTS ────────────────────────────────────────────────────────────────
-function renderArts(){
-  const gallery=SD.arts?.gallery||[];
-  const sel=$('art-stu-sel');sel.innerHTML='<option value="">— Choose student —</option>';
-  SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});
-  let html=`<div class="art-card" onclick="openM('add-artwork-modal')"><div class="art-prev" style="background:#f1f5f9;color:var(--sub);font-size:2rem;">➕</div><div class="art-info"><div class="art-title">Add Artwork</div><div class="art-stu">Tap to add</div></div></div>`;
-  gallery.slice().reverse().forEach((a,i)=>{
-    const ic=a.medium==='Drawing'?'✏️':a.medium==='Painting'?'🎨':a.medium==='Sculpture'?'🗿':'🖼️';
-    html+=`<div class="art-card" onclick="viewArtwork(${gallery.length-1-i})"><div class="art-prev">${ic}</div><div class="art-info"><div class="art-title">${esc(a.title)}</div><div class="art-stu">by ${esc(a.studentName)}</div></div></div>`;
-  });
-  $('art-gallery').innerHTML=html;
-}
-
-async function saveArtwork(){
-  const si=$('art-stu-sel').value,title=$('art-title').value.trim(),medium=$('art-medium').value,desc=$('art-desc').value.trim();
-  if(!si||!title)return alert('Select student and enter title.');
-  const s=SD.students[parseInt(si)];if(!s)return;
-  if(!SD.arts)SD.arts={gallery:[]};
-  SD.arts.gallery.unshift({studentName:s.name,title,medium,desc,createdAt:new Date().toISOString()});
-  await SQ.push('arts',SD.arts);closeM('add-artwork-modal');
-  $('art-title').value='';$('art-desc').value='';renderArts();
-}
-
-function viewArtwork(idx){const a=SD.arts?.gallery?.[idx];if(!a)return;const desc=a.desc||'(No description)';alert('\uD83C\uDFA8 "'+a.title+'"\n\nArtist: '+a.studentName+'\nMedium: '+a.medium+'\n\n'+desc);}
-
-function planExhibition(){
-  const title=prompt('Exhibition title:');if(!title)return;
-  const date=prompt('Planned date:');if(!date)return;
-  alert(`✅ Exhibition planned: "${title}" on ${date}\n\nGo to Comms to notify parents.`);
-}
-
-// ── 6. MUSIC ───────────────────────────────────────────────────────────────
-function renderMusic(){
-  const logs=SD.music?.practiceLogs||[];
-  $('practice-logs').innerHTML=logs.length===0?'<p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:0.75rem;">No logs yet.</p>':logs.slice(0,5).map(l=>`<div class="plog"><div style="font-size:0.7rem;color:var(--sub);">${new Date(l.date).toLocaleDateString('en-NG')}</div><div style="font-weight:600;font-size:0.82rem;">${esc(l.studentName)} · ${esc(l.activity)}</div><div style="font-size:0.75rem;color:var(--sub);">${l.duration||''} ${l.notes?'— '+l.notes:''}</div></div>`).join('');
-  const sel1=$('prac-stu'),sel2=$('lesson-stu');
-  [sel1,sel2].forEach(sel=>{if(!sel)return;sel.innerHTML='<option value="">— Choose student —</option>';SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});});
-  renderInstrumentList();
-}
-
-function renderInstrumentList(){
-  const inst=SD.music?.instruments||[];
-  const c=$('instrument-list');if(!c)return;
-  c.innerHTML=inst.length===0?'<p style="color:var(--sub);font-size:0.82rem;text-align:center;padding:0.75rem;">No instruments added.</p>':inst.map((x,i)=>`<div class="inst-row"><div><strong style="font-size:0.85rem;">${esc(x.name)}</strong></div><div style="display:flex;align-items:center;gap:0.5rem;"><span class="chip ${x.status==='available'?'chip-ok':'chip-warn'}">${x.status}</span><button class="btn-sm btn-ghost" style="color:var(--text);" onclick="toggleInstrument(${i})">${x.status==='available'?'Mark In Use':'Mark Available'}</button></div></div>`).join('');
-}
-
-async function toggleInstrument(idx){
-  if(!SD.music)SD.music={practiceLogs:[],instruments:[]};
-  SD.music.instruments[idx].status=SD.music.instruments[idx].status==='available'?'in use':'available';
-  await SQ.push('music',SD.music);renderInstrumentList();
-}
-
-function addInstrument(){
-  const name=prompt('Instrument name:');if(!name)return;
-  if(!SD.music)SD.music={practiceLogs:[],instruments:[]};
-  SD.music.instruments.push({name,status:'available'});
-  SQ.push('music',SD.music);renderInstrumentList();
-}
-
-async function savePractice(){
-  const si=$('prac-stu').value,act=$('prac-act').value.trim(),dur=$('prac-dur').value,notes=$('prac-notes').value.trim();
-  if(!si||!act)return alert('Select student and enter activity.');
-  const s=SD.students[parseInt(si)];if(!s)return;
-  if(!SD.music)SD.music={practiceLogs:[],instruments:[]};
-  if(!SD.music.practiceLogs)SD.music.practiceLogs=[];
-  SD.music.practiceLogs.unshift({studentName:s.name,activity:act,duration:dur,notes,date:new Date().toISOString()});
-  await SQ.push('music',SD.music);closeM('log-practice-modal');
-  $('prac-act').value='';$('prac-notes').value='';renderMusic();
-}
-
-async function bookLesson(){
-  const si=$('lesson-stu').value,dt=$('lesson-date').value,inst=$('lesson-inst').value,time=$('lesson-time').value;
-  if(!si||!dt)return alert('Select student and date.');
-  const s=SD.students[parseInt(si)];
-  alert(`✅ Lesson booked!\n\nStudent: ${s.name}\nInstrument: ${inst}\nDate: ${dt}\nTime: ${time}`);
-  closeM('book-lesson-modal');
-}
-
-// ── 7. HEALTH ─────────────────────────────────────────────────────────────
-function renderHealth(){
-  const incidents=SD.health||[];
-  $('h-visits').textContent=incidents.length;
-  $('h-open').textContent=incidents.filter(x=>!x.resolved).length;
-  const sel=$('inc-stu');sel.innerHTML='<option value="">— Choose student —</option>';
-  SD.students.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${s.name} (${s.class||'—'})`;sel.appendChild(o);});
-  $('health-list').innerHTML=incidents.length===0?'<p style="text-align:center;color:var(--sub);padding:1.5rem;">No incidents logged yet.</p>':incidents.slice().reverse().map((inc,i)=>`<div class="incident-row"><div><div style="font-weight:700;font-size:0.85rem;">${esc(inc.studentName)}</div><div style="font-size:0.75rem;color:var(--sub);">${esc(inc.type)} · ${esc(inc.action)} · ${inc.date}</div></div><span class="chip ${inc.resolved?'chip-ok':'chip-bad'}">${inc.resolved?'Resolved':'Open'}</span></div>`).join('');
-}
-
-async function logIncident(){
-  const si=$('inc-stu').value,type=$('inc-type').value.trim(),action=$('inc-action').value,notes=$('inc-notes').value.trim();
-  if(!si||!type)return alert('Select student and enter incident type.');
-  const s=SD.students[parseInt(si)];if(!s)return;
-  if(!SD.health)SD.health=[];
-  SD.health.unshift({studentName:s.name,type,action,notes,date:new Date().toLocaleDateString('en-NG'),resolved:false});
-  await SQ.push('health',SD.health);closeM('log-incident-modal');
-  $('inc-type').value='';$('inc-notes').value='';renderHealth();
-}
-
-// ── 8. ALUMNI ─────────────────────────────────────────────────────────────
-function renderAlumni(){
-  const alumni=SD.alumni||[];
-  $('al-count').textContent=alumni.length;
-  $('al-donations').textContent=fmt(alumni.reduce((t,a)=>t+(a.donation||0),0));
-  $('alumni-list').innerHTML=alumni.length===0?'<p style="text-align:center;color:var(--sub);padding:1.5rem;">No alumni added yet.</p>':alumni.map((a,i)=>`<div class="alumni-row"><div><div style="font-weight:700;font-size:0.85rem;">${esc(a.name)}</div><div style="font-size:0.75rem;color:var(--sub);">${a.year||'—'} · ${esc(a.job||'—')}</div></div><button class="btn-wa btn-sm" onclick="callAlumni('${a.phone||''}')">📲</button></div>`).join('');
-}
-
-async function addAlumni(){
-  const name=$('al-name').value.trim(),year=$('al-year').value,phone=$('al-phone').value.trim().replace(/\D/g,''),job=$('al-job').value.trim();
-  if(!name)return alert('Enter name.');
-  if(!SD.alumni)SD.alumni=[];
-  SD.alumni.unshift({name,year,phone,job,addedAt:new Date().toISOString()});
-  await SQ.push('alumni',SD.alumni);closeM('add-alumni-modal');
-  $('al-name').value='';$('al-year').value='';$('al-phone').value='';$('al-job').value='';renderAlumni();
-}
-
-function callAlumni(phone){if(!phone)return alert('No phone for this alumni.');window.open(`https://wa.me/${phone.replace(/\D/g,'')}`,'_blank');}
-
-function sendFundraisingAppeal(){
-  const sn=SD.config.schoolName||'our School';
-  const msg=`📢 *Alumni Fundraising Appeal*\n\nDear Alumni of ${sn},\n\nWe are reaching out to our valued alumni to request support for improving school facilities.\n\nEvery contribution makes a difference for current students.\n\nKindly contact us to discuss how you can contribute.\n\nWith gratitude,\nSchool Management`;
-  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
-}
-
-// ── 9. EXPENSES ────────────────────────────────────────────────────────────
-function renderExpenses(){
-  const exp=SD.expenses||[];let total=0;exp.forEach(e=>total+=e.amount||0);
-  $('exp-total').textContent=fmt(total);
-  $('exp-list').innerHTML=exp.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No expenses logged yet.</p>':exp.map((e,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);"><div><div style="font-weight:600;font-size:0.85rem;">${esc(e.description)}</div><div style="font-size:0.7rem;color:var(--sub);">${esc(e.category)} · ${e.date}</div></div><div style="display:flex;align-items:center;gap:0.5rem;"><span style="font-weight:700;font-family:'DM Mono',monospace;">${fmt(e.amount)}</span><button class="btn-danger btn-sm" onclick="deleteExpense(${i})">🗑️</button></div></div>`).join('');
-}
-
-async function addExpense(){
-  const cat=$('exp-cat').value,desc=$('exp-desc').value.trim(),amt=parseFloat($('exp-amt').value);
-  if(!desc||!amt)return alert('Fill description and amount.');
-  if(!SD.expenses)SD.expenses=[];
-  SD.expenses.unshift({category:cat,description:desc,amount:amt,date:new Date().toISOString().split('T')[0],by:userRole});
-  await SQ.push('expenses',SD.expenses);closeM('add-expense-modal');
-  $('exp-desc').value='';$('exp-amt').value='';renderExpenses();
-}
-
-async function deleteExpense(idx){if(!confirm('Delete?'))return;SD.expenses.splice(idx,1);await SQ.push('expenses',SD.expenses);renderExpenses();}
-
-// ── 10. FINANCE AI ─────────────────────────────────────────────────────────
-function checkFinance(){
-  const fr=SD.financialRecords;
-  if(fr&&fr.recordCount>0){$('finance-empty').style.display='none';showFinanceAnalysis(fr);}
-  else{$('finance-empty').style.display='block';$('finance-analysis').style.display='none';}
-}
-
-function handleFinanceUpload(e){
-  const f=e.target.files[0];if(!f)return;
-  const btn=$('finance-empty').querySelector('.btn-brand');btn.textContent='⏳ Reading...';btn.disabled=true;
-  const r=new FileReader();
-  r.onload=async ev=>{
-    const lines=ev.target.result.split(/\r?\n/).filter(l=>l.trim());
-    const records=lines.slice(1).map(l=>{const c=l.split(',').map(x=>x.replace(/"/g,'').trim());return{date:c[0]||'',desc:c[1]||'',amount:parseFloat(c[2])||0,type:(c[3]||'expense').toLowerCase()};}).filter(r=>r.desc&&!isNaN(r.amount));
-    const income=records.filter(r=>r.type==='income'||r.amount>0).reduce((s,r)=>s+Math.abs(r.amount),0);
-    const expenses=records.filter(r=>r.type==='expense'||r.amount<0).reduce((s,r)=>s+Math.abs(r.amount),0);
-    const large=records.filter(r=>Math.abs(r.amount)>500000).length;
-    const fr={fileName:f.name,recordCount:records.length,totalIncome:income,totalExpenses:expenses,largeTransactions:large,uploadedAt:new Date().toISOString()};
-    SD.financialRecords=fr;localStorage.setItem(`p_${schoolId}_financialRecords`,JSON.stringify(fr));
-    await SQ.push('financialRecords',fr);
-    showFinanceAnalysis(fr);
-    btn.textContent='📤 Upload Financial Data CSV';btn.disabled=false;e.target.value='';
-  };
-  r.onerror=()=>{alert('File read failed. Please try again.');btn.textContent='📤 Upload Financial Data CSV';btn.disabled=false;};
-  r.readAsText(f);
-}
-
-function showFinanceAnalysis(fr){
-  $('finance-empty').style.display='none';$('finance-analysis').style.display='block';
-  $('ai-projection').textContent=fmt(Math.round(fr.totalIncome*1.08));
-  $('ai-anomalies').textContent=fr.largeTransactions.toString();
-  const net=fr.totalIncome-fr.totalExpenses;
-  $('ai-recommendation').innerHTML=`<strong>💡 AI Insight:</strong><br>${net>=0?`Revenue exceeds expenses by ${fmt(net)}. Consider setting aside 10% (${fmt(Math.round(net*0.1))}) as a school reserve before term ends.`:`Expenses exceed income by ${fmt(Math.abs(net))}. Review staff salary ratio and utilities — those are typically the two largest controllable costs in Nigerian private schools.`}`;
-}
-
-async function askFinanceAI(){
-  const q=$('ai-question').value.trim();if(!q)return;
-  const area=$('ai-chat-area');
-  area.innerHTML+=`<div style="background:var(--s2);border-radius:9px;padding:0.6rem;margin-bottom:0.4rem;font-size:0.82rem;"><strong>You:</strong> ${esc(q)}</div>`;
-  area.innerHTML+=`<div id="ai-typing" style="color:var(--sub);font-size:0.8rem;padding:0.4rem;">🤖 Thinking...</div>`;
-  $('ai-question').value='';
-  try{
-    const fr=SD.financialRecords||{};
-    const context=`School financial data: Income ₦${fr.totalIncome||0}, Expenses ₦${fr.totalExpenses||0}, Records: ${fr.recordCount||0}. Current students: ${SD.students.length}, Collected: ₦${SD.students.reduce((t,s)=>t+(s.paid||0),0)}, Outstanding: ₦${SD.students.reduce((t,s)=>t+((s.totalFee||0)-(s.paid||0)),0)}.`;
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:`You are a financial advisor for a Nigerian private school. Be practical and concise. Context: ${context}\n\nQuestion: ${q}`}]})});
-    const data=await res.json();
-    const reply=data.content?.[0]?.text||'Unable to get response.';
-    document.getElementById('ai-typing')?.remove();
-    area.innerHTML+=`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:0.6rem;margin-bottom:0.4rem;font-size:0.82rem;"><strong>🤖 AI:</strong> ${esc(reply)}</div>`;
-  }catch(e){document.getElementById('ai-typing')?.remove();area.innerHTML+=`<div style="color:var(--sub);font-size:0.78rem;padding:0.4rem;">Finance AI requires internet. Connect and try again.</div>`;}
-}
-
-// ── 11. COMMS ─────────────────────────────────────────────────────────────
-function renderComms(){
-  const pages=SD.socialPages||[];
-  $('social-pages').innerHTML=pages.length===0?'<p style="font-size:0.8rem;color:var(--sub);text-align:center;padding:0.75rem;">No pages added yet.</p>':pages.map((p,i)=>{
-    const icons={facebook:'📘',instagram:'📸',twitter:'🐦',youtube:'📺',tiktok:'🎵',whatsapp:'💬',telegram:'✈️'};
-    return`<div class="social-item"><div><span style="font-size:1.2rem;margin-right:6px;">${icons[p.platform]||'🌐'}</span><strong style="font-size:0.85rem;">${esc(p.name)}</strong><div style="font-size:0.7rem;color:var(--sub);">${p.platform}</div></div><div style="display:flex;gap:0.35rem;"><button class="btn-brand btn-sm" onclick="window.open('${esc(p.url||'#')}','_blank')">🔗</button><button class="btn-danger btn-sm" onclick="removeSocialPage(${i})">🗑️</button></div></div>`;
-  }).join('');
-}
-
-async function addSocialPage(){
-  const plat=$('soc-platform').value,name=$('soc-name').value.trim(),url=$('soc-url').value.trim();
-  if(!plat||!name)return alert('Select platform and enter page name.');
-  if(!SD.socialPages)SD.socialPages=[];
-  SD.socialPages.push({platform:plat,name,url:url||'#',addedAt:new Date().toISOString()});
-  await SQ.push('socialPages',SD.socialPages);
-  $('soc-platform').value='';$('soc-name').value='';$('soc-url').value='';renderComms();
-}
-
-async function removeSocialPage(idx){if(!confirm('Remove?'))return;SD.socialPages.splice(idx,1);await SQ.push('socialPages',SD.socialPages);renderComms();}
-
-function logComm(type,preview){
-  if(!SD.commsLog)SD.commsLog=[];
-  SD.commsLog.unshift({type,preview,sentAt:new Date().toISOString(),sentBy:userRole});
-  SQ.push('commsLog',SD.commsLog);
-}
-
-function broadcastFeeReminder(){
-  const overdue=SD.students.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
-  const sn=SD.config.schoolName||'School';
-  const msg=`Dear Parent,\n\n*${sn}* would like to remind you that outstanding term fees are now due.\n\nKindly ensure prompt payment to avoid disruption to your ward's education.\n\nThank you.\n– ${sn}`;
-  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
-  logComm('Fee Reminder',`Broadcast to ${overdue.length} overdue parents`);
-}
-
-function broadcastEvent(){
-  const ev=prompt('Event name (e.g. Inter-house Sports Day):');if(!ev)return;
-  const date=prompt('Date of event (e.g. Saturday 24 May 2026):');if(!date)return;
-  const sn=SD.config.schoolName||'School';
-  const msg=`Dear Parent,\n\n*${sn}* cordially invites you to:\n\n📅 *${ev}*\n🗓️ Date: ${date}\n📍 Venue: School Premises\n\nYour presence and support is warmly welcomed.\n\n– ${sn}`;
-  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
-  logComm('Event Notice',`${ev} — ${date}`);
-}
-
-function broadcastAnnouncement(){
-  const subj=prompt('Announcement subject:');if(!subj)return;
-  const body=prompt('Message:');if(!body)return;
-  const sn=SD.config.schoolName||'School';
-  const msg=`📢 *Announcement from ${sn}*\n\n*${subj}*\n\n${body}\n\n– ${sn}`;
-  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
-  logComm('Announcement',subj);
-}
-
-function viewMessageHistory(){
-  const logs=SD.commsLog||[];
-  const c=$('comms-history-list');
-  c.innerHTML=logs.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No messages sent yet.</p>':logs.slice(0,30).map(l=>`<div class="comm-log"><div style="display:flex;justify-content:space-between;"><strong style="font-size:0.85rem;">${esc(l.type)}</strong><span style="font-size:0.7rem;color:var(--sub);">${new Date(l.sentAt).toLocaleDateString('en-NG')}</span></div><div style="font-size:0.78rem;color:var(--sub);margin-top:2px;">${esc(l.preview||'')}</div></div>`).join('');
-  openM('comms-history-modal');
-}
-
-// ── 12. ANALYTICS ─────────────────────────────────────────────────────────
-function renderAnalytics(){
-  const s=SD.students||[];const exp=SD.expenses||[];
-  const totalFee=s.reduce((t,x)=>t+(x.totalFee||0),0);
-  const totalCol=s.reduce((t,x)=>t+(x.paid||0),0);
-  const totalExp=exp.reduce((t,e)=>t+(e.amount||0),0);
-  const paid=s.filter(x=>(x.totalFee||0)<=(x.paid||0)).length;
-  const partial=s.filter(x=>x.paid>0&&(x.totalFee||0)>(x.paid||0)).length;
-  const unpaid=s.filter(x=>!x.paid||x.paid===0).length;
-  const byClass={};s.forEach(x=>{const c=x.class||'Unknown';byClass[c]=(byClass[c]||0)+1;});
-  const byExpCat={};exp.forEach(e=>{const c=e.category||'Other';byExpCat[c]=(byExpCat[c]||(0))+(e.amount||0);});
-  $('analytics-content').innerHTML=`
-    <div class="stats"><div class="stat"><div class="sn" style="color:var(--money);">${paid}</div><div class="sl">Fully Paid</div></div>
-    <div class="stat"><div class="sn" style="color:var(--warn);">${partial}</div><div class="sl">Partial</div></div>
-    <div class="stat"><div class="sn" style="color:var(--danger);">${unpaid}</div><div class="sl">Unpaid</div></div>
-    <div class="stat"><div class="sn">${s.length}</div><div class="sl">Total</div></div></div>
-    <div class="card"><div class="ct">💰 Financial Summary</div>
-    ${[['Expected',totalFee,''],['Collected',totalCol,'var(--money)'],['Outstanding',totalFee-totalCol,'var(--danger)'],['Expenses',totalExp,'var(--warn)'],['Net Balance',totalCol-totalExp,totalCol-totalExp>=0?'var(--money)':'var(--danger)']].map(([label,val,col])=>`<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.85rem;"><span>${label}</span><strong${col?` style="color:${col};"`:''} style="font-family:'DM Mono',monospace;">${fmt(val)}</strong></div>`).join('')}</div>
-    <div class="card"><div class="ct">🎓 Students by Class</div>
-    ${Object.entries(byClass).sort((a,b)=>b[1]-a[1]).map(([cls,cnt])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;"><span>${esc(cls)}</span><div style="display:flex;align-items:center;gap:0.5rem;"><div style="width:${Math.round((cnt/s.length)*80)}px;height:8px;background:var(--brand);border-radius:4px;"></div><span style="font-weight:700;">${cnt}</span></div></div>`).join('')}</div>
-    <div class="card"><div class="ct">📉 Expenses by Category</div>
-    ${Object.entries(byExpCat).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>`<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;"><span>${esc(cat)}</span><strong style="font-family:'DM Mono',monospace;">${fmt(amt)}</strong></div>`).join('')}</div>
-    <button class="btn-brand" onclick="exportCSV()">📥 Export Students CSV</button>`;
-}
-
-function exportCSV(){
-  const rows=[['Name','Class','Phone','Total Fee','Paid','Outstanding'],...SD.students.map(s=>[s.name,s.class||'',s.phone||'',s.totalFee||0,s.paid||0,(s.totalFee||0)-(s.paid||0)])];
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download=`students-${new Date().toISOString().split('T')[0]}.csv`;a.click();
-}
-
-// ── 13. SECURITY ──────────────────────────────────────────────────────────
-function securitySearch(){
-  const q=($('sec-search')?.value||'').toLowerCase().trim();
-  const c=$('security-results');
-  if(!q){c.innerHTML='';return;}
-  const matches=SD.students.filter(s=>s.name.toLowerCase().includes(q)||(s.phone||'').includes(q)||(s.class||'').toLowerCase().includes(q));
-  if(!matches.length){c.innerHTML='<p style="color:var(--sub);font-size:0.85rem;padding:0.5rem;">No student found.</p>';return;}
-  c.innerHTML=matches.map(s=>`<div class="sec-result"><div style="font-weight:700;font-size:0.9rem;">${esc(s.name)}</div>
-    <div style="font-size:0.75rem;color:var(--sub);margin-top:3px;">Class: ${esc(s.class||'—')} · Guardian: ${s.phone||'—'}</div>
-    ${s.swot?.threats&&s.swot.threats.toLowerCase().includes('allerg')?`<div class="allergy-alert">⚠️ ALLERGY ALERT: ${esc(s.swot.threats)}</div>`:''}
-  </div>`).join('');
-}
-
-// ── 14. SUPPORT ───────────────────────────────────────────────────────────
-function renderSupport(){
-  const agent=SD.config.agent;
-  if(agent&&agent.name){
-    $('agent-contact').innerHTML=`<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;"><div style="width:48px;height:48px;background:var(--brand);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem;flex-shrink:0;">${agent.name.charAt(0).toUpperCase()}</div><div><div style="font-weight:700;font-size:1rem;">${esc(agent.name)}</div><div style="font-size:0.78rem;color:var(--sub);">Your assigned agent</div></div></div>
-      <div style="display:flex;align-items:center;gap:0.65rem;padding:0.5rem 0;border-bottom:1px solid var(--border);"><span style="font-size:1.2rem;">📱</span><div style="flex:1;"><div style="font-size:0.65rem;color:var(--sub);text-transform:uppercase;">WhatsApp</div><div style="font-weight:600;">${agent.phone||'—'}</div></div><button class="btn-wa btn-sm" onclick="window.open('https://wa.me/${(agent.phone||'').replace(/\\D/g,'')}?text=Hello ${encodeURIComponent(agent.name)}, I need help with my Educational Bloom portal.','_blank')">📞 Call</button></div>`;
-  }
-}
-
-// ── 15. SETTINGS ──────────────────────────────────────────────────────────
-function loadSettings(){
-  const c=SD.config||{};
-  $('set-name').value=c.schoolName||'';$('set-phone').value=c.whatsapp||'';$('set-email').value=c.principalEmail||'';
-  $('set-fee').value=c.fee||50000;$('set-term').value=c.currentTerm||'Term 1';$('set-session').value=c.session||'2025/2026';
-  const defaultSubs=['English Language','Mathematics','Basic Science & Technology','Social Studies','Civic Education','Cultural & Creative Arts','Computer Science','Physical & Health Education','Agricultural Science','National Values Education','French Language','Home Economics','Business Studies','Religious Studies'];
-  $('set-subjects').value=(c.subjects||defaultSubs).join(', ');
-  renderSubjectChips();
-  const isPrem=c.plan==='premium';
-  $('settings-plan').textContent=isPrem?'Premium ✨':'Basic';
-  $('settings-staff-limit').textContent=isPrem?'Unlimited':'3';
-  $('settings-ai').textContent=isPrem?'Full Advisor':'Basic';
-}
-
-async function saveSettings(){
-  const subs=$('set-subjects').value.split(',').map(s=>s.trim()).filter(Boolean);
-  const newEmail=$('set-email').value.trim().toLowerCase();
-  const newPwd=$('set-pwd')?.value.trim()||'';
-  SD.config={...SD.config,schoolName:$('set-name').value.trim(),whatsapp:$('set-phone').value.trim(),principalEmail:newEmail,fee:parseFloat($('set-fee').value)||50000,currentTerm:$('set-term').value,session:$('set-session').value,subjects:subs};
-  await SQ.push('config',SD.config);
-  // If email or password updated, sync to staff record for Principal
-  if(newEmail||newPwd){
-    const staff=SD.staff||[];
-    const principal=staff.find(s=>s.role==='Principal');
-    if(principal){
-      if(newEmail) principal.email=newEmail;
-      if(newPwd){
-        if(newPwd.length<4){alert('Password must be at least 4 characters.');return;}
-        principal.password=newPwd;
-        // Update saved auth so Remember Me still works
-        const auth=JSON.parse(localStorage.getItem('p_auth')||sessionStorage.getItem('p_auth')||'{}');
-        auth.email=newEmail||auth.email;
-        const stored=localStorage.getItem('p_auth')?localStorage:sessionStorage;
-        stored.setItem('p_auth',JSON.stringify(auth));
-        if($('set-pwd'))$('set-pwd').value=''; // clear password field after save
-      }
-      await SQ.push('staff',staff);
-    }
-  }
-  $('hdr-school').textContent=SD.config.schoolName||schoolId;$('hdr-term').textContent=SD.config.currentTerm;
-  renderBanner();alert('✅ Settings saved!');
-}
-
-// ── 16. OPPORTUNITIES ─────────────────────────────────────────────────────
-function renderOpps(){
-  const isPrem=SD.config.plan==='premium';
-  const cat=$('opp-cat')?.value||'';const dl=$('opp-deadline')?.value||'';
-  let opps=[...SD.opportunities];
-  if(cat)opps=opps.filter(o=>o.type===cat);
-  if(dl){const cut=new Date();cut.setDate(cut.getDate()+parseInt(dl));opps=opps.filter(o=>new Date(o.deadline)<=cut);}
-  $('opp-premium-cta').style.display=isPrem?'none':'block';
-  const c=$('opps-list');
-  if(!opps.length){c.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No opportunities match your filters.</p>';return;}
-  const badgeCls={scholarship:'ob-s',grant:'ob-g',internship:'ob-i',competition:'ob-c'};
-  c.innerHTML=opps.map(o=>{
-    const dl=Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24));
-    const dlCls=dl<=7?'dl-urgent':dl<=30?'dl-soon':'dl-ok';
-    const dlTxt=dl<=0?'Closed':`${dl}d left`;
-    const locked=!isPrem;
-    return`<div class="opp-card ${locked?'locked':''}" onclick="${isPrem?`viewOpp('${o.id}')`:''}" style="${locked?'cursor:default;':''}">
-      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.4rem;">
-        <div style="font-weight:700;font-size:0.88rem;flex:1;margin-right:0.5rem;">${esc(o.title)}</div>
-        <span class="opp-badge ${badgeCls[o.type]||'ob-s'}">${o.type}</span>
-      </div>
-      <div style="font-size:0.75rem;color:var(--sub);margin-bottom:0.35rem;">${esc(o.provider)}</div>
-      <div style="display:flex;gap:0.4rem;align-items:center;">
-        <span class="${dlCls}">⏰ ${dlTxt}</span>
-        ${o.amount?`<span style="font-weight:700;color:var(--money);font-size:0.78rem;">💰 ${esc(o.amount)}</span>`:''}
-      </div>
-      ${isPrem?`<div style="font-size:0.78rem;color:var(--sub);margin-top:0.4rem;">${esc(o.desc||'')}</div><div style="margin-top:0.5rem;"><button class="btn-brand btn-sm" onclick="event.stopPropagation();alert('Apply at: ${esc(o.url||'See provider website')}')">📝 Apply Now</button></div>`:'<div style="font-size:0.73rem;color:var(--sub);margin-top:0.35rem;">✨ Upgrade to Premium to see details and apply</div>'}
-    </div>`;
-  }).join('');
-}
-
-function viewOpp(id){const o=SD.opportunities.find(x=>x.id===id);if(!o)return;alert(`${o.title}\n\nProvider: ${o.provider}\nDeadline: ${o.deadline}\nValue: ${o.amount||'—'}\n\n${o.desc||''}\n\nApply at: ${o.url||'See provider website'}`);}
-
-
-// ── Class Attendance Screen ─────────────────────────────────────────────
-// Replaces the per-student attendance tab with a class-wide roll call view.
-
-function openClassAttendance(){
-  // Show modal, populate class picker, render
-  openM('class-att-modal');
-  const sel = $('ca-class-sel');
-  const classes = [...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="">— Select Class —</option>' +
-    classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  $('ca-date').value = new Date().toISOString().split('T')[0];
-  $('ca-list').innerHTML = '<p style="color:var(--sub);font-size:0.82rem;text-align:center;padding:1.5rem;">Select a class above.</p>';
-  $('ca-summary').textContent = '';
-}
-
-function renderClassRoll(){
-  const cls = $('ca-class-sel').value;
-  const date = $('ca-date').value;
-  if(!cls||!date){ $('ca-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">Pick a class and date.</p>'; return; }
-  const students = SD.students.filter(s=>s.class===cls);
-  if(!students.length){ $('ca-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">No students in this class.</p>'; return; }
-  const att = SD.attendance[date]||{};
-  const present = students.filter(s=>att[s.name]==='Present').length;
-  $('ca-summary').textContent = `${present}/${students.length} Present`;
-
-  $('ca-list').innerHTML = students.map((s,i)=>{
-    const status = att[s.name]||'';
-    const pCls = status==='Present'?'ca-btn-active-p':'';
-    const aCls = status==='Absent'?'ca-btn-active-a':'';
-    const lCls = status==='Late'?'ca-btn-active-l':'';
-    return `<div class="ca-row" id="ca-row-${i}">
-      <div class="ca-name">${esc(s.name)}</div>
-      <div class="ca-btns">
-        <button class="ca-btn ca-p ${pCls}" onclick="markClassAtt(${SD.students.indexOf(s)},'${date}','Present',${i})">✅</button>
-        <button class="ca-btn ca-a ${aCls}" onclick="markClassAtt(${SD.students.indexOf(s)},'${date}','Absent',${i})">❌</button>
-        <button class="ca-btn ca-l ${lCls}" onclick="markClassAtt(${SD.students.indexOf(s)},'${date}','Late',${i})">⏰</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-async function markClassAtt(stuIdx, date, status, rowIdx){
-  const s = SD.students[stuIdx]; if(!s) return;
-  if(!SD.attendance[date]) SD.attendance[date]={};
-  SD.attendance[date][s.name] = status;
-  // Update just this row's buttons (no full re-render needed — stays fast)
-  const row = document.getElementById('ca-row-'+rowIdx);
-  if(row){
-    row.querySelectorAll('.ca-btn').forEach(b=>{
-      b.classList.remove('ca-btn-active-p','ca-btn-active-a','ca-btn-active-l');
-    });
-    const cls = status==='Present'?'ca-btn-active-p':status==='Absent'?'ca-btn-active-a':'ca-btn-active-l';
-    const idx = ['Present','Absent','Late'].indexOf(status);
-    const btns = row.querySelectorAll('.ca-btn');
-    if(btns[idx]) btns[idx].classList.add(cls);
-  }
-  // Update summary
-  const clsName = $('ca-class-sel').value;
-  const students = SD.students.filter(s=>s.class===clsName);
-  const att = SD.attendance[date]||{};
-  const present = students.filter(s=>att[s.name]==='Present').length;
-  $('ca-summary').textContent = `${present}/${students.length} Present`;
-  // Debounced save — batch writes to avoid 40 individual Firestore calls
-  clearTimeout(window._attSaveTimer);
-  window._attSaveTimer = setTimeout(()=>SQ.push('attendance',SD.attendance), 1200);
-}
-
-async function markAllPresent(){
-  const cls = $('ca-class-sel').value; const date = $('ca-date').value;
-  if(!cls||!date) return;
-  if(!SD.attendance[date]) SD.attendance[date]={};
-  SD.students.filter(s=>s.class===cls).forEach(s=>{ SD.attendance[date][s.name]='Present'; });
-  await SQ.push('attendance',SD.attendance);
-  renderClassRoll();
-}
-
-async function markAllAbsent(){
-  const cls = $('ca-class-sel').value; const date = $('ca-date').value;
-  if(!cls||!date) return;
-  if(!confirm(`Mark ALL students in ${cls} as Absent on ${date}?`)) return;
-  if(!SD.attendance[date]) SD.attendance[date]={};
-  SD.students.filter(s=>s.class===cls).forEach(s=>{ SD.attendance[date][s.name]='Absent'; });
-  await SQ.push('attendance',SD.attendance);
-  renderClassRoll();
-}
-
-function notifyAbsentParents(){
-  const cls = $('ca-class-sel').value; const date = $('ca-date').value;
-  if(!cls||!date) return;
-  const att = SD.attendance[date]||{};
-  const absent = SD.students.filter(s=>s.class===cls&&att[s.name]==='Absent'&&s.phone);
-  if(!absent.length){ alert('No absent students with phone numbers for this class/date.'); return; }
-  // Use same guided bulk sequence, but for absence notifications
-  _waBulkQueue = absent.map(s=>({...s, _isAbsence:true, _date:date}));
-  _waBulkIdx = 0;
-  openM('bulk-wa-modal');
-  // Temporarily override the render to show absence message
-  _waBulkIsAbsence = true;
-  renderBulkWAStep();
-}
-let _waBulkIsAbsence = false;
-
-async function saveClassAttendance(){
-  await SQ.push('attendance',SD.attendance);
-  closeM('class-att-modal');
-  alert('✅ Attendance saved for ' + ($('ca-class-sel').value||'class') + ' on ' + $('ca-date').value);
-}
-
-// ── Subject Score Entry Screen ──────────────────────────────────────────
-// Enter scores for all students in a class for one subject at once.
-
-function openSubjectScores(){
-  openM('subj-scores-modal');
-  const classes = [...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
-  const subs = SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
-      'Social Studies','Civic Education','Cultural & Creative Arts',
-      'Computer Science','Physical & Health Education','Agricultural Science',
-      'National Values Education','French Language','Home Economics',
-      'Business Studies','Religious Studies'];
-  $('ss-class-sel').innerHTML = '<option value="">— Select Class —</option>' +
-    classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  $('ss-subj-sel').innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-  $('ss-list').innerHTML = '<p style="color:var(--sub);font-size:0.82rem;text-align:center;padding:1.5rem;">Select a class and subject above.</p>';
-}
-
-function renderSubjectScoreList(){
-  const cls = $('ss-class-sel').value;
-  const sub = $('ss-subj-sel').value;
-  const term = SD.config.currentTerm||'Term 1';
-  if(!cls||!sub){ $('ss-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">Pick a class and subject.</p>'; return; }
-  const students = SD.students.filter(s=>s.class===cls);
-  if(!students.length){ $('ss-list').innerHTML='<p style="color:var(--sub);text-align:center;padding:1rem;">No students in this class.</p>'; return; }
-  $('ss-list').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 70px 70px 60px;gap:4px;padding:0.4rem 0;border-bottom:2px solid var(--border);font-size:0.72rem;font-weight:700;color:var(--sub);">
-      <span>Student</span><span style="text-align:center;">CA/40</span><span style="text-align:center;">Exam/60</span><span style="text-align:center;">Total</span>
-    </div>
-    ${students.map((s,i)=>{
-      const stuIdx = SD.students.indexOf(s);
-      const v = (s.scores||{})[sub]||{ca:'',exam:''};
-      const tot = ((v.ca||0)*1)+((v.exam||0)*1);
-      const g = tot>0?gradeScore(tot).g:'—';
-      const gCls = tot>0?'g'+g:'';
-      return `<div class="ss-row" id="ss-row-${i}">
-        <div style="font-size:0.8rem;font-weight:600;padding-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div>
-        <input type="number" min="0" max="40" value="${v.ca||''}" placeholder="CA"
-          class="ss-inp" id="ss-ca-${i}" inputmode="numeric" enterkeyhint="next"
-          oninput="updateSSTotal(${stuIdx},'${esc(sub)}','ca',this.value,${i})"
-          style="text-align:center;margin:0;padding:0.35rem 0.2rem;font-size:0.82rem;">
-        <input type="number" min="0" max="60" value="${v.exam||''}" placeholder="Exam"
-          class="ss-inp" id="ss-ex-${i}" inputmode="numeric" enterkeyhint="next"
-          oninput="updateSSTotal(${stuIdx},'${esc(sub)}','exam',this.value,${i})"
-          style="text-align:center;margin:0;padding:0.35rem 0.2rem;font-size:0.82rem;">
-        <div id="ss-tot-${i}" class="ss-tot ${gCls}" style="text-align:center;font-weight:700;font-size:0.85rem;padding-top:6px;">${tot||'—'}</div>
-      </div>`;
-    }).join('')}`;
-}
-
-function updateSSTotal(stuIdx,sub,type,val,rowIdx){
-  const s = SD.students[stuIdx]; if(!s) return;
-  if(!s.scores) s.scores={};
-  if(!s.scores[sub]) s.scores[sub]={ca:0,exam:0};
-  const num = Math.min(type==='ca'?40:60, Math.max(0,parseFloat(val)||0));
-  s.scores[sub][type] = num;
-  const tot = (s.scores[sub].ca||0)+(s.scores[sub].exam||0);
-  const el = document.getElementById('ss-tot-'+rowIdx);
-  if(el){
-    const g = gradeScore(tot);
-    el.textContent = tot||'—';
-    el.className = 'ss-tot g'+g.g;
-  }
-  clearTimeout(window._scoreSaveTimer);
-  window._scoreSaveTimer = setTimeout(()=>SQ.push('students',SD.students), 2000);
-}
-
-async function saveSubjectScores(){
-  await SQ.push('students',SD.students);
-  const sub = $('ss-subj-sel').value;
-  const cls = $('ss-class-sel').value;
-  closeM('subj-scores-modal');
-  alert(`✅ ${sub} scores saved for ${cls}!`);
-}
-
-// ── Bulk WhatsApp Sequence ───────────────────────────────────────────────
-// Opens messages one at a time for each overdue parent.
-// Teacher taps "Send" in WhatsApp, returns, taps "Next" — 60 parents done
-// in 60 taps with no navigation, vs 180 taps before.
-
-let _waBulkQueue = [];
-let _waBulkIdx = 0;
-
-function startBulkWA(){
-  const overdue = SD.students.filter(s=>(s.totalFee||0)-(s.paid||0)>0&&s.phone);
-  if(!overdue.length) return alert('No overdue students with phone numbers.');
-  _waBulkQueue = overdue;
-  _waBulkIdx = 0;
-  openM('bulk-wa-modal');
-  renderBulkWAStep();
-}
-
-function renderBulkWAStep(){
-  const total = _waBulkQueue.length;
-  if(_waBulkIdx >= total){ closeBulkWA(); return; }
-  const s = _waBulkQueue[_waBulkIdx];
-  const sn = SD.config.schoolName||'School';
-  let msg, oweDisplay;
-  if(_waBulkIsAbsence){
-    const dt = s._date||new Date().toISOString().split('T')[0];
-    msg = `Dear Parent,\n\nThis is to inform you that *${s.name}* was marked *ABSENT* today (${dt}) at *${sn}*.\n\nKindly ensure your ward attends school or contact us if there is a valid reason.\n\nThank you.\n– ${sn}`;
-    oweDisplay = '📍 Absent today';
-  } else {
-    const owe = (s.totalFee||0)-(s.paid||0);
-    msg = `Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
-    oweDisplay = fmt(owe);
-  }
-  $('bwa-progress').textContent = `${_waBulkIdx+1} of ${total}`;
-  $('bwa-pct').style.width = Math.round((_waBulkIdx/total)*100)+'%';
-  $('bwa-name').textContent = s.name;
-  $('bwa-owe').textContent = oweDisplay;
-  $('bwa-phone').textContent = s.phone;
-  $('bwa-open-btn').onclick = ()=>{
-    window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
-  };
-}
-
-function nextBulkWA(){
-  _waBulkIdx++;
-  renderBulkWAStep();
-}
-
-function closeBulkWA(){
-  closeM('bulk-wa-modal');
-  const done = Math.min(_waBulkIdx, _waBulkQueue.length);
-  const type = _waBulkIsAbsence?'Absence Notifications':'Fee Reminders';
-  logComm('Bulk WhatsApp '+type,`Sent to ${done} parents`);
-  if(done>0) alert(`✅ Done! ${done} message${done!==1?'s':''} sent.`);
-  _waBulkQueue=[];_waBulkIdx=0;_waBulkIsAbsence=false;
-}
-
-// ── Bulk Report Card Send ────────────────────────────────────────────────
-let _rcBulkQueue = [];
-let _rcBulkIdx = 0;
-
-function startBulkReportCards(){
-  const cls = prompt('Enter class name to send report cards (e.g. JSS1):');
-  if(!cls) return;
-  const students = SD.students.filter(s=>s.class===cls&&s.phone);
-  if(!students.length) return alert(`No students with phone numbers found in "${cls}".`);
-  _rcBulkQueue = students;
-  _rcBulkIdx = 0;
-  openM('bulk-rc-modal');
-  renderBulkRCStep();
-}
-
-function renderBulkRCStep(){
-  const total = _rcBulkQueue.length;
-  if(_rcBulkIdx >= total){ closeBulkRC(); return; }
-  const s = _rcBulkQueue[_rcBulkIdx];
-  const subs = SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
-      'Social Studies','Civic Education','Cultural & Creative Arts',
-      'Computer Science','Physical & Health Education','Agricultural Science',
-      'National Values Education','French Language','Home Economics',
-      'Business Studies','Religious Studies'];
-  const sc = s.scores||{};
-  let lines = `📋 *REPORT CARD — ${SD.config.schoolName||'School'}*\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Term:* ${SD.config.currentTerm||'Term 1'}\n\n`;
-  let total2=0,n=0;
-  subs.forEach(sub=>{const v=sc[sub]||{ca:0,exam:0};const t=(v.ca||0)+(v.exam||0);total2+=t;n++;lines+=`${sub}: ${t}/100 (${gradeScore(t).g})\n`;});
-  const avg=n>0?Math.round(total2/n):0;
-  lines+=`\n*Average: ${avg}% (${gradeScore(avg).g})*`;
-  $('brc-progress').textContent=`${_rcBulkIdx+1} of ${total}`;
-  $('brc-pct').style.width=Math.round((_rcBulkIdx/total)*100)+'%';
-  $('brc-name').textContent=s.name;
-  $('brc-phone').textContent=s.phone;
-  $('brc-open-btn').onclick=()=>{
-    window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(lines)}`,'_blank');
-  };
-}
-
-function nextBulkRC(){ _rcBulkIdx++; renderBulkRCStep(); }
-
-function closeBulkRC(){
-  closeM('bulk-rc-modal');
-  const done=Math.min(_rcBulkIdx,_rcBulkQueue.length);
-  if(done>0) alert(`✅ Done! ${done} report card${done!==1?'s':''} sent.`);
-  _rcBulkQueue=[];_rcBulkIdx=0;
-}
-
-
-// ── Score Sheet OCR ─────────────────────────────────────────────────────
-// Teacher picks subject + class, uploads photo of score sheet.
-// OCR reads the table, fuzzy-matches student names, fills CA + Exam scores.
-
-function openScoreOCR(){
-  openM('score-ocr-modal');
-  const classes=[...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
+function printBroadsheet(cls,view){
   const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
-      'Social Studies','Civic Education','Cultural & Creative Arts',
-      'Computer Science','Physical & Health Education','Agricultural Science',
-      'National Values Education','French Language','Home Economics',
-      'Business Studies','Religious Studies'];
-  $('socr-class').innerHTML='<option value="">— Select Class —</option>'+classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  $('socr-subj').innerHTML=subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-  $('socr-status').textContent='';
-  $('socr-preview').innerHTML='';
-  $('socr-save-btn').style.display='none';
-  $('socr-img-input').value='';
-  window._socrParsed=[];
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const isCum=view==='Cumulative';
+  const classStudents=SD.students.filter(s=>s.class===cls);
+  const stats=classStudents.map(s=>{
+    const sid=s.id||SD.students.indexOf(s);
+    if(isCum){const{cumSub,avg}=calcCumulative(sid,subs);return{s,perSub:cumSub,avg};}
+    const{perSub,avg}=calcStudentTermStats(sid,view,subs);return{s,perSub,avg};
+  }).sort((a,b)=>b.avg-a.avg);
+  const thCells=subs.map(s=>`<th style="writing-mode:vertical-lr;transform:rotate(180deg);font-size:9px;padding:2px;">${s}</th>`).join('');
+  const rows=stats.map(({s,perSub,avg},i)=>{
+    const cells=subs.map(sub=>{const v=isCum?perSub[sub]:(perSub[sub]?.tot||0);return`<td style="text-align:center;font-size:9.5px;">${v||'–'}</td>`;}).join('');
+    const{g}=getGrade(avg);
+    return`<tr><td>${i+1}</td><td style="white-space:nowrap;font-size:10px;">${esc(s.name)}</td>${cells}<td style="font-weight:700;">${avg||'–'}</td><td>${avg>0?g:''}</td></tr>`;
+  }).join('');
+  const w=window.open('','_blank','width=1100,height=800');if(!w)return;
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Broadsheet</title>
+  <style>body{font-family:Arial;font-size:10px;padding:12px;}
+  table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:2px 4px;}
+  th{background:#f0f0f0;font-weight:700;}@media print{button{display:none;}}</style>
+  </head><body>
+  <h2 style="text-align:center;margin-bottom:3px;">${esc(SD.config.schoolName||'School')} — Broadsheet</h2>
+  <h3 style="text-align:center;margin-bottom:8px;">${esc(cls)} &nbsp;|&nbsp; ${view==='Cumulative'?'Cumulative (All Terms)':view} &nbsp;|&nbsp; ${SD.config.session||''}</h3>
+  <table><thead><tr><th>#</th><th>Student Name</th>${thCells}<th>Avg</th><th>Grd</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <button onclick="window.print()" style="margin-top:8px;padding:5px 14px;cursor:pointer;">🖨️ Print</button>
+  </body></html>`);
+  w.document.close();
 }
 
-function socrPickPhoto(){
-  $('socr-img-input').click();
-}
-
-async function socrHandleImage(e){
-  const f=e.target.files[0]; if(!f)return;
-  const cls=$('socr-class').value;
-  const sub=$('socr-subj').value;
-  if(!cls||!sub){alert('Select class and subject first.');e.target.value='';return;}
-  
-  $('socr-status').innerHTML='<span style="color:var(--sub);">📸 Loading OCR engine… (first time ~30s)</span>';
-  $('socr-preview').innerHTML='';
-  $('socr-save-btn').style.display='none';
-
-  // Load Tesseract
-  await new Promise((resolve,reject)=>{
-    if(window.Tesseract){resolve();return;}
-    const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload=resolve; s.onerror=reject;
-    document.head.appendChild(s);
-  });
-
-  // Read image
-  const imgData=await new Promise((res,rej)=>{
-    const r=new FileReader();
-    r.onload=ev=>res(ev.target.result);
-    r.onerror=rej;
-    r.readAsDataURL(f);
-  });
-
-  $('socr-status').innerHTML='<span style="color:var(--sub);">📸 Reading score sheet… 0%</span>';
-  
-  try{
-    const {data:{text}}=await Tesseract.recognize(imgData,'eng',{
-      logger:m=>{
-        if(m.status==='recognizing text')
-          $('socr-status').innerHTML=`<span style="color:var(--sub);">📸 Reading… ${Math.round((m.progress||0)*100)}%</span>`;
-      }
-    });
-
-    $('socr-status').innerHTML='<span style="color:var(--sub);">🔍 Matching names to student list…</span>';
-    
-    const results=parseScoreSheet(text, cls, sub);
-    window._socrParsed=results;
-    renderSocrPreview(results, sub);
-
-  }catch(err){
-    $('socr-status').innerHTML='<span style="color:var(--danger);">❌ Could not read image. Try better lighting or a flatter photo.</span>';
-    console.error('Score OCR error:',err);
-  }
-  e.target.value='';
-}
-
-function parseScoreSheet(raw, cls, sub){
-  const classStudents = SD.students.filter(s => s.class === cls);
-  const term = parseInt($('socr-term')?.value || '1');
-
-  // ── Enhanced fuzzy name matcher ──────────────────────────────────────
-  const nameSim = (a, b) => {
-    const wa = a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
-    const wb = b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
-    if(!wa.length||!wb.length) return 0;
-    let score = 0;
-    wa.forEach(w => {
-      if(wb.includes(w)){ score+=1.0; return; }
-      const pfx = w.slice(0,4);
-      if(wb.some(v=>v.startsWith(pfx)||v.slice(0,4)===pfx)){ score+=0.7; return; }
-      // Edit-distance ≤ 2
-      wb.forEach(v=>{
-        if(w.length>=4&&v.length>=4){
-          let diffs=0;
-          for(let i=0;i<Math.min(w.length,v.length);i++) if(w[i]!==v[i]) diffs++;
-          diffs+=Math.abs(w.length-v.length);
-          if(diffs<=2) score+=0.5;
-        }
-      });
-    });
-    return score / Math.max(wa.length, wb.length);
-  };
-
-  // ── Smart score-triple finder ─────────────────────────────────────────
-  // Finds (ca, exam, total) where ca+exam≈total, prioritises largest totals
-  // Handles multi-term sheets (picks the Nth best match for term N)
-  const findTriples = nums => {
-    const valid = nums.map(Number).filter(n=>!isNaN(n)&&n>0&&n<=100);
-    const seen = new Set();
-    const triples = [];
-    for(let i=0;i<valid.length;i++)
-      for(let j=0;j<valid.length;j++){
-        if(i===j) continue;
-        for(let k=0;k<valid.length;k++){
-          if(k===i||k===j) continue;
-          const [a,b,c]=[valid[i],valid[j],valid[k]];
-          if(Math.abs(a+b-c)<=3 && c>=40 && c<=100 && b>=15 && b<=65 && a>=5 && a<=50){
-            const key=`${a},${b},${c}`;
-            if(!seen.has(key)){ seen.add(key); triples.push([a,b,c]); }
-          }
-        }
-      }
-    // Deduplicate by total, keep highest exam for each total
-    const byTotal = {};
-    triples.forEach(([a,b,c])=>{
-      if(!byTotal[c]||b>byTotal[c][1]) byTotal[c]=[a,b,c];
-    });
-    // Sort by total descending
-    return Object.values(byTotal).sort((x,y)=>y[2]-x[2]);
-  };
-
-  const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const results = [];
-  const matched = new Set();
-
-  lines.forEach(line => {
-    const nums = line.match(/\b\d{1,3}\b/g);
-    if(!nums||nums.length<2) return;
-
-    // Text part = remove numbers + row markers
-    const textPart = line
-      .replace(/^\s*\d+[\.\):\s]+/,'')
-      .replace(/\b\d{1,3}\b/g,' ')
-      .replace(/[\/\\|%\-_=]/g,' ')
-      .replace(/\s+/g,' ').trim();
-
-    if(textPart.length < 3) return;
-
-    // Find best student match
-    let best = null, bestScore = 0;
-    classStudents.forEach(s => {
-      const sim = nameSim(textPart, s.name);
-      if(sim > bestScore){ bestScore=sim; best=s; }
-    });
-    if(!best || bestScore < 0.35) return;
-    if(matched.has(best.name)) return;
-    matched.add(best.name);
-
-    const stuIdx = SD.students.indexOf(best);
-    const triples = findTriples(nums.map(Number));
-
-    if(!triples.length){
-      // Fallback: any two numbers ≤40/≤60 
-      const ns = nums.map(Number).filter(n=>n>0&&n<=100);
-      const ca  = ns.find(n=>n<=40)||null;
-      const ex  = ns.find(n=>n>ca&&n<=60)||null;
-      results.push({stuIdx,name:best.name,ca,exam:ex,
-        total:ca&&ex?ca+ex:null,raw:line,status:'review',
-        note:'Scores unclear — check manually',sim:Math.round(bestScore*100)});
-      return;
-    }
-
-    // Pick the triple for the requested term (1st biggest = term 1, 2nd = term 2, etc.)
-    const termTriple = triples[term-1] || triples[0];
-    const [ca, exam, total] = termTriple;
-
-    results.push({stuIdx,name:best.name,ca,exam,total,
-      raw:line,status:'ok',sim:Math.round(bestScore*100),
-      altTriples: triples.slice(0,3)});
-  });
-
-  return results;
+function saveScores(idx){
+  saveLocal('scores', SD.scores);
+  SQ.push({key:'scores', data:SD.scores});
+  toast('✅ Scores saved!');
 }
 
 
-function renderSocrPreview(results, sub){
-  const ok=results.filter(r=>r.status==='ok');
-  const review=results.filter(r=>r.status==='review');
-  const total=ok.length+review.length;
-
-  $('socr-status').innerHTML=`<strong style="color:var(--money);">✅ ${ok.length} matched</strong>`+
-    (review.length?` · <span style="color:var(--warn);">⚠️ ${review.length} need review</span>`:'')+
-    (total===0?'<span style="color:var(--danger);">No scores detected. Try a clearer photo or enter manually.</span>':'');
-
-  if(!total){$('socr-save-btn').style.display='none';return;}
-
-  $('socr-preview').innerHTML=`
-    <div style="font-size:0.72rem;color:var(--sub);margin-bottom:0.5rem;">Review before saving — tap any field to edit:</div>
-    <div style="display:grid;grid-template-columns:1fr 55px 55px 50px;gap:3px;padding:0.3rem 0;border-bottom:2px solid var(--border);font-size:0.68rem;font-weight:700;color:var(--sub);">
-      <span>Student</span><span style="text-align:center;">CA/40</span><span style="text-align:center;">Exam/60</span><span style="text-align:center;">Total</span>
-    </div>
-    ${results.map((r,i)=>{
-      const rowCls=r.status==='review'?'background:#fffbeb;':'';
-      return`<div style="display:grid;grid-template-columns:1fr 55px 55px 50px;gap:3px;padding:0.3rem 0;border-bottom:1px solid var(--border);align-items:center;${rowCls}">
-        <div style="font-size:0.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-          ${esc(r.name)}${r.status==='review'?'<span style="color:var(--warn);font-size:0.65rem;"> ⚠️</span>':''}
-        </div>
-        <input type="number" min="0" max="50" value="${r.ca!==null?r.ca:''}" inputmode="numeric"
-          placeholder="CA" id="socr-ca-${i}"
-          oninput="socrUpdateTotal(${i})"
-          style="text-align:center;margin:0;padding:0.3rem 0.15rem;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;${r.ca===null?'border-color:var(--warn);':''}">
-        <input type="number" min="0" max="65" value="${r.exam!==null?r.exam:''}" inputmode="numeric"
-          placeholder="Exam" id="socr-ex-${i}"
-          oninput="socrUpdateTotal(${i})"
-          style="text-align:center;margin:0;padding:0.3rem 0.15rem;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;${r.exam===null?'border-color:var(--warn);':''}">
-        <div id="socr-tot-${i}" style="text-align:center;font-weight:700;font-size:0.82rem;color:${(r.ca||0)+(r.exam||0)>=70?'var(--money)':'var(--text)'};">
-          ${r.ca!==null&&r.exam!==null?(r.ca+r.exam):'—'}
-        </div>
-      </div>
-      ${r.altTriples&&r.altTriples.length>1?`<div style="grid-column:1/-1;padding:0 0 0.3rem 0;display:flex;gap:4px;flex-wrap:wrap;">
-        <span style="font-size:0.65rem;color:var(--sub);">Other reads:</span>
-        ${r.altTriples.slice(1).map(([a,b,c],ti)=>
-          `<button onclick="socrPickAlt(${i},${a},${b})" style="font-size:0.65rem;padding:2px 6px;border:1px solid var(--border);border-radius:10px;background:var(--s2);cursor:pointer;">
-            CA:${a} Ex:${b} Tot:${c}</button>`).join('')}
-      </div>`:''}`;
-    }).join('')}`;
-
-  $('socr-save-btn').style.display='block';
-}
-
-
-function socrPickAlt(i, ca, exam){
-  const caEl  = document.getElementById('socr-ca-'+i);
-  const exEl  = document.getElementById('socr-ex-'+i);
-  if(caEl)  caEl.value  = ca;
-  if(exEl)  exEl.value  = exam;
-  socrUpdateTotal(i);
-}
-
-function socrUpdateTotal(i){
-  const ca=parseFloat(document.getElementById('socr-ca-'+i)?.value)||0;
-  const ex=parseFloat(document.getElementById('socr-ex-'+i)?.value)||0;
-  const tot=ca+ex;
-  const el=document.getElementById('socr-tot-'+i);
-  if(el){ el.textContent=tot||'—'; el.style.color=tot>=70?'var(--money)':'var(--text)'; }
-}
-
-async function socrSaveScores(){
-  const sub=$('socr-subj').value;
-  const results=window._socrParsed||[];
-  if(!results.length)return;
-
-  let saved=0;
-  results.forEach((r,i)=>{
-    const ca=parseFloat(document.getElementById('socr-ca-'+i)?.value);
-    const ex=parseFloat(document.getElementById('socr-ex-'+i)?.value);
-    if(isNaN(ca)&&isNaN(ex))return;
-    const s=SD.students[r.stuIdx]; if(!s)return;
-    if(!s.scores)s.scores={};
-    s.scores[sub]={
-      ca:Math.min(40,Math.max(0,isNaN(ca)?0:ca)),
-      exam:Math.min(60,Math.max(0,isNaN(ex)?0:ex))
-    };
-    saved++;
-  });
-
-  await SQ.push('students',SD.students);
-  closeM('score-ocr-modal');
-  alert(`✅ ${sub} scores saved for ${saved} student${saved!==1?'s':''}!\n\nGo to Students → open any profile → Scores tab to verify.`);
-}
-
-
-// ── Subject Manager ─────────────────────────────────────────────────────
-const PRESET_SUBJECTS={
-  primary:['English Language','Mathematics','Basic Science & Technology','Social Studies',
-    'National Values Education','Cultural & Creative Arts','Computer Science',
-    'Physical & Health Education','Agricultural Science','French Language',
-    'Yoruba Language','Igbo Language','Hausa Language','Home Economics',
-    'Civic Education','Security Education','Business Studies','Religious Studies'],
-  jss:['English Language','Mathematics','Basic Science','Basic Technology',
-    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Studies',
-    'Agricultural Science','Home Economics','Business Studies','French Language',
-    'Yoruba Language','Igbo Language','Hausa Language','Physical & Health Education',
-    'Religious Studies','Security Education'],
-  sss:['English Language','Mathematics','Further Mathematics','Physics','Chemistry',
-    'Biology','Agricultural Science','Economics','Government','Literature in English',
-    'Geography','Commerce','Accounting','Civic Education','Computer Studies',
-    'French Language','Yoruba Language','Igbo Language','Hausa Language',
-    'Physical Education','Visual Arts','Music','Home Economics']
-};
-
-function renderSubjectChips(){
-  const subs=SD.config.subjects||[];
-  const c=$('subj-chips');if(!c)return;
-  c.innerHTML=subs.map((s,i)=>
-    `<span class="subj-chip">${esc(s)}<button onclick="removeSubject(${i})" class="chip-del">×</button></span>`
-  ).join('');
-}
-
-function removeSubject(idx){
-  if(!SD.config.subjects)return;
-  SD.config.subjects.splice(idx,1);
-  renderSubjectChips();
-  $('set-subjects').value=SD.config.subjects.join(', ');
-}
-
-function addSubjectFromInput(){
-  const inp=$('new-subj-inp');if(!inp)return;
-  const name=inp.value.trim();if(!name)return;
-  if(!SD.config.subjects)SD.config.subjects=[];
-  if(SD.config.subjects.includes(name)){inp.value='';return;}
-  SD.config.subjects.push(name);
-  renderSubjectChips();
-  $('set-subjects').value=SD.config.subjects.join(', ');
-  inp.value='';
-}
-
-function loadPresetSubjects(level){
-  const list=PRESET_SUBJECTS[level];if(!list)return;
-  SD.config.subjects=[...list];
-  renderSubjectChips();
-  $('set-subjects').value=SD.config.subjects.join(', ');
-}
-
-
-// ── Individual Script Scanner ────────────────────────────────────────────
-// Teacher marks a paper, points camera at it.
-// App reads the student name + score from that single script.
-// Loops: scan → confirm → next script → scan → confirm → next...
-
-let _scriptQueue = [];   // queued results waiting to save
-let _scriptSubject = ''; // which subject we're scanning for
-
-function openScriptScan(){
-  openM('script-scan-modal');
-  const subs = SD.config.subjects || ['English Language','Mathematics'];
-  $('scan-subj').innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-  $('scan-status').textContent = '';
-  $('scan-result').innerHTML = '';
-  $('scan-queue-count').textContent = '';
-  $('scan-img-input').value = '';
-  _scriptQueue = [];
-  _scriptSubject = subs[0] || '';
-}
-
-function scanSubjChanged(){
-  _scriptSubject = $('scan-subj').value;
-}
-
-function triggerScriptScan(){
-  _scriptSubject = $('scan-subj').value;
-  if(!_scriptSubject){ alert('Select a subject first.'); return; }
-  $('scan-img-input').click();
-}
-
-async function handleScriptImage(e){
-  const f = e.target.files[0]; if(!f) return;
-  e.target.value = '';
-
-  $('scan-status').innerHTML = '<span style="color:var(--sub);">📸 Reading script…</span>';
-  $('scan-result').innerHTML = '';
-
-  // Load Tesseract if needed
-  await new Promise((res,rej)=>{
-    if(window.Tesseract){res();return;}
-    const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload=res; s.onerror=rej;
-    document.head.appendChild(s);
-  });
-
-  const imgData = await new Promise((res,rej)=>{
-    const r=new FileReader();
-    r.onload=ev=>res(ev.target.result);
-    r.onerror=rej;
-    r.readAsDataURL(f);
-  });
-
-  try{
-    const {data:{text}} = await Tesseract.recognize(imgData,'eng',{
-      logger:m=>{
-        if(m.status==='recognizing text')
-          $('scan-status').innerHTML=`<span style="color:var(--sub);">📸 Reading… ${Math.round((m.progress||0)*100)}%</span>`;
-      }
-    });
-
-    $('scan-status').innerHTML = '<span style="color:var(--sub);">🔍 Finding name and score…</span>';
-    const result = parseScriptOCR(text);
-    renderScriptResult(result);
-
-  }catch(err){
-    $('scan-status').innerHTML = '<span style="color:var(--danger);">❌ Could not read. Try better lighting.</span>';
-    console.error(err);
-  }
-}
-
-function parseScriptOCR(raw){
-  const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const sub = _scriptSubject;
-
-  // ── Try to find student name ──────────────────────────────────────────
-  // Look for "Name:" label, or the line that best matches a known student
-  let detectedName = null;
-  let bestStudent = null;
-  let bestSim = 0;
-
-  const nameSim = (a,b) => {
-    const wa=a.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
-    const wb=b.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w.length>1);
-    if(!wa.length||!wb.length) return 0;
-    const shared=wa.filter(w=>wb.includes(w)).length;
-    let prefix=0;
-    wa.forEach(w=>{if(w.length>2&&wb.some(v=>v.startsWith(w)||w.startsWith(v)))prefix+=0.4;});
-    return (shared+prefix)/Math.max(wa.length,wb.length);
-  };
-
-  // Check every line against all students
-  lines.forEach(line=>{
-    // Strip "Name:", "Student:", "Pupil:" labels
-    const cleaned = line.replace(/^(name|student|pupil|candidate)[:\s]*/i,'').trim();
-    if(cleaned.length < 3) return;
-    SD.students.forEach(s=>{
-      const sim = nameSim(cleaned, s.name);
-      if(sim > bestSim){ bestSim=sim; bestStudent=s; detectedName=cleaned; }
-    });
-  });
-
-  // ── Try to find score ─────────────────────────────────────────────────
-  // Look for patterns like: "Total: 78", "Score: 45/60", "78/100", "CA: 32  Exam: 51"
-  let ca = null, exam = null, total = null;
-
-  const allNums = raw.match(/\b\d{1,3}\b/g)||[];
-  const scores = allNums.map(Number).filter(n=>n<=100&&n>=0);
-
-  // Pattern 1: explicit CA and Exam labels
-  const caMatch = raw.match(/\b(ca|continuous\s*assessment)[:\s]*(\d{1,2})/i);
-  const exMatch = raw.match(/\b(exam|examination|test)[:\s]*(\d{1,2})/i);
-  if(caMatch) ca = Math.min(40, parseInt(caMatch[2]));
-  if(exMatch) exam = Math.min(60, parseInt(exMatch[2]));
-
-  // Pattern 2: "Total: 78" or "78/100"
-  if(ca===null && exam===null){
-    const totMatch = raw.match(/\b(total|score|mark)[:\s]*(\d{1,3})\s*(?:\/\s*100)?/i);
-    if(totMatch) total = Math.min(100, parseInt(totMatch[2]));
-  }
-
-  // Pattern 3: two numbers ≤40 then ≤60 (typical table row)
-  if(ca===null && exam===null && total===null){
-    for(let i=0; i<scores.length-1; i++){
-      if(scores[i]<=40 && scores[i+1]<=60){ ca=scores[i]; exam=scores[i+1]; break; }
-    }
-  }
-
-  // Pattern 4: single number ≤100 as total
-  if(ca===null && exam===null && total===null && scores.length>=1){
-    total = scores.find(n=>n>0) || null;
-  }
-
-  return {
-    detectedName,
-    bestStudent,
-    bestSim: Math.round(bestSim*100),
-    ca, exam, total,
-    sub
-  };
-}
-
-function renderScriptResult(r){
-  const hasScore = r.ca!==null || r.exam!==null || r.total!==null;
-  const hasStudent = r.bestStudent && r.bestSim >= 30;
-
-  $('scan-status').innerHTML = '';
-
-  // Student picker
-  const stuOptions = SD.students.map((s,i)=>
-    `<option value="${i}" ${r.bestStudent&&SD.students.indexOf(r.bestStudent)===i?'selected':''}>${esc(s.name)} (${s.class||'—'})</option>`
-  ).join('');
-
-  const computedTotal = r.ca!==null && r.exam!==null ? (r.ca+r.exam) :
-                        r.total!==null ? r.total : '—';
-
-  $('scan-result').innerHTML = `
-    <div style="background:var(--s2);border-radius:12px;padding:0.85rem;margin-bottom:0.65rem;">
-      <div style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;">
-        ${hasStudent?`Matched at ${r.bestSim}% confidence`:'⚠️ Name not recognised — select manually'}
-      </div>
-      <label style="font-size:0.78rem;">Student</label>
-      <select id="scan-stu-sel" style="margin:0 0 0.5rem;font-size:0.82rem;">
-        <option value="">— Select student —</option>
-        ${stuOptions}
-      </select>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.5rem;">
-        <div>
-          <label style="font-size:0.72rem;">CA /40</label>
-          <input type="number" min="0" max="40" id="scan-ca"
-            value="${r.ca!==null?r.ca:''}" placeholder="—"
-            inputmode="numeric" style="text-align:center;margin:0;font-size:0.9rem;">
-        </div>
-        <div>
-          <label style="font-size:0.72rem;">Exam /60</label>
-          <input type="number" min="0" max="60" id="scan-exam"
-            value="${r.exam!==null?r.exam:''}" placeholder="—"
-            inputmode="numeric" style="text-align:center;margin:0;font-size:0.9rem;">
-        </div>
-        <div>
-          <label style="font-size:0.72rem;">Total</label>
-          <div style="font-size:1.4rem;font-weight:900;text-align:center;color:var(--money);padding-top:4px;">${computedTotal}</div>
-        </div>
-      </div>
-
-      <div style="display:flex;gap:0.4rem;">
-        <button class="btn-money" style="flex:1;" onclick="confirmScript()">✅ Confirm & Queue</button>
-        <button class="btn-ghost btn-sm" onclick="$('scan-result').innerHTML='';$('scan-status').textContent=''">✖ Discard</button>
-      </div>
-    </div>`;
-}
-
-async function confirmScript(){
-  const stuSel = $('scan-stu-sel');
-  const idx = parseInt(stuSel?.value);
-  if(isNaN(idx)||idx<0){ alert('Select the student first.'); return; }
-  const s = SD.students[idx]; if(!s) return;
-  const ca = parseFloat($('scan-ca')?.value);
-  const ex = parseFloat($('scan-exam')?.value);
-  if(isNaN(ca)&&isNaN(ex)){ alert('Enter at least one score.'); return; }
-  if(!s.scores) s.scores={};
-  s.scores[_scriptSubject]={
-    ca: Math.min(40,Math.max(0,isNaN(ca)?0:ca)),
-    exam: Math.min(60,Math.max(0,isNaN(ex)?0:ex))
-  };
-  _scriptQueue.push({name:s.name, sub:_scriptSubject, ca:isNaN(ca)?0:ca, exam:isNaN(ex)?0:ex});
-
-  // Save to state immediately, debounce Firestore
-  clearTimeout(window._scriptSaveTimer);
-  window._scriptSaveTimer = setTimeout(()=>SQ.push('students',SD.students), 1500);
-
-  $('scan-result').innerHTML = '';
-  $('scan-status').innerHTML = `<span style="color:var(--money);">✅ ${esc(s.name)} saved — scan next paper</span>`;
-  $('scan-queue-count').textContent = `${_scriptQueue.length} saved this session`;
-  // Auto-trigger camera again after short delay for fluid scanning
-  setTimeout(()=>{ $('scan-img-input').click(); }, 600);
-}
-
-async function finishScriptScan(){
-  if(_scriptQueue.length>0) await SQ.push('students',SD.students);
-  const n = _scriptQueue.length;
-  closeM('script-scan-modal');
-  _scriptQueue=[]; _scriptSubject='';
-  if(n>0) alert(`✅ ${n} script${n!==1?'s':''} saved to student profiles.`);
-}
-
-// ── Boot ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded',()=>{
-  // Restore any saved session (localStorage = "Remember me", sessionStorage = tab-only)
-  const saved = localStorage.getItem('p_auth') || sessionStorage.getItem('p_auth');
-  if(saved){
-    try{
-      const auth = JSON.parse(saved);
-      // Reject the old 'LOCAL' demo fallback — force real login
-      if(auth.schoolId && auth.schoolId !== 'LOCAL'){
-        schoolId  = auth.schoolId;
-        userRole  = auth.role || 'Principal';
-      }
-    }catch(e){}
-  }
-
-  // If we have a valid schoolId AND cached data — launch straight in (offline-first)
-  if(schoolId){
-    const lc = localStorage.getItem(`p_${schoolId}_config`);
-    const ls = localStorage.getItem(`p_${schoolId}_staff`);
-    if(lc && ls){
-      // Full cache present — load and go
-      SD.config   = loadLocal('config',   {schoolName:'Educational Bloom',plan:'basic',fee:50000,currentTerm:'Term 1',session:'2025/2026'});
-      SD.students = loadLocal('students', []);
-      SD.staff    = loadLocal('staff',    [{name:'Principal',email:'',password:'',role:'Principal',phone:''}]);
-      SD.expenses = loadLocal('expenses', []);
-      SD.attendance  = loadLocal('attendance',  {});
-      SD.sports      = loadLocal('sports',      {teams:{},custom:[]});
-      SD.arts        = loadLocal('arts',        {gallery:[]});
-      SD.music       = loadLocal('music',       {practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]});
-      SD.health      = loadLocal('health',   []);
-      SD.alumni      = loadLocal('alumni',   []);
-      SD.socialPages = loadLocal('socialPages', []);
-      SD.commsLog    = loadLocal('commsLog', []);
-      SD.opportunities    = loadLocal('opportunities',    defaultOpps());
-      SD.financialRecords = loadLocal('financialRecords', null);
-
-      $('login').style.display = 'none';
-      $('app').style.display   = 'block';
-      const isPrem = SD.config.plan === 'premium';
-      $('hdr-school').textContent  = SD.config.schoolName || schoolId;
-      $('hdr-role').textContent    = userRole;
-      $('hdr-term').textContent    = SD.config.currentTerm || 'Term 1';
-      $('planBadge').textContent   = isPrem ? 'PREMIUM ✨' : 'BASIC';
-      $('planBadge').className     = 'plan-badge ' + (isPrem ? 'plan-premium' : 'plan-basic');
-      SQ.ping();
-      renderBanner();
-      go('revenue');
-      setTimeout(()=>SQ.flush(),   500);
-      setTimeout(()=>SQ.silentPull(), 2000);
-      return; // ← skip login screen entirely
-    }
-  }
-
-  // No valid session or no local cache — show login
-  // (first-time user, or cache was cleared, or new device)
-  $('login').style.display = 'flex';
-  $('app').style.display   = 'none';
-  SQ.ping();
-});
