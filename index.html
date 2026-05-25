@@ -720,10 +720,15 @@ function toggleEye(inputId, btn) {
       Photograph a class score sheet. The app reads the names and scores and fills them in automatically.
     </p>
 
-    <!-- Step 1: Pick class + subject -->
-    <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem;">
-      <select id="socr-class" style="flex:1;margin:0;font-size:0.82rem;"></select>
-      <select id="socr-subj" style="flex:1;margin:0;font-size:0.82rem;"></select>
+    <!-- Step 1: Pick class + subject + term -->
+    <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem;flex-wrap:wrap;">
+      <select id="socr-class" style="flex:1;min-width:120px;margin:0;font-size:0.82rem;"></select>
+      <select id="socr-subj" style="flex:2;min-width:140px;margin:0;font-size:0.82rem;"></select>
+      <select id="socr-term" style="flex:0 0 90px;margin:0;font-size:0.82rem;">
+        <option value="1">Term 1</option>
+        <option value="2">Term 2</option>
+        <option value="3">Term 3</option>
+      </select>
     </div>
 
     <!-- Step 2: Photo button -->
