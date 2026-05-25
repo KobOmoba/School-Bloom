@@ -1163,7 +1163,9 @@ function renderScorecard(){
     </div>`:''}
     <div style="display:flex;gap:0.5rem;margin-top:0.7rem;flex-wrap:wrap;">
       <button class="btn-ghost" onclick="printBroadsheet('${esc(activeClass)}','${activeView}')">🖨️ Print Broadsheet</button>
-      <button class="btn-brand" onclick="go('students')">📝 Enter Scores</button>
+      <button class="btn-ghost" onclick="printAllReportCards('${esc(activeClass)}','${activeView==='Cumulative'?'Term 3':activeView}')">🖨️ Print All Cards</button>
+      <button class="btn-ghost" style="background:var(--s2);" onclick="renderBulkScoreGrid('${esc(activeClass)}','${SD.config.currentTerm||'Term 1'}',0)">✏️ Bulk Score Entry</button>
+      <button class="btn-brand" onclick="_wizState={cls:'${esc(activeClass)}',term:SD.config.currentTerm||'Term 1',step:1};renderWizard()">🧙 End-of-Term Wizard</button>
     </div>
   </div>`;
 }
@@ -1312,6 +1314,507 @@ function printBroadsheet(cls,view){
   <button onclick="window.print()" style="margin-top:8px;padding:5px 14px;cursor:pointer;">🖨️ Print</button>
   </body></html>`);
   w.document.close();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// BULK SCORE ENTRY GRID
+// ═══════════════════════════════════════════════════════════════════════
+
+function renderBulkScoreGrid(cls, term, subIdx){
+  const subs = SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const sub = subs[subIdx] || subs[0];
+  const classStudents = SD.students.filter(s=>s.class===cls);
+  const el = document.getElementById('scorecard-content');
+  if(!el) return;
+
+  const subTabs = subs.map((s,i)=>
+    `<button onclick="renderBulkScoreGrid('${esc(cls)}','${esc(term)}',${i})"
+      style="padding:4px 9px;border-radius:16px;font-size:0.72rem;white-space:nowrap;
+      border:1px solid var(--border);cursor:pointer;
+      background:${i===subIdx?'var(--brand)':'var(--s2)'};
+      color:${i===subIdx?'white':'var(--text)'};">${esc(s)}</button>`
+  ).join('');
+
+  const rows = classStudents.map((s,i)=>{
+    const sid = s.id || SD.students.indexOf(s);
+    const v = ((SD.scores[term]||{})[sid]||{})[sub] || {ca1:0,ca2:0,ca3:0,exam:0};
+    const caT = (v.ca1||0)+(v.ca2||0)+(v.ca3||0);
+    const tot = caT + (v.exam||0);
+    const {g,col} = getGrade(tot);
+    const tabBase = i*4;
+    return`<tr id="bsg-row-${i}" style="${tot>=70?'background:rgba(16,185,129,0.04)':''}">
+      <td style="font-size:0.76rem;font-weight:600;padding:5px 6px;white-space:nowrap;">${esc(s.name)}</td>
+      <td style="padding:2px;"><input type="number" min="0" max="10" value="${v.ca1||''}"
+        tabindex="${tabBase+1}" placeholder="0"
+        onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca1',this.value)"
+        onkeydown="bsgNav(event,${i},0,${classStudents.length})"
+        style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;
+        border:1px solid ${v.ca1?'var(--brand)':'var(--border)'};border-radius:6px;"
+        id="bsg-${i}-0"></td>
+      <td style="padding:2px;"><input type="number" min="0" max="10" value="${v.ca2||''}"
+        tabindex="${tabBase+2}" placeholder="0"
+        onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca2',this.value)"
+        onkeydown="bsgNav(event,${i},1,${classStudents.length})"
+        style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;
+        border:1px solid ${v.ca2?'var(--brand)':'var(--border)'};border-radius:6px;"
+        id="bsg-${i}-1"></td>
+      <td style="padding:2px;"><input type="number" min="0" max="10" value="${v.ca3||''}"
+        tabindex="${tabBase+3}" placeholder="0"
+        onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca3',this.value)"
+        onkeydown="bsgNav(event,${i},2,${classStudents.length})"
+        style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;
+        border:1px solid ${v.ca3?'var(--brand)':'var(--border)'};border-radius:6px;"
+        id="bsg-${i}-2"></td>
+      <td style="padding:2px;"><input type="number" min="0" max="70" value="${v.exam||''}"
+        tabindex="${tabBase+4}" placeholder="0"
+        onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'exam',this.value)"
+        onkeydown="bsgNav(event,${i},3,${classStudents.length})"
+        style="width:48px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;
+        border:1px solid ${v.exam?'var(--brand)':'var(--border)'};border-radius:6px;"
+        id="bsg-${i}-3"></td>
+      <td style="text-align:center;font-weight:700;font-family:'DM Mono',monospace;
+        font-size:0.82rem;color:${tot>0?'var(--text)':'var(--border)'};">${tot||'–'}</td>
+      <td style="text-align:center;"><span style="font-weight:700;font-size:0.76rem;color:${col};">${tot>0?g:'–'}</span></td>
+    </tr>`;
+  }).join('');
+
+  // count entered
+  const entered = classStudents.filter(s=>{
+    const sid=s.id||SD.students.indexOf(s);
+    const v=((SD.scores[term]||{})[sid]||{})[sub]||{};
+    return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0)>0;
+  }).length;
+
+  el.innerHTML = `<div class="card" style="padding:0.75rem 0.5rem;">
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.6rem;">
+      <button class="btn-ghost" style="padding:4px 10px;font-size:0.76rem;" onclick="renderScorecard()">← Broadsheet</button>
+      <div class="ct" style="margin:0;flex:1;">✏️ Bulk Score Entry — ${esc(cls)} · ${term}</div>
+      <button class="btn-brand" style="padding:5px 12px;font-size:0.78rem;" onclick="bsgSaveAll('${esc(cls)}','${esc(term)}')">💾 Save All</button>
+    </div>
+
+    <p style="font-size:0.74rem;color:var(--sub);margin-bottom:0.5rem;">
+      📌 <strong>${esc(sub)}</strong> &nbsp;·&nbsp; ${entered}/${classStudents.length} students entered
+      &nbsp;·&nbsp; Tab/Enter to move between cells
+    </p>
+
+    <!-- Subject tabs -->
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:0.65rem;overflow-x:auto;padding-bottom:4px;">
+      ${subTabs}
+    </div>
+
+    <!-- Score grid -->
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:8px;">
+      <table class="stbl" style="font-size:0.78rem;min-width:380px;">
+        <thead><tr style="background:var(--s1);">
+          <th style="text-align:left;min-width:110px;">Student</th>
+          <th style="min-width:50px;font-size:0.7rem;">1st CA<br><span style="color:var(--sub)">/10</span></th>
+          <th style="min-width:50px;font-size:0.7rem;">2nd CA<br><span style="color:var(--sub)">/10</span></th>
+          <th style="min-width:50px;font-size:0.7rem;">3rd CA<br><span style="color:var(--sub)">/10</span></th>
+          <th style="min-width:54px;font-size:0.7rem;">Exam<br><span style="color:var(--sub)">/70</span></th>
+          <th style="min-width:40px;font-size:0.7rem;">Total<br><span style="color:var(--sub)">/100</span></th>
+          <th style="min-width:32px;font-size:0.7rem;">Grd</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+
+    <!-- Next subject quick nav -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.6rem;flex-wrap:wrap;gap:0.4rem;">
+      ${subIdx>0?`<button class="btn-ghost" style="font-size:0.76rem;padding:5px 12px;"
+        onclick="bsgSaveAll('${esc(cls)}','${esc(term)}');renderBulkScoreGrid('${esc(cls)}','${esc(term)}',${subIdx-1})">
+        ← ${esc(subs[subIdx-1]||'')}</button>`:'<div></div>'}
+      ${subIdx<subs.length-1?`<button class="btn-brand" style="font-size:0.76rem;padding:5px 12px;"
+        onclick="bsgSaveAll('${esc(cls)}','${esc(term)}');renderBulkScoreGrid('${esc(cls)}','${esc(term)}',${subIdx+1})">
+        ${esc(subs[subIdx+1]||'')} →</button>`:`<button class="btn-brand" style="font-size:0.76rem;padding:5px 14px;"
+        onclick="bsgSaveAll('${esc(cls)}','${esc(term)}');renderScorecard()">
+        ✅ Done — View Broadsheet</button>`}
+    </div>
+  </div>`;
+
+  // Focus first empty cell
+  setTimeout(()=>{
+    for(let i=0;i<classStudents.length;i++){
+      const el=document.getElementById(`bsg-${i}-3`);
+      if(el&&!el.value){el.focus();break;}
+    }
+  },100);
+}
+
+function bsgUpdate(cls,term,sub,rowIdx,field,val){
+  const classStudents=SD.students.filter(s=>s.class===cls);
+  const s=classStudents[rowIdx]; if(!s) return;
+  const sid=s.id||SD.students.indexOf(s);
+  if(!SD.scores[term]) SD.scores[term]={};
+  if(!SD.scores[term][sid]) SD.scores[term][sid]={};
+  if(!SD.scores[term][sid][sub]) SD.scores[term][sid][sub]={ca1:0,ca2:0,ca3:0,exam:0};
+  SD.scores[term][sid][sub][field]=parseInt(val)||0;
+  // Live update total cell
+  const v=SD.scores[term][sid][sub];
+  const tot=(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
+  const row=document.getElementById('bsg-row-'+rowIdx);
+  if(row){
+    const cells=row.querySelectorAll('td');
+    const {g,col}=getGrade(tot);
+    if(cells[5]) cells[5].textContent=tot||'–';
+    if(cells[6]) cells[6].innerHTML=`<span style="font-weight:700;font-size:0.76rem;color:${col};">${tot>0?g:'–'}</span>`;
+    row.style.background=tot>=70?'rgba(16,185,129,0.04)':'';
+    // highlight border
+    const inp=document.getElementById(`bsg-${rowIdx}-${['ca1','ca2','ca3','exam'].indexOf(field)}`);
+    if(inp) inp.style.borderColor=val?'var(--brand)':'var(--border)';
+  }
+}
+
+function bsgNav(e,row,col,total){
+  // Enter or ArrowDown → next row same col; ArrowUp → prev row same col
+  if(e.key==='Enter'||e.key==='ArrowDown'){
+    e.preventDefault();
+    const next=document.getElementById(`bsg-${row+1}-${col}`);
+    if(next) next.focus();
+  } else if(e.key==='ArrowUp'){
+    e.preventDefault();
+    const prev=document.getElementById(`bsg-${row-1}-${col}`);
+    if(prev) prev.focus();
+  }
+}
+
+function bsgSaveAll(cls,term){
+  saveLocal('scores',SD.scores);
+  SQ.push({key:'scores',data:SD.scores});
+  toast('✅ Scores saved!');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PRINT ALL REPORT CARDS AT ONCE
+// ═══════════════════════════════════════════════════════════════════════
+
+function printAllReportCards(cls, term){
+  const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const classStudents=SD.students.filter(s=>s.class===cls);
+  if(!classStudents.length){toast('No students in this class.');return;}
+  const cfg=SD.config;
+
+  // Pre-compute positions
+  const allAvgs=classStudents.map(s=>{
+    const sid=s.id||SD.students.indexOf(s);
+    const {avg}=calcStudentTermStats(sid,term,subs);
+    return{name:s.name,avg};
+  }).sort((a,b)=>b.avg-a.avg);
+
+  const cards=classStudents.map(s=>{
+    const sid=s.id||SD.students.indexOf(s);
+    const termData=(SD.scores[term]||{})[sid]||{};
+    const aff=((SD.affective||{})[sid]||{})[term]||{};
+    const myPos=(allAvgs.findIndex(r=>r.name===s.name)+1)||'–';
+    const daysPresent=Object.values(SD.attendance[s.name]||{}).filter(v=>v==='present').length;
+
+    const rows=subs.map(sub=>{
+      const v=termData[sub]||{ca1:0,ca2:0,ca3:0,exam:0};
+      const caT=(v.ca1||0)+(v.ca2||0)+(v.ca3||0);
+      const tot=caT+(v.exam||0);
+      const{g}=getGrade(tot);
+      const subRanked=classStudents.map(st=>{
+        const stid=st.id||SD.students.indexOf(st);
+        const sv=((SD.scores[term]||{})[stid]||{})[sub]||{};
+        return{name:st.name,tot:(sv.ca1||0)+(sv.ca2||0)+(sv.ca3||0)+(sv.exam||0)};
+      }).sort((a,b)=>b.tot-a.tot);
+      const sPos=(subRanked.findIndex(r=>r.name===s.name)+1)||'–';
+      return`<tr><td>${sub}</td><td>${v.ca1||''}</td><td>${v.ca2||''}</td><td>${v.ca3||''}</td>
+        <td>${caT||''}</td><td>${v.exam||''}</td>
+        <td style="font-weight:700;color:${tot>=70?'green':tot>=50?'#333':'red'};">${tot||''}</td>
+        <td style="font-weight:700;">${tot>0?g:''}</td><td>${tot>0?sPos:''}</td></tr>`;
+    }).join('');
+    const totals=subs.map(sub=>{const v=termData[sub]||{};return(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);}).filter(v=>v>0);
+    const avg=totals.length?Math.round(totals.reduce((a,b)=>a+b,0)/totals.length):0;
+    const affTraits=['Punctuality','Neatness','Attentiveness','Honesty','Politeness','Relationship with others'];
+    const psyTraits=['Handwriting','Sports Ability','Drawing & Craft','Class Participation'];
+    const stars=n=>['','★','★★','★★★','★★★★','★★★★★'][n]||'–';
+    const affRows=affTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['aff_'+t]||0)}</td></tr>`).join('');
+    const psyRows=psyTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['psy_'+t]||0)}</td></tr>`).join('');
+
+    return`<div class="card-page" style="page-break-after:always;padding:18px;font-family:Arial,sans-serif;font-size:11.5px;color:#111;max-width:720px;margin:0 auto;">
+      <div style="text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px;">
+        <h1 style="font-size:17px;margin:3px 0;">${esc(cfg.schoolName||'School')}</h1>
+        <h2 style="font-size:12px;margin:2px 0;color:#555;">Student Report Card — ${term} ${cfg.session||''}</h2>
+        ${cfg.address?`<p style="font-size:10px;margin:1px 0;">${esc(cfg.address)}</p>`:''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:8px;">
+        <div><b>Student:</b> ${esc(s.name)}</div><div><b>Class:</b> ${esc(s.class||'')}</div>
+        <div><b>Admission No:</b> ${esc(s.admissionNo||'–')}</div><div><b>Term:</b> ${term}</div>
+        <div><b>Days Opened:</b> ${cfg.daysOpened||'–'}</div><div><b>Days Present:</b> ${daysPresent}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:6px 0;text-align:center;">
+        <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${avg||'–'}</div>Average</div>
+        <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${avg>0?getGrade(avg).g:'–'}</div>Grade</div>
+        <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${myPos}</div>Position</div>
+        <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${classStudents.length}</div>In Class</div>
+      </div>
+      <div style="font-weight:700;font-size:11px;background:#e8e8e8;padding:3px 5px;margin:6px 0 3px;">ACADEMIC PERFORMANCE</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:8px;">
+        <thead><tr style="background:#f0f0f0;">
+          <th style="border:1px solid #bbb;padding:3px 4px;text-align:left;">Subject</th>
+          <th style="border:1px solid #bbb;padding:3px 2px;">1st CA</th><th style="border:1px solid #bbb;padding:3px 2px;">2nd CA</th>
+          <th style="border:1px solid #bbb;padding:3px 2px;">3rd CA</th><th style="border:1px solid #bbb;padding:3px 2px;">CA/30</th>
+          <th style="border:1px solid #bbb;padding:3px 2px;">Exam/70</th><th style="border:1px solid #bbb;padding:3px 2px;font-weight:700;">Total/100</th>
+          <th style="border:1px solid #bbb;padding:3px 2px;">Grade</th><th style="border:1px solid #bbb;padding:3px 2px;">Pos.</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:9.5px;margin:4px 0 6px;">
+        <b>Grades:</b>
+        <span style="padding:1px 5px;border-radius:3px;background:#d1fae5;">A 70-100 Excellent</span>
+        <span style="padding:1px 5px;border-radius:3px;background:#dbeafe;">B 60-69 Very Good</span>
+        <span style="padding:1px 5px;border-radius:3px;background:#fef9c3;">C 50-59 Good</span>
+        <span style="padding:1px 5px;border-radius:3px;background:#ffedd5;">D 40-49 Fair</span>
+        <span style="padding:1px 5px;border-radius:3px;background:#fee2e2;">F 0-39 Fail</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div><div style="font-weight:700;font-size:11px;background:#e8e8e8;padding:3px 5px;margin-bottom:3px;">AFFECTIVE DOMAIN</div>
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead><tr style="background:#f0f0f0;"><th style="border:1px solid #bbb;padding:2px 4px;text-align:left;">Trait</th><th style="border:1px solid #bbb;padding:2px 4px;">Rating</th></tr></thead>
+            <tbody>${affRows}</tbody></table></div>
+        <div><div style="font-weight:700;font-size:11px;background:#e8e8e8;padding:3px 5px;margin-bottom:3px;">PSYCHOMOTOR SKILLS</div>
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead><tr style="background:#f0f0f0;"><th style="border:1px solid #bbb;padding:2px 4px;text-align:left;">Skill</th><th style="border:1px solid #bbb;padding:2px 4px;">Rating</th></tr></thead>
+            <tbody>${psyRows}</tbody></table></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div style="border:1px solid #ccc;border-radius:4px;padding:6px;min-height:40px;"><b>Class Teacher's Remark:</b><br><br>____________________</div>
+        <div style="border:1px solid #ccc;border-radius:4px;padding:6px;min-height:40px;"><b>Principal's Comment:</b><br><br>____________________</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;flex-wrap:wrap;gap:4px;">
+        <div>Teacher's Signature: ______________</div>
+        <div>Principal's Signature: ______________</div>
+        <div>Next Term Begins: ______________</div>
+        <div>Parent's Signature: ______________</div>
+      </div>
+    </div>`;
+  }).join('\n');
+
+  const w=window.open('','_blank','width=820,height=900');
+  if(!w)return alert('Please allow popups.');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Report Cards – ${esc(cls)} – ${term}</title>
+  <style>
+    body{margin:0;padding:10px;background:#f5f5f5;}
+    .card-page{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.12);margin-bottom:20px;}
+    table td,table th{border:1px solid #bbb;padding:3px 4px;}
+    @media print{
+      body{background:none;padding:0;}
+      .card-page{box-shadow:none;margin:0;page-break-after:always;}
+      .no-print{display:none;}
+    }
+  </style>
+  </head><body>
+  <div class="no-print" style="position:sticky;top:0;background:#1e293b;color:white;
+    padding:10px 16px;display:flex;align-items:center;gap:12px;z-index:999;font-family:sans-serif;">
+    <span style="font-weight:700;">📋 ${classStudents.length} Report Cards — ${esc(cls)} · ${term}</span>
+    <button onclick="window.print()" style="padding:6px 18px;background:#22c55e;color:white;
+      border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px;">🖨️ Print All / Save PDF</button>
+    <span style="font-size:11px;color:#94a3b8;">Tip: In print dialog → "Save as PDF" to get a digital copy</span>
+  </div>
+  ${cards}
+  </body></html>`);
+  w.document.close();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// END-OF-TERM WIZARD
+// ═══════════════════════════════════════════════════════════════════════
+
+let _wizState = {cls:'', term:'', step:1};
+
+function renderWizard(){
+  const el=document.getElementById('scorecard-content');
+  if(!el)return;
+  const classes=[...new Set(SD.students.map(s=>s.class).filter(Boolean))].sort();
+  const {cls,term,step}=_wizState;
+  const subs=SD.config.subjects||['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+
+  if(step===1){
+    const classOpts=classes.map(c=>`<option value="${esc(c)}" ${c===cls?'selected':''}>${esc(c)}</option>`).join('');
+    el.innerHTML=`<div class="card" style="padding:1rem 0.75rem;max-width:440px;margin:0 auto;">
+      <div style="text-align:center;margin-bottom:1rem;">
+        <div style="font-size:2rem;">📋</div>
+        <div style="font-weight:800;font-size:1.05rem;">End-of-Term Wizard</div>
+        <p style="color:var(--sub);font-size:0.8rem;margin-top:4px;">
+          Close out the term in 3 steps — score entry, review rankings, print all cards.
+        </p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.6rem;">
+        <div>
+          <label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:3px;">Class</label>
+          <select id="wiz-class" style="width:100%;font-size:0.9rem;">
+            ${classOpts}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:3px;">Term to close</label>
+          <select id="wiz-term" style="width:100%;font-size:0.9rem;">
+            <option value="Term 1" ${term==='Term 1'?'selected':''}>Term 1</option>
+            <option value="Term 2" ${term==='Term 2'?'selected':''}>Term 2</option>
+            <option value="Term 3" ${term==='Term 3'?'selected':''}>Term 3</option>
+          </select>
+        </div>
+        <button class="btn-brand" style="margin-top:0.4rem;padding:0.65rem;" onclick="wizNext1()">
+          Let's go → Step 1: Enter Scores
+        </button>
+        <button class="btn-ghost" style="font-size:0.78rem;" onclick="renderScorecard()">← Back to Broadsheet</button>
+      </div>
+      <div style="margin-top:1rem;background:var(--s2);border-radius:8px;padding:0.6rem 0.75rem;">
+        <div style="font-size:0.72rem;font-weight:700;color:var(--sub);margin-bottom:4px;">WHAT THE WIZARD DOES</div>
+        <div style="font-size:0.76rem;display:flex;flex-direction:column;gap:3px;">
+          <div>✏️ <b>Step 1:</b> Enter scores for all subjects class by class</div>
+          <div>📊 <b>Step 2:</b> Review computed rankings &amp; honours board</div>
+          <div>🖨️ <b>Step 3:</b> Print all ${cls?SD.students.filter(s=>s.class===cls).length:''} report cards in one click</div>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if(step===2){
+    // Step 2: Bulk score entry for all subjects — reuse bsg but with wizard chrome
+    const classStudents=SD.students.filter(s=>s.class===cls);
+    const totalSubs=subs.length;
+    const subsDone=subs.filter(sub=>{
+      return classStudents.some(s=>{
+        const sid=s.id||SD.students.indexOf(s);
+        const v=((SD.scores[term]||{})[sid]||{})[sub]||{};
+        return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0)>0;
+      });
+    }).length;
+    const pct=Math.round(subsDone/totalSubs*100);
+
+    // Progress bar + subject completion chips
+    const subChips=subs.map((sub,i)=>{
+      const done=classStudents.some(s=>{
+        const sid=s.id||SD.students.indexOf(s);
+        const v=((SD.scores[term]||{})[sid]||{})[sub]||{};
+        return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0)>0;
+      });
+      return`<div onclick="wizOpenSubject(${i})" style="padding:3px 8px;border-radius:12px;font-size:0.7rem;
+        cursor:pointer;border:1px solid ${done?'var(--money)':'var(--border)'};
+        background:${done?'rgba(16,185,129,0.08)':'var(--s2)'};
+        color:${done?'var(--money)':'var(--text)'};">
+        ${done?'✅':'○'} ${esc(sub)}</div>`;
+    }).join('');
+
+    el.innerHTML=`<div class="card" style="padding:0.75rem 0.5rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;flex-wrap:wrap;">
+        <button class="btn-ghost" style="padding:4px 10px;font-size:0.76rem;" onclick="_wizState.step=1;renderWizard()">← Back</button>
+        <div class="ct" style="margin:0;flex:1;">Step 1: Enter Scores — ${esc(cls)} · ${term}</div>
+        <button class="btn-brand" style="padding:5px 12px;font-size:0.78rem;" onclick="wizStep3()">Next: Review Rankings →</button>
+      </div>
+
+      <!-- Progress -->
+      <div style="background:var(--s2);border-radius:8px;padding:0.6rem 0.75rem;margin-bottom:0.65rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <span style="font-size:0.78rem;font-weight:700;">${subsDone}/${totalSubs} subjects entered</span>
+          <span style="font-size:0.76rem;color:var(--brand);font-weight:700;">${pct}%</span>
+        </div>
+        <div style="background:var(--border);border-radius:6px;height:7px;">
+          <div style="background:var(--brand);width:${pct}%;height:7px;border-radius:6px;transition:width 0.3s;"></div>
+        </div>
+      </div>
+
+      <!-- Subject chips -->
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:0.65rem;">${subChips}</div>
+      <p style="font-size:0.74rem;color:var(--sub);">Tap a subject above to open its score entry grid. Green = scores entered.</p>
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem;">
+        <button class="btn-brand" style="flex:1;font-size:0.8rem;" onclick="wizOpenSubject(0)">✏️ Start with ${esc(subs[0])}</button>
+        <button class="btn-ghost" style="font-size:0.78rem;" onclick="wizStep3()">Skip to Rankings →</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if(step===3){
+    // Step 3: Rankings review
+    const classStudents=SD.students.filter(s=>s.class===cls);
+    const stats=classStudents.map(s=>{
+      const sid=s.id||SD.students.indexOf(s);
+      const{avg,count}=calcStudentTermStats(sid,term,subs);
+      return{s,avg,count};
+    }).sort((a,b)=>b.avg-a.avg);
+    const entered=stats.filter(r=>r.count>0).length;
+    const medals=['🥇','🥈','🥉'];
+    const honours=stats.filter(r=>r.avg>0).slice(0,3).map((r,i)=>{
+      const{g,col}=getGrade(r.avg);
+      return`<div style="background:var(--s2);border-radius:10px;padding:0.6rem 0.75rem;text-align:center;flex:1;min-width:100px;border:1px solid var(--border);">
+        <div style="font-size:1.5rem;">${medals[i]}</div>
+        <div style="font-weight:800;font-size:0.82rem;">${esc(r.s.name)}</div>
+        <div style="font-size:0.76rem;color:${col};font-weight:700;">Avg: ${r.avg} · Grade ${g}</div>
+      </div>`;
+    }).join('');
+    const rankRows=stats.map((r,i)=>{
+      const{g,col}=getGrade(r.avg);
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+      return`<tr>
+        <td style="text-align:center;font-weight:700;color:${col};">${medal}${i+1}</td>
+        <td style="font-size:0.78rem;font-weight:600;">${esc(r.s.name)}</td>
+        <td style="text-align:center;font-weight:800;color:${col};">${r.avg||'–'}</td>
+        <td style="text-align:center;"><span style="font-weight:700;color:${col};">${r.avg>0?g:'–'}</span></td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML=`<div class="card" style="padding:0.75rem 0.5rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;flex-wrap:wrap;">
+        <button class="btn-ghost" style="padding:4px 10px;font-size:0.76rem;" onclick="_wizState.step=2;renderWizard()">← Back to Scores</button>
+        <div class="ct" style="margin:0;flex:1;">Step 2: Rankings — ${esc(cls)} · ${term}</div>
+      </div>
+      <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.65rem;">${entered}/${classStudents.length} students have scores entered</p>
+      ${honours?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;">${honours}</div>`:''}
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:0.65rem;">
+        <table class="stbl" style="font-size:0.78rem;">
+          <thead><tr style="background:var(--s1);">
+            <th style="width:36px;">#</th><th style="text-align:left;">Student</th>
+            <th>Average</th><th>Grade</th>
+          </tr></thead>
+          <tbody>${rankRows}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button class="btn-ghost" style="flex:1;" onclick="_wizState.step=2;renderWizard()">← Fix Scores</button>
+        <button class="btn-brand" style="flex:2;font-size:0.88rem;padding:0.65rem;"
+          onclick="wizPrintAll()">🖨️ Print All ${classStudents.length} Report Cards →</button>
+      </div>
+    </div>`;
+    return;
+  }
+}
+
+function wizNext1(){
+  _wizState.cls=document.getElementById('wiz-class')?.value||'';
+  _wizState.term=document.getElementById('wiz-term')?.value||'Term 1';
+  _wizState.step=2;renderWizard();
+}
+function wizOpenSubject(subIdx){
+  const{cls,term}=_wizState;
+  // Open bulk grid, but back button returns to wizard step 2
+  renderBulkScoreGrid(cls,term,subIdx);
+  // Patch back button to return to wizard
+  setTimeout(()=>{
+    const backBtns=document.querySelectorAll('#scorecard-content button');
+    backBtns.forEach(b=>{if(b.textContent.includes('← Broadsheet')){
+      b.textContent='← Back to Wizard';
+      b.onclick=()=>{_wizState.step=2;renderWizard();};
+    }});
+  },80);
+}
+function wizStep3(){_wizState.step=3;renderWizard();}
+function wizPrintAll(){
+  const{cls,term}=_wizState;
+  printAllReportCards(cls,term);
 }
 
 function saveScores(idx){
