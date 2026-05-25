@@ -733,7 +733,7 @@ function buildFees(s,idx){
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
-    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${s.paymentHistory.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span>${p.date} · ${p.method}</span><strong style="color:var(--money);">${fmt(p.amount)}</strong></div>`).join('')}</div>`:''}
+    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span style="flex:1;">${p.date} · ${p.method}</span><strong style="color:var(--money);margin-right:8px;">${fmt(p.amount)}</strong><button onclick="editPayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--brand);" title="Edit">✏️</button><button onclick="deletePayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--danger);" title="Delete">🗑️</button></div>`).join('')}</div>`:''}
     </div>`;
 }
 
@@ -768,7 +768,20 @@ function buildAttendance(s){
       <button class="btn-danger btn-sm" onclick="markAtt(${activeIdx},'${today}','Absent')">❌ Absent</button>
       <button style="background:var(--warn);color:white;width:auto;padding:0.32rem 0.7rem;font-size:0.73rem;display:inline-block;margin:0;border-radius:10px;font-weight:700;cursor:pointer;" onclick="markAtt(${activeIdx},'${today}','Late')">⏰ Late</button>
     </div>
-    <div>${days.map(d=>{const st=att[d]?.[s.name]||null;const cls=st==='Present'?'chip-ok':st==='Absent'?'chip-bad':st==='Late'?'chip-warn':'';return`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;"><span>${d}</span>${st?`<span class="chip ${cls}">${st}</span>`:'<span style="color:var(--sub);font-size:0.7rem;">—</span>'}</div>`;}).join('')}</div></div>`;
+    <div>${days.map(d=>{const st=att[d]?.[s.name]||null;const cls=st==='Present'?'chip-ok':st==='Absent'?'chip-bad':st==='Late'?'chip-warn':'';return`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.78rem;">
+      <span style="flex:1;">${d}</span>
+      ${st?`<span class="chip ${cls}" style="margin-right:5px;">${st}</span>`:'<span style="color:var(--sub);font-size:0.7rem;margin-right:5px;">—</span>'}
+      <div style="display:flex;gap:3px;" onclick="event.stopPropagation()">
+        <button onclick="correctAttendance('${esc(s.name)}','${"'+d+'"}','Present')" title="Mark Present"
+          style="border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:0.68rem;
+          background:${st==='Present'?'var(--money)':'var(--s2)'};color:${st==='Present'?'white':'var(--text)'};">✅</button>
+        <button onclick="correctAttendance('${esc(s.name)}','${"'+d+'"}','Absent')" title="Mark Absent"
+          style="border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:0.68rem;
+          background:${st==='Absent'?'var(--danger)':'var(--s2)'};color:${st==='Absent'?'white':'var(--text)'};">❌</button>
+        <button onclick="correctAttendance('${esc(s.name)}','${"'+d+'"}','Late')" title="Mark Late"
+          style="border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:0.68rem;
+          background:${st==='Late'?'var(--warn)':'var(--s2)'};color:${st==='Late'?'white':'var(--text)'};">⏰</button>
+      </div></div>`;}).join('')}</div></div>`;
 }
 
 async function markAtt(idx,date,status){
@@ -873,6 +886,7 @@ function buildScores(s,idx){
     </div>
     <div id="score-table-${idx}">${buildTermTable(curTerm)}</div>
     <button class="btn-brand" style="margin-top:0.5rem;width:100%;" onclick="saveScores(${idx})">💾 Save Scores</button>
+    <button class="btn-ghost" style="color:var(--danger);font-size:0.76rem;margin-top:0.3rem;width:100%;" onclick="clearStudentScores(${idx},\`${curTerm}\`)">🗑️ Clear All ${curTerm} Scores</button>
 
     <div class="ct" style="margin-top:1rem;">🌟 Behavioural Assessment (${curTerm})</div>
     <p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.5rem;">Rate each trait ★★★★★ (5=Excellent, 1=Needs Work)</p>
@@ -929,7 +943,7 @@ function buildFees(s,idx){
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
-    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${s.paymentHistory.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span>${p.date} · ${p.method}</span><strong style="color:var(--money);">${fmt(p.amount)}</strong></div>`).join('')}</div>`:''}
+    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span style="flex:1;">${p.date} · ${p.method}</span><strong style="color:var(--money);margin-right:8px;">${fmt(p.amount)}</strong><button onclick="editPayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--brand);" title="Edit">✏️</button><button onclick="deletePayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--danger);" title="Delete">🗑️</button></div>`).join('')}</div>`:''}
     </div>`;
 }
 
@@ -1824,3 +1838,341 @@ function saveScores(idx){
 }
 
 
+
+function renderStaff(){
+  const staff=SD.staff||[];const isPrem=SD.config.plan==='premium';const limit=isPrem?'∞':3;
+  if($('staff-count')) $('staff-count').textContent=`${staff.length}/${limit} used (${isPrem?'Premium':'Basic'})`;
+  const el=$('staff-list'); if(!el) return;
+  el.innerHTML=staff.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No staff added yet.</p>':
+  staff.map((s,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);">
+    <div style="flex:1;min-width:0;">
+      <strong style="font-size:0.85rem;">${esc(s.name)}</strong>
+      <span class="chip chip-ok" style="margin-left:5px;font-size:0.7rem;">${s.role}</span>
+      <div style="font-size:0.72rem;color:var(--sub);margin-top:2px;">${s.email||''}</div>
+    </div>
+    <div style="display:flex;gap:5px;flex-shrink:0;">
+      <button onclick="editStaff(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 8px;cursor:pointer;font-size:0.78rem;color:var(--brand);">✏️ Edit</button>
+      ${s.role!=='Principal'?`<button onclick="deleteStaff(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 8px;cursor:pointer;font-size:0.78rem;color:var(--danger);">🗑️</button>`:''}
+    </div>
+  </div>`).join('');
+  const atLimit=!isPrem&&staff.length>=3;
+  if($('staff-upgrade')) $('staff-upgrade').style.display=atLimit?'block':'none';
+}
+
+function renderExpenses(){
+  const exp=SD.expenses||[];let total=0;exp.forEach(e=>total+=e.amount||0);
+  if($('exp-total')) $('exp-total').textContent=fmt(total);
+  const el=$('exp-list'); if(!el) return;
+  el.innerHTML=exp.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No expenses logged yet.</p>':
+  exp.map((e,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.55rem 0;border-bottom:1px solid var(--border);gap:0.4rem;">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:0.82rem;font-weight:600;">${esc(e.description||'')}</div>
+      <div style="font-size:0.7rem;color:var(--sub);">${e.category||''} · ${e.date||''}</div>
+    </div>
+    <strong style="font-family:'DM Mono',monospace;color:var(--danger);font-size:0.82rem;flex-shrink:0;">${fmt(e.amount||0)}</strong>
+    <div style="display:flex;gap:4px;flex-shrink:0;">
+      <button onclick="editExpense(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 7px;cursor:pointer;font-size:0.75rem;color:var(--brand);">✏️</button>
+      <button onclick="deleteExpenseItem(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 7px;cursor:pointer;font-size:0.75rem;color:var(--danger);">🗑️</button>
+    </div>
+  </div>`).join('');
+}
+
+async function addStaff(){
+  const name=$('sf-name').value.trim(),email=$('sf-email').value.trim(),pwd=$('sf-pwd').value,role=$('sf-role').value;
+  if(!name||!email||!pwd)return alert('Fill all fields.');if(pwd.length<4)return alert('Password min 4 chars.');
+  if((SD.staff||[]).find(s=>s.email===email))return alert('Email already registered.');
+  const isPrem=SD.config.plan==='premium';
+  if(!isPrem&&(SD.staff||[]).length>=3){openM('upgrade-modal');return;}
+  if(!SD.staff)SD.staff=[];
+  SD.staff.push({name,email,password:pwd,role});
+  await SQ.push('staff',SD.staff);
+  closeM('add-staff-modal');$('sf-name').value='';$('sf-email').value='';$('sf-pwd').value='';
+  renderStaff();alert(`✅ ${name} added as ${role}.`);
+}
+async function addExpense(){
+  const cat=$('exp-cat').value,desc=$('exp-desc').value.trim(),amt=parseFloat($('exp-amt').value);
+  if(!desc||!amt)return alert('Fill description and amount.');
+  if(!SD.expenses)SD.expenses=[];
+  SD.expenses.unshift({category:cat,description:desc,amount:amt,date:new Date().toISOString().split('T')[0],by:userRole});
+  await SQ.push('expenses',SD.expenses);closeM('add-expense-modal');
+  $('exp-desc').value='';$('exp-amt').value='';renderExpenses();
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// EDIT & DELETE — COMPLETE CORRECTION SYSTEM FOR ALL DATA AREAS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── STUDENT: Edit name / class / phone / fee ─────────────────────────────
+function editStudent(idx){
+  const s = SD.students[idx]; if(!s) return;
+  const html = `
+    <div style="display:flex;flex-direction:column;gap:0.5rem;">
+      <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Student</div>
+      <label style="font-size:0.8rem;font-weight:600;">Full Name</label>
+      <input id="edit-s-name" value="${esc(s.name)}" placeholder="Full name">
+      <label style="font-size:0.8rem;font-weight:600;">Phone</label>
+      <input id="edit-s-phone" value="${esc(s.phone||'')}" placeholder="Phone">
+      <label style="font-size:0.8rem;font-weight:600;">Class</label>
+      <input id="edit-s-class" value="${esc(s.class||'')}" placeholder="e.g. Basic Two">
+      <label style="font-size:0.8rem;font-weight:600;">Total Fee (₦)</label>
+      <input id="edit-s-fee" type="number" value="${s.totalFee||''}" placeholder="e.g. 50000">
+      <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
+        <button class="btn-brand" style="flex:1;" onclick="saveEditStudent(${idx})">💾 Save Changes</button>
+        <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-student-modal')">Cancel</button>
+      </div>
+    </div>`;
+  let modal = document.getElementById('edit-student-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'edit-student-modal';
+    modal.className = 'modal';
+    const box = document.createElement('div');
+    box.className = 'mbox';
+    box.innerHTML = '<button class="mclose" onclick="closeM(\'edit-student-modal\')">✕</button><div id="edit-student-modal-body"></div>';
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+  }
+  document.getElementById('edit-student-modal-body').innerHTML = html;
+  openM('edit-student-modal');
+}
+
+async function saveEditStudent(idx){
+  const s = SD.students[idx]; if(!s) return;
+  const oldName = s.name;
+  const newName = document.getElementById('edit-s-name').value.trim();
+  if(!newName) return alert('Name cannot be empty.');
+  s.name  = newName;
+  s.phone = document.getElementById('edit-s-phone').value.trim().replace(/\D/g,'');
+  s.class = document.getElementById('edit-s-class').value.trim();
+  s.totalFee = parseFloat(document.getElementById('edit-s-fee').value)||s.totalFee||50000;
+  // Migrate attendance keys if name changed
+  if(oldName !== newName && SD.attendance){
+    Object.keys(SD.attendance).forEach(date=>{
+      if(SD.attendance[date][oldName] !== undefined){
+        SD.attendance[date][newName] = SD.attendance[date][oldName];
+        delete SD.attendance[date][oldName];
+      }
+    });
+    await SQ.push('attendance', SD.attendance);
+    saveLocal('attendance', SD.attendance);
+  }
+  await SQ.push('students', SD.students);
+  saveLocal('students', SD.students);
+  closeM('edit-student-modal');
+  renderStudentList();
+  renderBanner();
+  renderRevenue();
+  toast('✅ Student updated!');
+}
+
+// ── PAYMENT: Delete a specific payment from history ──────────────────────
+async function deletePayment(studentIdx, payIdx){
+  const s = SD.students[studentIdx]; if(!s) return;
+  const p = (s.paymentHistory||[])[payIdx];
+  if(!p) return;
+  if(!confirm(`Delete payment of ${fmt(p.amount)} on ${p.date}?`)) return;
+  s.paid = Math.max(0, (s.paid||0) - (p.amount||0));
+  s.paymentHistory.splice(payIdx, 1);
+  await SQ.push('students', SD.students);
+  saveLocal('students', SD.students);
+  renderTab(studentIdx, 'fees');
+  toast('🗑️ Payment deleted.');
+}
+
+// Edit a payment amount/date/method
+function editPayment(studentIdx, payIdx){
+  const s = SD.students[studentIdx]; if(!s) return;
+  const p = (s.paymentHistory||[])[payIdx]; if(!p) return;
+  const html = `
+    <div style="display:flex;flex-direction:column;gap:0.5rem;">
+      <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Payment</div>
+      <label style="font-size:0.8rem;font-weight:600;">Amount (₦)</label>
+      <input id="ep-amt" type="number" value="${p.amount||''}">
+      <label style="font-size:0.8rem;font-weight:600;">Method</label>
+      <select id="ep-method">
+        ${['Bank Transfer','Cash','POS','Online'].map(m=>`<option ${m===p.method?'selected':''}>${m}</option>`).join('')}
+      </select>
+      <label style="font-size:0.8rem;font-weight:600;">Date</label>
+      <input id="ep-date" type="date" value="${p.date||''}">
+      <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
+        <button class="btn-brand" style="flex:1;" onclick="saveEditPayment(${studentIdx},${payIdx})">💾 Save</button>
+        <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-payment-modal')">Cancel</button>
+      </div>
+    </div>`;
+  let modal = document.getElementById('edit-payment-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'edit-payment-modal';
+    modal.className = 'modal';
+    const box = document.createElement('div');
+    box.className = 'mbox';
+    box.innerHTML = '<button class="mclose" onclick="closeM(\'edit-payment-modal\')">✕</button><div id="edit-payment-modal-body"></div>';
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+  }
+  document.getElementById('edit-payment-modal-body').innerHTML = html;
+  openM('edit-payment-modal');
+}
+
+async function saveEditPayment(studentIdx, payIdx){
+  const s = SD.students[studentIdx]; if(!s) return;
+  const p = (s.paymentHistory||[])[payIdx]; if(!p) return;
+  const oldAmt = p.amount||0;
+  const newAmt = parseFloat(document.getElementById('ep-amt').value)||0;
+  if(!newAmt) return alert('Enter a valid amount.');
+  p.amount = newAmt;
+  p.method = document.getElementById('ep-method').value;
+  p.date   = document.getElementById('ep-date').value;
+  // Adjust running total
+  s.paid = Math.max(0, (s.paid||0) - oldAmt + newAmt);
+  await SQ.push('students', SD.students);
+  saveLocal('students', SD.students);
+  closeM('edit-payment-modal');
+  renderTab(studentIdx, 'fees');
+  toast('✅ Payment updated!');
+}
+
+// ── SCORES: Clear one student's scores for a term ────────────────────────
+async function clearStudentScores(studentIdx, term){
+  const s = SD.students[studentIdx]; if(!s) return;
+  if(!confirm(`Clear ALL scores for ${s.name} — ${term}? This cannot be undone.`)) return;
+  const sid = s.id || studentIdx;
+  if(SD.scores[term] && SD.scores[term][sid]) delete SD.scores[term][sid];
+  saveLocal('scores', SD.scores);
+  await SQ.push('scores', SD.scores);
+  renderTab(studentIdx, 'scores');
+  toast('🗑️ Scores cleared.');
+}
+
+// Clear one subject score for a student + term
+async function clearSubjectScore(studentIdx, term, sub){
+  const s = SD.students[studentIdx]; if(!s) return;
+  if(!confirm(`Clear ${sub} scores for ${s.name} (${term})?`)) return;
+  const sid = s.id || studentIdx;
+  if(SD.scores[term] && SD.scores[term][sid] && SD.scores[term][sid][sub])
+    delete SD.scores[term][sid][sub];
+  saveLocal('scores', SD.scores);
+  await SQ.push('scores', SD.scores);
+  renderTab(studentIdx, 'scores');
+  toast('🗑️ Subject scores cleared.');
+}
+
+// ── ATTENDANCE: Correct a single day's mark ───────────────────────────────
+async function correctAttendance(studentName, date, newStatus){
+  if(!SD.attendance) SD.attendance={};
+  if(!SD.attendance[date]) SD.attendance[date]={};
+  if(newStatus === null || newStatus === ''){
+    delete SD.attendance[date][studentName];
+  } else {
+    SD.attendance[date][studentName] = newStatus;
+  }
+  saveLocal('attendance', SD.attendance);
+  await SQ.push('attendance', SD.attendance);
+  toast(`✅ Attendance updated for ${studentName} on ${date}`);
+}
+
+// ── STAFF: Edit ───────────────────────────────────────────────────────────
+function editStaff(idx){
+  const s = (SD.staff||[])[idx]; if(!s) return;
+  const html = `
+    <div style="display:flex;flex-direction:column;gap:0.5rem;">
+      <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Staff</div>
+      <label style="font-size:0.8rem;font-weight:600;">Full Name</label>
+      <input id="est-name" value="${esc(s.name||'')}">
+      <label style="font-size:0.8rem;font-weight:600;">Email</label>
+      <input id="est-email" value="${esc(s.email||'')}">
+      <label style="font-size:0.8rem;font-weight:600;">Role</label>
+      <select id="est-role">
+        ${['teacher','admin','bursar','head_teacher'].map(r=>`<option value="${r}" ${s.role===r?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
+        <button class="btn-brand" style="flex:1;" onclick="saveEditStaff(${idx})">💾 Save</button>
+        <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-staff-modal')">Cancel</button>
+      </div>
+    </div>`;
+  let modal = document.getElementById('edit-staff-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id='edit-staff-modal';modal.className='modal';
+    const box = document.createElement('div');
+    box.className='mbox';
+    box.innerHTML='<button class="mclose" onclick="closeM(\'edit-staff-modal\')">✕</button><div id="edit-staff-modal-body"></div>';
+    modal.appendChild(box);document.body.appendChild(modal);
+  }
+  document.getElementById('edit-staff-modal-body').innerHTML=html;
+  openM('edit-staff-modal');
+}
+
+async function saveEditStaff(idx){
+  const s=(SD.staff||[])[idx];if(!s)return;
+  s.name  = document.getElementById('est-name').value.trim()||s.name;
+  s.email = document.getElementById('est-email').value.trim()||s.email;
+  s.role  = document.getElementById('est-role').value;
+  await SQ.push('staff', SD.staff);
+  saveLocal('staff', SD.staff);
+  closeM('edit-staff-modal');
+  if(typeof renderStaff==='function') renderStaff();
+  toast('✅ Staff updated!');
+}
+
+async function deleteStaff(idx){
+  const s=(SD.staff||[])[idx];if(!s)return;
+  if(!confirm(`Remove ${s.name} from staff?`))return;
+  SD.staff.splice(idx,1);
+  await SQ.push('staff',SD.staff);
+  saveLocal('staff',SD.staff);
+  if(typeof renderStaff==='function') renderStaff();
+  toast('🗑️ Staff removed.');
+}
+
+// ── EXPENSES: Edit ────────────────────────────────────────────────────────
+function editExpense(idx){
+  const e=(SD.expenses||[])[idx];if(!e)return;
+  const cats=['Salaries','Maintenance','Supplies','Utilities','Events','Other'];
+  const html=`
+    <div style="display:flex;flex-direction:column;gap:0.5rem;">
+      <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Expense</div>
+      <label style="font-size:0.8rem;font-weight:600;">Category</label>
+      <select id="ee-cat">${cats.map(c=>`<option ${c===e.category?'selected':''}>${c}</option>`).join('')}</select>
+      <label style="font-size:0.8rem;font-weight:600;">Description</label>
+      <input id="ee-desc" value="${esc(e.description||'')}">
+      <label style="font-size:0.8rem;font-weight:600;">Amount (₦)</label>
+      <input id="ee-amt" type="number" value="${e.amount||''}">
+      <label style="font-size:0.8rem;font-weight:600;">Date</label>
+      <input id="ee-date" type="date" value="${e.date||''}">
+      <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
+        <button class="btn-brand" style="flex:1;" onclick="saveEditExpense(${idx})">💾 Save</button>
+        <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-expense-modal')">Cancel</button>
+      </div>
+    </div>`;
+  let modal=document.getElementById('edit-expense-modal');
+  if(!modal){
+    modal=document.createElement('div');modal.id='edit-expense-modal';modal.className='modal';
+    const box=document.createElement('div');box.className='mbox';
+    box.innerHTML='<button class="mclose" onclick="closeM(\'edit-expense-modal\')">✕</button><div id="edit-expense-modal-body"></div>';
+    modal.appendChild(box);document.body.appendChild(modal);
+  }
+  document.getElementById('edit-expense-modal-body').innerHTML=html;
+  openM('edit-expense-modal');
+}
+
+async function saveEditExpense(idx){
+  const e=(SD.expenses||[])[idx];if(!e)return;
+  e.category    = document.getElementById('ee-cat').value;
+  e.description = document.getElementById('ee-desc').value.trim()||e.description;
+  e.amount      = parseFloat(document.getElementById('ee-amt').value)||e.amount;
+  e.date        = document.getElementById('ee-date').value||e.date;
+  await SQ.push('expenses',SD.expenses);
+  saveLocal('expenses',SD.expenses);
+  closeM('edit-expense-modal');
+  if(typeof renderExpenses==='function') renderExpenses();
+  toast('✅ Expense updated!');
+}
+
+async function deleteExpenseItem(idx){
+  if(!confirm('Delete this expense?'))return;
+  SD.expenses.splice(idx,1);
+  await SQ.push('expenses',SD.expenses);
+  saveLocal('expenses',SD.expenses);
+  if(typeof renderExpenses==='function') renderExpenses();
+  toast('🗑️ Expense deleted.');
+}
