@@ -138,6 +138,8 @@ function loadSchoolIntoSD(sid,school){
   // Cache everything to localStorage immediately
   Object.keys(SD).forEach(k=>localStorage.setItem(`p_${sid}_${k}`,JSON.stringify(SD[k])));
 }
+checkTierStatus();
+
 
 async function doLogin(){
   const sid=$('l-school').value.trim().toUpperCase();
@@ -295,6 +297,127 @@ function go(tab){
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────
+
+// ─── Tier enforcement ──────────────────────────────────────────────────────
+function checkTierStatus(){
+  const count = (SD.students||[]).length;
+  const cfg   = SD.config || {};
+  const tierMax   = cfg.tierMax   || getTier(cfg.studentCount||0).max;
+  const tierPrice = cfg.tierPrice || getTier(cfg.studentCount||0).price;
+  const tierName  = cfg.tier      || getTier(cfg.studentCount||0).name;
+  const schoolId  = cfg._schoolId || localStorage.getItem('p_activeSchoolId') || '';
+
+  // Save live studentCount to Firestore so admin can see it
+  if(count !== (cfg._lastReportedCount||0)){
+    cfg._lastReportedCount = count;
+    SQ.push('config', cfg);
+    // Write studentCount directly to the schools/{id}/config path so admin sees it in real time
+    if(db && schoolId){
+      db.collection('schools').doc(schoolId).update({'config.studentCount': count, 'config._lastReportedCount': count})
+        .catch(e=>console.warn('studentCount sync:', e));
+    }
+  }
+
+  const over = count > tierMax;
+  const banner = document.getElementById('tier-alert-banner');
+
+  if(!over){
+    cfg.tierExceededAt = null;
+    cfg.tierExceededNewTier = null;
+    if(banner) banner.style.display = 'none';
+    // Unlock if was locked
+    const lockEl = document.getElementById('app-lockscreen');
+    if(lockEl) lockEl.style.display = 'none';
+    return;
+  }
+
+  // First time crossing — record timestamp + notify admin
+  if(!cfg.tierExceededAt){
+    cfg.tierExceededAt = new Date().toISOString();
+    const newTier = getTier(count);
+    cfg.tierExceededNewTier = newTier;
+    SQ.push('config', cfg);
+    // Firestore alert so admin sees it immediately
+    if(db && schoolId){
+      db.collection('schools').doc(schoolId).update({
+        'config.tierExceededAt': cfg.tierExceededAt,
+        'config.tierExceededNewTier': cfg.tierExceededNewTier,
+        'config.studentCount': count
+      }).catch(e=>console.warn('tier alert sync:', e));
+      // Write to admin_alerts collection so admin dashboard can show it
+      db.collection('admin_alerts').add({
+        type: 'tier_exceeded',
+        schoolId,
+        schoolName: cfg.schoolName||schoolId,
+        oldTier: tierName,
+        newTier: cfg.tierExceededNewTier.name,
+        newPrice: cfg.tierExceededNewTier.price,
+        studentCount: count,
+        exceededAt: cfg.tierExceededAt,
+        resolved: false
+      }).catch(e=>console.warn('admin alert:', e));
+    }
+  }
+
+  const newTier = cfg.tierExceededNewTier || getTier(count);
+  const exceededAt = new Date(cfg.tierExceededAt);
+  const graceDays = 3;
+  const lockAt    = new Date(exceededAt.getTime() + graceDays*24*60*60*1000);
+  const now       = new Date();
+  const msLeft    = lockAt - now;
+  const hoursLeft = Math.max(0, Math.floor(msLeft / 3600000));
+  const daysLeft  = Math.ceil(msLeft / 86400000);
+  const isLocked  = msLeft <= 0;
+
+  // Show / update banner
+  if(banner){
+    banner.style.display = 'flex';
+    const daysStr = daysLeft > 0 ? `${daysLeft} day${daysLeft!==1?'s':''} left` : 'TODAY — pay now!';
+    banner.innerHTML = `
+      <div style="flex:1;">
+        <strong>⚠️ Student count (${count}) exceeded your ${tierName} tier limit (${tierMax})</strong><br>
+        <span style="font-size:0.8rem;">Upgrade to <b>${newTier.name}</b> at <b>₦${Number(newTier.price).toLocaleString('en-NG')}/term</b> — <b style="color:${daysLeft<=1?'#ff4444':'#fbbf24'};">${daysStr}</b> before app locks.</span>
+      </div>
+      <button onclick="contactAdminForUpgrade()" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">📞 Contact Admin</button>
+    `;
+  }
+
+  // LOCK the app if grace period expired
+  if(isLocked){
+    let lockEl = document.getElementById('app-lockscreen');
+    if(!lockEl){
+      lockEl = document.createElement('div');
+      lockEl.id = 'app-lockscreen';
+      lockEl.style.cssText = 'position:fixed;inset:0;background:#0f172a;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;text-align:center;';
+      lockEl.innerHTML = `
+        <div style="font-size:3rem;margin-bottom:1rem;">🔒</div>
+        <div style="color:#f1f5f9;font-size:1.2rem;font-weight:800;margin-bottom:0.5rem;">App Locked</div>
+        <div style="color:#94a3b8;font-size:0.9rem;max-width:320px;margin-bottom:1.5rem;">
+          Your school has <b style="color:#f8fafc;">${count} students</b> but your plan covers up to <b style="color:#f8fafc;">${tierMax}</b>.<br><br>
+          To unlock, upgrade to <b style="color:#60a5fa;">${newTier.name}</b> at <b style="color:#4ade80;">₦${Number(newTier.price).toLocaleString('en-NG')}/term</b> and contact your agent.
+        </div>
+        <button onclick="contactAdminForUpgrade()" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:1rem;font-weight:700;cursor:pointer;">📞 Contact Agent to Unlock</button>
+      `;
+      document.body.appendChild(lockEl);
+    }
+    lockEl.style.display = 'flex';
+  }
+}
+
+function contactAdminForUpgrade(){
+  const cfg = SD.config||{};
+  const count = (SD.students||[]).length;
+  const newTier = cfg.tierExceededNewTier || getTier(count);
+  const agent = cfg.agent || {};
+  const agentPhone = (agent.phone||'').replace(/\D/g,'');
+  const msg = `Hello, I need to upgrade my EducationBloom plan.\n\nSchool: ${cfg.schoolName||'My School'}\nCurrent students: ${count}\nRequested tier: ${newTier.name} (₦${Number(newTier.price).toLocaleString('en-NG')}/term)\n\nPlease assist with the upgrade. Thank you.`;
+  if(agentPhone){
+    window.open(`https://wa.me/${agentPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  } else {
+    alert('Contact your agent or admin to upgrade your plan.');
+  }
+}
+
 function renderBanner(){
   let out=0,cnt=0;
   (SD.students||[]).forEach(s=>{const o=(s.totalFee||0)-(s.paid||0);if(o>0){out+=o;cnt++;}});
@@ -366,7 +489,7 @@ async function handleBulkPayment(e){
       matched++;
     }
 
-    await SQ.push('students',SD.students);
+    await SQ.push('students',SD.students); checkTierStatus();
     let msg=`✅ ${matched} matched and updated`;
     if(skipped)msg+=` · ⚠️ ${skipped} ambiguous`;
     if(noMatch)msg+=` · ❓ ${noMatch} not found`;
@@ -432,7 +555,7 @@ async function fixGarbledNames(){
     alert('Nothing to clean — all names look valid and there are no duplicates! ✅');
     return;
   }
-  await SQ.push('students',SD.students);
+  await SQ.push('students',SD.students); checkTierStatus();
   renderStudentList();renderBanner();renderRevenue();
   alert(`✅ Removed ${removed} entr${removed!==1?'ies':'y'} (junk + duplicates).\n\nIf any real student was removed, add them back manually with ➕ Add Student.`);
 }
@@ -469,7 +592,7 @@ async function addStudent(){
   const cls=$('ns-class').value.trim(),fee=parseFloat($('ns-fee').value)||SD.config.fee||50000;
   if(!name||!phone)return alert('Name and phone required.');
   SD.students.push({name,phone,class:cls,totalFee:fee,paid:0,scores:{},swot:{}});
-  await SQ.push('students',SD.students);
+  await SQ.push('students',SD.students); checkTierStatus();
   closeM('add-student-modal');
   $('ns-name').value='';$('ns-phone').value='';$('ns-class').value='';$('ns-fee').value='';
   renderStudentList();renderBanner();renderRevenue();
@@ -477,7 +600,7 @@ async function addStudent(){
 
 async function deleteStudent(idx){
   if(!confirm(`Delete ${SD.students[idx]?.name}?`))return;
-  SD.students.splice(idx,1);await SQ.push('students',SD.students);
+  SD.students.splice(idx,1);await SQ.push('students',SD.students); checkTierStatus();
   closeM('student-modal');renderStudentList();renderBanner();
 }
 
@@ -543,7 +666,7 @@ function importStudentsFromText(f){
         }
       });
     }
-    await SQ.push('students',SD.students);
+    await SQ.push('students',SD.students); checkTierStatus();
     $('csv-fb').textContent=`✅ Imported ${count} student${count!==1?'s':''}.${isStructured?'':' Add phone/class in profiles.'}`;
     renderStudentList();renderBanner();renderRevenue();
   })().catch(()=>alert('Could not read file. Try saving it as UTF-8 CSV.'));
@@ -577,7 +700,7 @@ async function importStudentsFromImage(f){
           count++;
         }
       });
-      await SQ.push('students',SD.students);
+      await SQ.push('students',SD.students); checkTierStatus();
       $('csv-fb').textContent=`✅ Found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
       renderStudentList();renderBanner();renderRevenue();
     }catch(err){
@@ -754,7 +877,7 @@ async function recordPayment(idx){
   SD.students[idx].paid=(SD.students[idx].paid||0)+amt;
   if(!SD.students[idx].paymentHistory)SD.students[idx].paymentHistory=[];
   SD.students[idx].paymentHistory.unshift({amount:amt,method:$('pay-method')?.value||'Cash',date:$('pay-date')?.value||new Date().toISOString().split('T')[0],by:userRole});
-  await SQ.push('students',SD.students);
+  await SQ.push('students',SD.students); checkTierStatus();
   $('pay-amt').value='';renderTab('fees');renderBanner();renderRevenue();
   alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
 }
@@ -976,7 +1099,7 @@ async function recordPayment(idx){
   SD.students[idx].paid=(SD.students[idx].paid||0)+amt;
   if(!SD.students[idx].paymentHistory)SD.students[idx].paymentHistory=[];
   SD.students[idx].paymentHistory.unshift({amount:amt,method:$('pay-method')?.value||'Cash',date:$('pay-date')?.value||new Date().toISOString().split('T')[0],by:userRole});
-  await SQ.push('students',SD.students);
+  await SQ.push('students',SD.students); checkTierStatus();
   $('pay-amt').value='';renderTab('fees');renderBanner();renderRevenue();
   alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
 }
@@ -1922,7 +2045,7 @@ async function addStaff(){
   if(!name||!email||!pwd)return alert('Fill all fields.');if(pwd.length<4)return alert('Password min 4 chars.');
   if((SD.staff||[]).find(s=>s.email===email))return alert('Email already registered.');
   const isPrem=SD.config.plan==='premium';
-  if(!isPrem&&(SD.staff||[]).length>=3){openM('upgrade-modal');return;}
+  if(!isPrem&&(SD.staff||[]).length>=3){openUpgradeModal();return;}
   if(!SD.staff)SD.staff=[];
   SD.staff.push({name,email,password:pwd,role});
   await SQ.push('staff',SD.staff);
@@ -2216,3 +2339,58 @@ async function deleteExpenseItem(idx){
   if(typeof renderExpenses==='function') renderExpenses();
   toast('🗑️ Expense deleted.');
 }
+function openUpgradeModal(){
+  const cfg = SD.config||{};
+  const count = (SD.students||[]).length;
+  const tierMax = cfg.tierMax || getTier(cfg.studentCount||count).max;
+  const tierName = cfg.tier || getTier(count).name;
+  const tierPrice = cfg.tierPrice || getTier(count).price;
+  const isPrem = cfg.plan==='premium';
+
+  const nameEl = document.getElementById('up-plan-name');
+  const tierEl = document.getElementById('up-tier-info');
+  const stuEl  = document.getElementById('up-student-info');
+  const tableEl = document.getElementById('up-tier-table');
+
+  if(nameEl) nameEl.textContent = (isPrem ? '⭐ PREMIUM' : '📋 BASIC') + ' — ' + (tierName||'—');
+  if(tierEl) tierEl.textContent = '₦' + Number(tierPrice||0).toLocaleString('en-NG') + '/term · Up to ' + (tierMax||'?') + ' students';
+  if(stuEl)  stuEl.textContent  = 'Current students: ' + count + (count>tierMax ? ' ⚠️ OVER LIMIT' : ' ✅');
+
+  if(tableEl){
+    tableEl.innerHTML = TIERS.map(t=>{
+      const current = count <= t.max && (TIERS.indexOf(t)===0 || count > TIERS[TIERS.indexOf(t)-1].max);
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:7px;margin-bottom:4px;background:${current?'#ecfdf5':'var(--s2)'};border:1px solid ${current?'#86efac':'var(--border)'};">
+        <span>${current?'✅ ':''}<b>${t.name}</b></span>
+        <span style="font-family:'DM Mono',monospace;font-weight:700;color:var(--money);">₦${Number(t.price).toLocaleString('en-NG')}/term</span>
+      </div>`;
+    }).join('');
+  }
+  openUpgradeModal();
+}
+
+async function refreshPlanFromFirestore(){
+  const btn = event.target;
+  btn.textContent = '⏳ Checking...'; btn.disabled=true;
+  const schoolId = SD.config?._schoolId || localStorage.getItem('p_activeSchoolId');
+  if(!schoolId||!db){ btn.textContent='❌ Not connected'; btn.disabled=false; return; }
+  try{
+    const snap = await db.collection('schools').doc(schoolId).get();
+    if(snap.exists){
+      const cfg = snap.data().config||{};
+      SD.config = {...SD.config, ...cfg};
+      const sid = schoolId;
+      localStorage.setItem(`p_${sid}_config`, JSON.stringify(SD.config));
+      checkTierStatus();
+      openUpgradeModal(); // refresh the modal display
+      btn.textContent = '✅ Plan refreshed!';
+    } else {
+      btn.textContent = '❌ School not found';
+    }
+  } catch(e){
+    btn.textContent = '❌ Error — try again';
+    console.error('refreshPlan:', e);
+  }
+  setTimeout(()=>{btn.textContent='🔄 Refresh Plan (after payment)';btn.disabled=false;},3000);
+}
+
+
