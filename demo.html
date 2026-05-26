@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EducationBloom — Demo Guide</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh;}
+  .hero{background:linear-gradient(135deg,#1e3a8a,#7c3aed);padding:3rem 1.5rem;text-align:center;}
+  .hero h1{font-size:2rem;font-weight:900;margin-bottom:0.5rem;}
+  .hero p{font-size:1rem;opacity:0.85;max-width:480px;margin:0 auto 1.5rem;}
+  .badge{display:inline-block;background:rgba(255,255,255,0.15);border-radius:20px;padding:4px 14px;font-size:0.78rem;font-weight:700;letter-spacing:0.5px;}
+  .cta-bar{display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.5rem;}
+  .btn-primary{background:#fff;color:#1e3a8a;font-weight:800;border:none;border-radius:10px;padding:0.75rem 1.5rem;font-size:0.9rem;cursor:pointer;text-decoration:none;}
+  .btn-ghost{background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:1px solid rgba(255,255,255,0.3);border-radius:10px;padding:0.75rem 1.5rem;font-size:0.9rem;cursor:pointer;text-decoration:none;}
+  .section{padding:2rem 1.5rem;max-width:640px;margin:0 auto;}
+  .section h2{font-size:1.1rem;font-weight:800;margin-bottom:1rem;color:#93c5fd;}
+  .step{background:#1e293b;border-radius:12px;padding:1rem;margin-bottom:0.75rem;border-left:3px solid #3b82f6;}
+  .step-num{font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;}
+  .step h3{font-size:0.92rem;font-weight:700;margin-bottom:4px;}
+  .step p{font-size:0.8rem;color:#94a3b8;line-height:1.6;}
+  .tier-table{background:#1e293b;border-radius:12px;overflow:hidden;margin:1rem 0;}
+  .tier-row{display:flex;justify-content:space-between;padding:0.6rem 1rem;border-bottom:1px solid #334155;font-size:0.82rem;}
+  .tier-row:last-child{border-bottom:none;}
+  .tier-row .price{font-weight:700;color:#4ade80;font-family:monospace;}
+  .video-placeholder{background:#1e293b;border-radius:14px;padding:3rem 1rem;text-align:center;border:2px dashed #334155;margin:1rem 0;}
+  .video-placeholder .icon{font-size:3rem;margin-bottom:0.75rem;}
+  .video-placeholder p{font-size:0.82rem;color:#64748b;}
+  footer{text-align:center;padding:2rem;font-size:0.78rem;color:#475569;}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <span class="badge">📚 EducationBloom</span>
+  <h1 style="margin-top:0.75rem;">School Management,<br>Finally Simplified</h1>
+  <p>Designed for Nigerian schools. Works offline. One teacher can manage everything.</p>
+  <div class="cta-bar">
+    <a href="index.html" class="btn-primary">🏫 Open School App</a>
+    <a href="https://kobomoba.github.io/bloom-agent/" class="btn-ghost">🤝 I'm an Agent</a>
+  </div>
+</div>
+
+<div class="section">
+  <div class="video-placeholder">
+    <div class="icon">🎬</div>
+    <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:0.5rem;">Demo Video Coming Soon</div>
+    <p>A walkthrough of the full app will be available here.<br>For now, use the steps below as your guide.</p>
+  </div>
+
+  <h2>⚡ How It Works — 5 Steps</h2>
+
+  <div class="step">
+    <div class="step-num">Step 1</div>
+    <h3>📱 Agent signs up a school</h3>
+    <p>The agent opens the Agent App, enters the school's details (name, student count, terms), selects the right tier, and submits. The deal goes to admin instantly.</p>
+  </div>
+  <div class="step">
+    <div class="step-num">Step 2</div>
+    <h3>✅ Admin approves & sends credentials</h3>
+    <p>Admin reviews the deal in Bloom Portal, approves it, and the school gets a WhatsApp message with their School ID and password.</p>
+  </div>
+  <div class="step">
+    <div class="step-num">Step 3</div>
+    <h3>🏫 Teacher logs in & imports students</h3>
+    <p>Teacher opens the School App, enters their School ID and password. They can add students manually, import a CSV, or take a photo of the class list — the app reads names automatically.</p>
+  </div>
+  <div class="step">
+    <div class="step-num">Step 4</div>
+    <h3>📊 Record scores, fees & attendance</h3>
+    <p>Enter CA scores and exams per subject. Track who has paid school fees and who owes. Mark attendance daily. The app does all calculations — averages, rankings, report cards.</p>
+  </div>
+  <div class="step">
+    <div class="step-num">Step 5</div>
+    <h3>🖨️ Print report cards in one tap</h3>
+    <p>At end of term, open the Scorecard, tap "Print All". Every student gets a fully formatted Nigerian-standard report card with grades, position, CA breakdown, and comments.</p>
+  </div>
+
+  <h2 style="margin-top:1.5rem;">💰 Pricing Tiers (Per Term)</h2>
+  <div class="tier-table">
+    <div class="tier-row" style="background:#1a2744;font-weight:800;font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;">
+      <span>School Size</span><span class="price">Price/Term</span>
+    </div>
+    <div class="tier-row"><span>Starter — 1 to 50 students</span><span class="price">₦10,000</span></div>
+    <div class="tier-row"><span>Small — 51 to 100 students</span><span class="price">₦20,000</span></div>
+    <div class="tier-row"><span>Medium — 101 to 200 students</span><span class="price">₦35,000</span></div>
+    <div class="tier-row"><span>Large — 201 to 350 students</span><span class="price">₦55,000</span></div>
+    <div class="tier-row"><span>Enterprise — 351+ students</span><span class="price">₦75,000</span></div>
+  </div>
+
+  <div style="background:#1e293b;border-radius:12px;padding:1rem;margin-top:1rem;text-align:center;">
+    <div style="font-weight:800;font-size:0.95rem;margin-bottom:0.4rem;">Ready to get started?</div>
+    <p style="font-size:0.8rem;color:#94a3b8;margin-bottom:1rem;">Contact an agent near you or reach us directly on WhatsApp.</p>
+    <a href="https://kobomoba.github.io/bloom-agent/" class="btn-primary" style="display:inline-block;">🤝 Find an Agent</a>
+  </div>
+</div>
+
+<footer>© 2026 EducationBloom · Built for Nigerian schools</footer>
+</body>
+</html>
