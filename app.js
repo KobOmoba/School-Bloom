@@ -129,6 +129,8 @@ function loadSchoolIntoSD(sid,school){
   SD.staff=school.staff||[];
   SD.expenses=school.expenses||[];
   SD.attendance=school.attendance||{};
+  SD.scores=school.scores||{};   // ✅ FIX: scores now loaded properly
+  SD.affective=school.affective||{};
   SD.sports=school.sports||{teams:{},custom:[]};
   SD.arts=school.arts||{gallery:[]};
   SD.music=school.music||{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]};
@@ -140,7 +142,9 @@ function loadSchoolIntoSD(sid,school){
   // Cache everything to localStorage immediately
   Object.keys(SD).forEach(k=>localStorage.setItem(`p_${sid}_${k}`,JSON.stringify(SD[k])));
 }
-checkTierStatus();
+
+// ✅ FIX: checkTierStatus moved AFTER function definition — no hoisting risk
+
 
 
 
@@ -230,10 +234,10 @@ function loadDemo(){
 
 async function doLogin(){
   const sid=$('l-school').value.trim().toUpperCase();
-  const pwd=$('l-pwd').value.trim();
   const err=$('l-err');err.style.display='none';
   const btn=$('l-btn');
-  if(!sid||!pwd){err.textContent='Enter your School ID and principal email address.';err.style.display='block';return;}
+  if(!sid){err.textContent='Enter your School ID (e.g. BLOOM-ABK0042).';err.style.display='block';return;}
+  if(!sid.startsWith('BLOOM-')){err.textContent='School ID must start with BLOOM- (e.g. BLOOM-ABK0042).';err.style.display='block';return;}
   btn.textContent='Checking...';btn.disabled=true;
 
   // ── STEP 1: localStorage first — instant, works with zero network ──
@@ -242,37 +246,31 @@ async function doLogin(){
   if(lc&&ls){
     try{
       const staff=JSON.parse(ls);
-      const user=matchUser(staff,pwd);
-      if(user){
-        console.log('✅ Login from localStorage cache (offline-first)');
-        schoolId=sid;userRole=user.role;
-        _saveAuth(sid,user.email||'');
-        loadSchoolIntoSD(sid,{
-          config:JSON.parse(lc),staff,
-          students:loadLocal('students',[]),expenses:loadLocal('expenses',[]),
-          attendance:loadLocal('attendance',{}),sports:loadLocal('sports',{teams:{},custom:[]}),
-          arts:loadLocal('arts',{gallery:[]}),music:loadLocal('music',{practiceLogs:[],instruments:[]}),
-          health:loadLocal('health',[]),alumni:loadLocal('alumni',[]),
-          socialPages:loadLocal('socialPages',[]),commsLog:loadLocal('commsLog',[]),
-          opportunities:loadLocal('opportunities',defaultOpps())
-        });
-        startApp();
-        // Background: pull fresh data from Firestore silently — no waiting, no UI block
-        setTimeout(()=>SQ.silentPull(),1500);
-        btn.textContent='▶ Login';btn.disabled=false;
-        return;
-      } else {
-        // Cache exists but password wrong — don't try network with a wrong password
-        err.textContent='Wrong email. Use the principal email address registered with your AariNAT agent.';
-        err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
-      }
+      const config=JSON.parse(lc);
+      console.log('✅ Login from localStorage cache (offline-first, ID only)');
+      schoolId=sid;userRole='Principal';
+      _saveAuth(sid,'');
+      loadSchoolIntoSD(sid,{
+        config,staff,
+        students:loadLocal('students',[]),expenses:loadLocal('expenses',[]),
+        attendance:loadLocal('attendance',{}),sports:loadLocal('sports',{teams:{},custom:[]}),
+        arts:loadLocal('arts',{gallery:[]}),music:loadLocal('music',{practiceLogs:[],instruments:[]}),
+        health:loadLocal('health',[]),alumni:loadLocal('alumni',[]),
+        socialPages:loadLocal('socialPages',[]),commsLog:loadLocal('commsLog',[]),
+        scores:loadLocal('scores',{}),
+      opportunities:loadLocal('opportunities',defaultOpps())
+      });
+      startApp();
+      setTimeout(()=>SQ.silentPull(),1500);
+      btn.textContent='▶ Enter Portal';btn.disabled=false;
+      return;
     }catch(e){console.warn('localStorage parse error:',e);}
   }
 
   // ── STEP 2: No local cache — need network for first-time login ──
   if(!navigator.onLine){
     err.innerHTML='📶 <strong>No internet & no saved data.</strong><br>Connect to network for your first login. After that you can use the app offline.';
-    err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
+    err.style.display='block';btn.textContent='▶ Enter Portal';btn.disabled=false;return;
   }
 
   btn.textContent='Connecting...';
@@ -293,38 +291,27 @@ async function doLogin(){
         const snap=await db.collection('admin_approved_schools').where('schoolId','==',sid).get();
         if(!snap.empty){
           const rec=snap.docs[0].data();
-          if((rec.password||'').trim()===pwd){
-            console.log('✅ Found in admin_approved_schools — bootstrapping school doc');
-            school={
-              config:{plan:'basic',fee:50000,schoolName:rec.schoolName||'',principalEmail:rec.principalEmail||'',whatsapp:rec.principalPhone||'',createdAt:new Date().toISOString()},
-              staff:[{name:'Principal',email:(rec.principalEmail||sid.toLowerCase()+'@bloom.edu.ng').toLowerCase(),password:rec.password,role:'Principal',phone:rec.principalPhone||''}],
-              students:[],expenses:[],attendance:{},sports:{teams:{},custom:[]},arts:{gallery:[]},
-              music:{practiceLogs:[],instruments:[]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]
-            };
-            // Write to schools collection so future logins are instant
-            try{await db.collection('schools').doc(sid).set(school,{merge:true});}catch(e2){}
-          } else {
-            err.textContent='Wrong email. Use the principal email address registered with your AariNAT agent.';
-            err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
-          }
+          console.log('✅ Found in admin_approved_schools — bootstrapping school doc');
+          school={
+            config:{plan:'basic',fee:50000,schoolName:rec.schoolName||'',principalEmail:rec.principalEmail||'',whatsapp:rec.principalPhone||'',createdAt:new Date().toISOString()},
+            staff:[{name:'Principal',email:(rec.principalEmail||sid.toLowerCase()+'@bloom.edu.ng').toLowerCase(),password:rec.password||'',role:'Principal',phone:rec.principalPhone||''}],
+            students:[],expenses:[],attendance:{},sports:{teams:{},custom:[]},arts:{gallery:[]},
+            music:{practiceLogs:[],instruments:[]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]
+          };
+          try{await db.collection('schools').doc(sid).set(school,{merge:true});}catch(e2){}
         }
       }catch(e){console.warn('admin_approved_schools check failed:', e.message);}
     }
 
     if(!school){
-      err.textContent=`School ID "${sid}" not found. Double-check the ID (format: BLOOM-XXXXXX) sent by your AariNAT agent.`;
-      err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
-    }
-
-    const user=matchUser(school.staff||[],pwd);
-    if(!user){
-      err.textContent='School found but password is incorrect. Use the exact password from your AariNAT agent.';
-      err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
+      err.textContent=`School ID "${sid}" not found. Double-check the ID sent by your AariNAT agent (format: BLOOM-XXXXXX).`;
+      err.style.display='block';btn.textContent='▶ Enter Portal';btn.disabled=false;return;
     }
 
     // ✅ First-time login success — cache everything locally
-    schoolId=sid;userRole=user.role;
-    _saveAuth(sid,user.email||'');
+    schoolId=sid;
+    userRole=(school.staff&&school.staff[0]?.role)||'Principal';
+    _saveAuth(sid,'');
     loadSchoolIntoSD(sid,school);
     startApp();
 
@@ -333,12 +320,12 @@ async function doLogin(){
     err.textContent='Connection error: '+(e?.message||'Check your internet and try again.');
     err.style.display='block';
   }
-  btn.textContent='▶ Login';btn.disabled=false;
+  btn.textContent='▶ Enter Portal';btn.disabled=false;
 }
 
 function _saveAuth(sid,email){
   const rememberMe=$('l-remember')?.checked!==false;
-  const authData=JSON.stringify({schoolId:sid,email,role:userRole});
+  const authData=JSON.stringify({schoolId:sid,email:email||'',role:userRole||'Principal'});
   if(rememberMe){
     localStorage.setItem('p_auth',authData);
     sessionStorage.removeItem('p_auth');
@@ -2426,7 +2413,8 @@ async function deleteExpenseItem(idx){
   if(typeof renderExpenses==='function') renderExpenses();
   toast('🗑️ Expense deleted.');
 }
-function openUpgradeModal(){
+function renderUpgradeModal(){
+  // ✅ FIX: Renamed from openUpgradeModal to renderUpgradeModal — no more infinite recursion
   const cfg = SD.config||{};
   const count = (SD.students||[]).length;
   const tierMax = cfg.tierMax || getTier(cfg.studentCount||count).max;
@@ -2452,32 +2440,73 @@ function openUpgradeModal(){
       </div>`;
     }).join('');
   }
-  openUpgradeModal();
 }
 
-async function refreshPlanFromFirestore(){
-  const btn = event.target;
-  btn.textContent = '⏳ Checking...'; btn.disabled=true;
-  const schoolId = SD.config?._schoolId || localStorage.getItem('p_activeSchoolId');
-  if(!schoolId||!db){ btn.textContent='❌ Not connected'; btn.disabled=false; return; }
+function openUpgradeModal(){
+  // ✅ FIX: openUpgradeModal now just renders content then opens the modal — no recursion
+  renderUpgradeModal();
+  const modal = document.getElementById('upgrade-modal');
+  if(modal) modal.classList.add('on');
+}
+
+async function refreshPlanFromFirestore(btn){
+  // ✅ FIX: btn passed explicitly — no global event.target
+  if(!btn){ btn = document.querySelector('[onclick*="refreshPlanFromFirestore"]'); }
+  if(btn){ btn.textContent = '⏳ Checking...'; btn.disabled=true; }
+  const sid = schoolId || SD.config?._schoolId || localStorage.getItem('p_activeSchoolId');
+  if(!sid||!db){
+    if(btn){ btn.textContent='❌ Not connected'; btn.disabled=false; }
+    return;
+  }
   try{
-    const snap = await db.collection('schools').doc(schoolId).get();
+    const snap = await db.collection('schools').doc(sid).get();
     if(snap.exists){
       const cfg = snap.data().config||{};
       SD.config = {...SD.config, ...cfg};
-      const sid = schoolId;
       localStorage.setItem(`p_${sid}_config`, JSON.stringify(SD.config));
       checkTierStatus();
-      openUpgradeModal(); // refresh the modal display
-      btn.textContent = '✅ Plan refreshed!';
+      renderUpgradeModal(); // ✅ just re-render, don't open again
+      if(btn) btn.textContent = '✅ Plan refreshed!';
     } else {
-      btn.textContent = '❌ School not found';
+      if(btn) btn.textContent = '❌ School not found';
     }
   } catch(e){
-    btn.textContent = '❌ Error — try again';
+    if(btn) btn.textContent = '❌ Error — try again';
     console.error('refreshPlan:', e);
   }
-  setTimeout(()=>{btn.textContent='🔄 Refresh Plan (after payment)';btn.disabled=false;},3000);
+  setTimeout(()=>{ if(btn){btn.textContent='🔄 Refresh Plan (after payment)';btn.disabled=false;} },3000);
 }
 
 
+
+// ── Auto-login on page load (Remember Me) ────────────────────────────────
+(function autoLogin(){
+  const raw = localStorage.getItem('p_auth') || sessionStorage.getItem('p_auth');
+  if(!raw) return;
+  try{
+    const auth = JSON.parse(raw);
+    if(!auth.schoolId) return;
+    const lc = localStorage.getItem(`p_${auth.schoolId}_config`);
+    const ls = localStorage.getItem(`p_${auth.schoolId}_staff`);
+    if(!lc) return;
+    schoolId = auth.schoolId;
+    userRole = auth.role || 'Principal';
+    loadSchoolIntoSD(auth.schoolId, {
+      config: JSON.parse(lc),
+      staff: ls ? JSON.parse(ls) : [],
+      students: loadLocal('students',[]),
+      expenses: loadLocal('expenses',[]),
+      attendance: loadLocal('attendance',{}),
+      sports: loadLocal('sports',{teams:{},custom:[]}),
+      arts: loadLocal('arts',{gallery:[]}),
+      music: loadLocal('music',{practiceLogs:[],instruments:[]}),
+      health: loadLocal('health',[]),
+      alumni: loadLocal('alumni',[]),
+      socialPages: loadLocal('socialPages',[]),
+      commsLog: loadLocal('commsLog',[]),
+      opportunities: loadLocal('opportunities', defaultOpps())
+    });
+    startApp();
+    setTimeout(() => SQ.silentPull(), 2000);
+  } catch(e) { console.warn('Auto-login failed:', e); }
+})();
