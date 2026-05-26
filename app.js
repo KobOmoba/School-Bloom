@@ -115,10 +115,12 @@ function toggleEye(inputId,btn){
 // Login always works offline if the school logged in before.
 // On first login, needs network once to cache credentials. After that — offline forever.
 
-function matchUser(staff,pwd){
-  // Password-only match with trim on both sides
-  const p=(pwd||'').trim();
-  return staff.find(s=>(s.password||'').trim()===p)||null;
+function matchUser(staff,input){
+  // Match by principal email first, then fallback to password (legacy)
+  const v=(input||'').trim().toLowerCase();
+  return staff.find(s=>(s.email||'').trim().toLowerCase()===v)
+      || staff.find(s=>(s.password||'').trim().toLowerCase()===v)
+      || null;
 }
 
 function loadSchoolIntoSD(sid,school){
@@ -141,12 +143,97 @@ function loadSchoolIntoSD(sid,school){
 checkTierStatus();
 
 
+
+// ─── Demo mode ────────────────────────────────────────────────────────────
+function loadDemo(){
+  const demoStudents=[
+    {id:'d1',name:'Adaeze Okonkwo',   class:'JSS 2',phone:'08012345601',feePaid:25000,feeTotal:50000,gender:'F'},
+    {id:'d2',name:'Emeka Eze',        class:'JSS 2',phone:'08012345602',feePaid:50000,feeTotal:50000,gender:'M'},
+    {id:'d3',name:'Fatima Bello',     class:'JSS 2',phone:'08012345603',feePaid:0,    feeTotal:50000,gender:'F'},
+    {id:'d4',name:'Chukwudi Obi',     class:'JSS 2',phone:'08012345604',feePaid:50000,feeTotal:50000,gender:'M'},
+    {id:'d5',name:'Ngozi Nwosu',      class:'JSS 2',phone:'08012345605',feePaid:30000,feeTotal:50000,gender:'F'},
+    {id:'d6',name:'Babatunde Adewale',class:'JSS 2',phone:'08012345606',feePaid:50000,feeTotal:50000,gender:'M'},
+    {id:'d7',name:'Chiamaka Udo',     class:'JSS 2',phone:'08012345607',feePaid:50000,feeTotal:50000,gender:'F'},
+    {id:'d8',name:'Yusuf Suleiman',   class:'JSS 2',phone:'08012345608',feePaid:0,    feeTotal:50000,gender:'M'},
+    {id:'d9',name:'Blessing Nwobi',   class:'JSS 2',phone:'08012345609',feePaid:50000,feeTotal:50000,gender:'F'},
+    {id:'d10',name:'Tunde Afolabi',   class:'JSS 2',phone:'08012345610',feePaid:25000,feeTotal:50000,gender:'M'},
+  ];
+  const demoScores={
+    'Mathematics':{
+      d1:{ca1:18,ca2:16,ca3:17,exam:62},d2:{ca1:20,ca2:19,ca3:18,exam:75},
+      d3:{ca1:12,ca2:14,ca3:11,exam:45},d4:{ca1:19,ca2:20,ca3:20,exam:78},
+      d5:{ca1:15,ca2:16,ca3:14,exam:55},d6:{ca1:18,ca2:17,ca3:19,exam:68},
+      d7:{ca1:20,ca2:20,ca3:19,exam:80},d8:{ca1:10,ca2:11,ca3:12,exam:40},
+      d9:{ca1:16,ca2:15,ca3:17,exam:60},d10:{ca1:14,ca2:13,ca3:15,exam:52},
+    },
+    'English Language':{
+      d1:{ca1:17,ca2:18,ca3:16,exam:65},d2:{ca1:16,ca2:17,ca3:15,exam:60},
+      d3:{ca1:13,ca2:12,ca3:14,exam:48},d4:{ca1:18,ca2:19,ca3:17,exam:70},
+      d5:{ca1:15,ca2:16,ca3:14,exam:58},d6:{ca1:19,ca2:18,ca3:20,exam:72},
+      d7:{ca1:20,ca2:19,ca3:18,exam:78},d8:{ca1:11,ca2:10,ca3:12,exam:42},
+      d9:{ca1:17,ca2:16,ca3:15,exam:63},d10:{ca1:14,ca2:15,ca3:13,exam:54},
+    },
+    'Basic Science':{
+      d1:{ca1:16,ca2:17,ca3:15,exam:60},d2:{ca1:18,ca2:17,ca3:19,exam:70},
+      d3:{ca1:14,ca2:13,ca3:12,exam:50},d4:{ca1:20,ca2:19,ca3:18,exam:75},
+      d5:{ca1:15,ca2:14,ca3:16,exam:56},d6:{ca1:17,ca2:18,ca3:16,exam:65},
+      d7:{ca1:19,ca2:20,ca3:18,exam:76},d8:{ca1:12,ca2:11,ca3:10,exam:44},
+      d9:{ca1:16,ca2:15,ca3:17,exam:62},d10:{ca1:13,ca2:14,ca3:12,exam:53},
+    },
+  };
+  const demoAttendance={
+    '2026-05-19':Object.fromEntries(demoStudents.map(s=>[s.id,s.id!=='d3'&&s.id!=='d8'?'present':'absent'])),
+    '2026-05-20':Object.fromEntries(demoStudents.map(s=>[s.id,'present'])),
+    '2026-05-21':Object.fromEntries(demoStudents.map(s=>[s.id,s.id==='d3'?'late':'present'])),
+  };
+
+  // Build SD directly
+  SD.config={
+    schoolName:'Sunshine Academy',
+    plan:'premium',
+    fee:50000,
+    currentTerm:'Term 2',
+    tier:'Small (51–100)',
+    tierPrice:20000,
+    tierMax:100,
+    studentCount:10,
+    whatsapp:'2348145073941',
+    agent:{name:'Demo Agent',phone:'2348145073941'},
+    _schoolId:'DEMO-SCHOOL',
+    _demo:true,
+  };
+  SD.students = demoStudents;
+  SD.staff    = [{name:'Mrs. Adaora Obi',email:'demo@sunshine.edu.ng',password:'demo',role:'Principal',phone:'08012345600'}];
+  SD.scores   = demoScores;
+  SD.attendance = demoAttendance;
+  SD.expenses = [
+    {id:'e1',desc:'Chalk & markers',amount:5000,date:'2026-05-10',category:'Supplies'},
+    {id:'e2',desc:'Generator fuel',amount:15000,date:'2026-05-15',category:'Utilities'},
+  ];
+  SD.sports={teams:{},custom:[]};
+  SD.arts={gallery:[]};
+  SD.music={practiceLogs:[],instruments:[]};
+  SD.health=[];SD.alumni=[];SD.socialPages=[];SD.commsLog=[];
+  SD.opportunities=defaultOpps();
+
+  // Set session vars
+  schoolId='DEMO-SCHOOL';
+  userRole='Principal';
+
+  // Show demo banner
+  const demoBanner=document.getElementById('demo-banner');
+  if(demoBanner) demoBanner.style.display='flex';
+
+  startApp();
+  console.log('🎬 Demo mode loaded');
+}
+
 async function doLogin(){
   const sid=$('l-school').value.trim().toUpperCase();
   const pwd=$('l-pwd').value.trim();
   const err=$('l-err');err.style.display='none';
   const btn=$('l-btn');
-  if(!sid||!pwd){err.textContent='Enter School ID and password.';err.style.display='block';return;}
+  if(!sid||!pwd){err.textContent='Enter your School ID and principal email address.';err.style.display='block';return;}
   btn.textContent='Checking...';btn.disabled=true;
 
   // ── STEP 1: localStorage first — instant, works with zero network ──
@@ -176,7 +263,7 @@ async function doLogin(){
         return;
       } else {
         // Cache exists but password wrong — don't try network with a wrong password
-        err.textContent='Wrong password. Use the exact password sent by your AariNAT agent.';
+        err.textContent='Wrong email. Use the principal email address registered with your AariNAT agent.';
         err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
       }
     }catch(e){console.warn('localStorage parse error:',e);}
@@ -217,7 +304,7 @@ async function doLogin(){
             // Write to schools collection so future logins are instant
             try{await db.collection('schools').doc(sid).set(school,{merge:true});}catch(e2){}
           } else {
-            err.textContent='Wrong password. Use the exact password sent by your AariNAT agent.';
+            err.textContent='Wrong email. Use the principal email address registered with your AariNAT agent.';
             err.style.display='block';btn.textContent='▶ Login';btn.disabled=false;return;
           }
         }
@@ -312,7 +399,7 @@ function checkTierStatus(){
     cfg._lastReportedCount = count;
     SQ.push('config', cfg);
     // Write studentCount directly to the schools/{id}/config path so admin sees it in real time
-    if(db && schoolId){
+    if(db && schoolId && !SD.config?._demo){
       db.collection('schools').doc(schoolId).update({'config.studentCount': count, 'config._lastReportedCount': count})
         .catch(e=>console.warn('studentCount sync:', e));
     }
