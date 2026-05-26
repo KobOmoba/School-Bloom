@@ -14,6 +14,11 @@
 <meta name="theme-color" content="#4f46e5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Educational Bloom · School Portal</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Edu-BLOOM">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="style.css">
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
@@ -73,22 +78,34 @@ function toggleEye(inputId, btn) {
 </head>
 <body>
 
+<!-- PWA Install Banner -->
+<div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:0.75rem 1rem;align-items:center;justify-content:space-between;gap:0.5rem;box-shadow:0 -4px 20px rgba(0,0,0,0.3);">
+  <div style="display:flex;align-items:center;gap:0.6rem;">
+    <img src="icon-192x192.png" style="width:36px;height:36px;border-radius:8px;" alt="Edu-BLOOM">
+    <div>
+      <div style="font-weight:700;font-size:0.82rem;color:#fff;">Install Edu-BLOOM</div>
+      <div style="font-size:0.72rem;color:rgba(255,255,255,0.8);">Add to home screen for offline access</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+    <button onclick="installPWA()" style="background:#fff;color:#4f46e5;border:none;border-radius:8px;padding:0.4rem 0.85rem;font-weight:700;font-size:0.78rem;cursor:pointer;">Install</button>
+    <button onclick="document.getElementById('pwa-install-banner').style.display='none'" style="background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:8px;padding:0.4rem 0.6rem;font-weight:700;font-size:0.78rem;cursor:pointer;">✕</button>
+  </div>
+</div>
+
 <!-- LOGIN (hidden — app opens directly) -->
 <div id="login" class="login" style="display:flex;">
   <div class="lbox">
     <div class="lbox-logo">🌸 Educational Bloom</div>
     <div class="lbox-sub">School Management Portal · AariNAT Company</div>
     <label>School ID</label>
-    <input type="text" id="l-school" placeholder="e.g. BLOOM-ABK0042" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()">
-    <label>Password</label>
-    <div class="pwd-wrap">
-      <input type="password" id="l-pwd" placeholder="Password sent by your agent" onkeydown="if(event.key==='Enter')doLogin()">
-      <button type="button" class="eye-btn" onclick="toggleEye('l-pwd',this)" tabindex="-1">👁️</button>
+    <input type="text" id="l-school" placeholder="e.g. BLOOM-ABK0042" autocapitalize="characters" 
+      oninput="this.value=this.value.toUpperCase()" 
+      onkeydown="if(event.key==='Enter')doLogin()" autofocus>
+    <div class="remember-row" style="margin-top:0.4rem;">
+      <label class="rem-label"><input type="checkbox" id="l-remember" checked> Remember me on this device</label>
     </div>
-    <div class="remember-row">
-      <label class="rem-label"><input type="checkbox" id="l-remember" checked> Remember me</label>
-    </div>
-    <button id="l-btn" class="btn-brand" onclick="doLogin()">▶ Login</button>
+    <button id="l-btn" class="btn-brand" onclick="doLogin()" style="margin-top:0.75rem;">▶ Enter Portal</button>
     <div style="display:flex;align-items:center;gap:8px;margin-top:0.6rem;">
       <div style="flex:1;height:1px;background:var(--border);"></div>
       <span style="font-size:0.7rem;color:var(--sub);">or</span>
@@ -196,7 +213,7 @@ function toggleEye(inputId, btn) {
         <div id="staff-upgrade" class="upgrade-lock" style="display:none;">
           <p style="font-size:0.8rem;font-weight:700;color:#9a3412;">⚠️ Staff limit reached (3/3)</p>
           <p style="font-size:0.72rem;color:#c2410c;margin:0.4rem 0 0.75rem;">Upgrade to Premium for unlimited staff.</p>
-          <button class="btn-brand" onclick="openM('upgrade-modal')">✨ Upgrade to Premium</button>
+          <button class="btn-brand" onclick="openUpgradeModal()">✨ Upgrade to Premium</button>
         </div>
       </div>
     </section>
@@ -432,7 +449,7 @@ function toggleEye(inputId, btn) {
       <div class="card" style="border-left:4px solid var(--warn);">
         <div class="ct">Current Plan: <span id="settings-plan">Basic</span></div>
         <p style="font-size:0.82rem;color:var(--sub);">Staff limit: <span id="settings-staff-limit">3</span> · Finance AI: <span id="settings-ai">Basic</span></p>
-        <button class="btn-brand" style="margin-top:0.65rem;" onclick="openM('upgrade-modal')">✨ Upgrade to Premium</button>
+        <button class="btn-brand" style="margin-top:0.65rem;" onclick="openUpgradeModal()">✨ Upgrade to Premium</button>
       </div>
     </section>
 
@@ -454,7 +471,7 @@ function toggleEye(inputId, btn) {
         <div id="opp-premium-cta" style="background:linear-gradient(135deg,#f0f9ff,#faf5ff);border:2px solid var(--brand);border-radius:12px;padding:1rem;text-align:center;margin-top:0.75rem;display:none;">
           <strong>✨ Unlock Full Access</strong>
           <p style="font-size:0.82rem;color:var(--sub);margin:0.4rem 0 0.75rem;">See eligibility details, apply directly, and get deadline reminders with Premium.</p>
-          <button class="btn-brand" onclick="openM('upgrade-modal')">Upgrade to Premium</button>
+          <button class="btn-brand" onclick="openUpgradeModal()">Upgrade to Premium</button>
         </div>
       </div>
     </section>
@@ -657,7 +674,7 @@ function toggleEye(inputId, btn) {
       <div style="font-size:0.78rem;color:var(--sub);margin-top:2px;" id="up-student-info">—</div>
     </div>
     <!-- Refresh button -->
-    <button onclick="refreshPlanFromFirestore()" style="width:100%;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:0.65rem;font-size:0.85rem;font-weight:700;color:#2563eb;cursor:pointer;margin-bottom:0.75rem;">🔄 Refresh Plan (after payment)</button>
+    <button onclick="refreshPlanFromFirestore(this)" style="width:100%;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:0.65rem;font-size:0.85rem;font-weight:700;color:#2563eb;cursor:pointer;margin-bottom:0.75rem;">🔄 Refresh Plan (after payment)</button>
     <!-- Tier table -->
     <div style="font-size:0.75rem;font-weight:700;color:var(--sub);margin-bottom:0.4rem;">PRICING TIERS</div>
     <div id="up-tier-table" style="font-size:0.78rem;"></div>
@@ -827,5 +844,49 @@ function toggleEye(inputId, btn) {
     </button>
   </div>
 </div>
+
+<script>
+// ── Register Service Worker (PWA) ──────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => {
+        console.log('[PWA] Service Worker registered:', reg.scope);
+        // Listen for background sync messages from SW
+        navigator.serviceWorker.addEventListener('message', e => {
+          if (e.data?.type === 'BACKGROUND_SYNC') {
+            if (typeof SQ !== 'undefined') SQ.flush();
+          }
+        });
+      })
+      .catch(err => console.warn('[PWA] SW registration failed:', err));
+  });
+}
+// ── PWA Install Prompt ──────────────────────────────────────────────────────
+let _deferredInstall = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredInstall = e;
+  // Show install banner after 5 seconds if not installed
+  setTimeout(() => {
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner && _deferredInstall) banner.style.display = 'flex';
+  }, 5000);
+});
+function installPWA() {
+  if (!_deferredInstall) return;
+  _deferredInstall.prompt();
+  _deferredInstall.userChoice.then(() => {
+    _deferredInstall = null;
+    const banner = document.getElementById('pwa-install-banner');
+    if (banner) banner.style.display = 'none';
+  });
+}
+window.addEventListener('appinstalled', () => {
+  const banner = document.getElementById('pwa-install-banner');
+  if (banner) banner.style.display = 'none';
+  console.log('[PWA] App installed successfully!');
+});
+</script>
 </body>
 </html>
