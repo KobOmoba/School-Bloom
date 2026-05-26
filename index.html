@@ -1,6 +1,11 @@
 
   <!-- Tier alert banner -->
-  <div id="tier-alert-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#1e293b;border-bottom:2px solid #f59e0b;padding:0.65rem 1rem;gap:0.75rem;align-items:center;font-size:0.82rem;color:#f1f5f9;"></div>
+    <!-- Demo mode banner -->
+  <div id="demo-banner" style="display:none;position:sticky;top:0;z-index:1001;background:linear-gradient(135deg,#7c3aed,#2563eb);padding:0.5rem 1rem;gap:0.75rem;align-items:center;justify-content:space-between;font-size:0.78rem;color:#fff;font-weight:700;">
+    <span>🎬 DEMO MODE — No data is saved. <span style="font-weight:400;opacity:0.85;">Explore freely!</span></span>
+    <button onclick="document.getElementById('login').style.display='flex';document.getElementById('main-app').style.display='none';document.getElementById('demo-banner').style.display='none';" style="background:rgba(255,255,255,0.2);border:none;border-radius:6px;padding:3px 10px;color:#fff;cursor:pointer;font-weight:700;font-size:0.74rem;">✕ Exit Demo</button>
+  </div>
+<div id="tier-alert-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#1e293b;border-bottom:2px solid #f59e0b;padding:0.65rem 1rem;gap:0.75rem;align-items:center;font-size:0.82rem;color:#f1f5f9;"></div>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -84,6 +89,12 @@ function toggleEye(inputId, btn) {
       <label class="rem-label"><input type="checkbox" id="l-remember" checked> Remember me</label>
     </div>
     <button id="l-btn" class="btn-brand" onclick="doLogin()">▶ Login</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:0.6rem;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+      <span style="font-size:0.7rem;color:var(--sub);">or</span>
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+    <button type="button" onclick="loadDemo()" style="width:100%;background:transparent;border:1.5px solid var(--border);border-radius:10px;padding:0.6rem;font-size:0.85rem;color:var(--sub);cursor:pointer;font-weight:600;margin-top:0.4rem;">🎬 Try Demo (no login needed)</button>
     <div id="l-err" class="err"></div>
     <p style="font-size:0.72rem;color:var(--sub);text-align:center;margin-top:1rem;">
       Your <strong>School ID</strong> and <strong>Password</strong> were sent by your AariNAT agent via WhatsApp.<br><br>
