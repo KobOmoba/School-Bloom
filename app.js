@@ -733,7 +733,19 @@ function buildFees(s,idx){
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
-    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span style="flex:1;">${p.date} · ${p.method}</span><strong style="color:var(--money);margin-right:8px;">${fmt(p.amount)}</strong><button onclick="editPayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--brand);" title="Edit">✏️</button><button onclick="deletePayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--danger);" title="Delete">🗑️</button></div>`).join('')}</div>`:''}
+    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`
+  <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:0.8rem;font-weight:600;color:var(--money);">${fmt(p.amount)}</div>
+      <div style="font-size:0.7rem;color:var(--sub);">${p.date} · ${p.method}</div>
+    </div>
+    <button onclick="editPayment(${idx},${pi})"
+      style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;
+      padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
+    <button onclick="deletePayment(${idx},${pi})"
+      style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;
+      padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#dc2626;white-space:nowrap;">🗑️ Del</button>
+  </div>`).join('')}</div>`:''}
     </div>`;
 }
 
@@ -943,7 +955,19 @@ function buildFees(s,idx){
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
-    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><span style="flex:1;">${p.date} · ${p.method}</span><strong style="color:var(--money);margin-right:8px;">${fmt(p.amount)}</strong><button onclick="editPayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--brand);" title="Edit">✏️</button><button onclick="deletePayment(${idx},${pi})" style="background:none;border:none;cursor:pointer;font-size:0.8rem;padding:2px 5px;color:var(--danger);" title="Delete">🗑️</button></div>`).join('')}</div>`:''}
+    ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`
+  <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:0.8rem;font-weight:600;color:var(--money);">${fmt(p.amount)}</div>
+      <div style="font-size:0.7rem;color:var(--sub);">${p.date} · ${p.method}</div>
+    </div>
+    <button onclick="editPayment(${idx},${pi})"
+      style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;
+      padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
+    <button onclick="deletePayment(${idx},${pi})"
+      style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;
+      padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#dc2626;white-space:nowrap;">🗑️ Del</button>
+  </div>`).join('')}</div>`:''}
     </div>`;
 }
 
@@ -1840,41 +1864,57 @@ function saveScores(idx){
 
 
 function renderStaff(){
-  const staff=SD.staff||[];const isPrem=SD.config.plan==='premium';const limit=isPrem?'∞':3;
-  if($('staff-count')) $('staff-count').textContent=`${staff.length}/${limit} used (${isPrem?'Premium':'Basic'})`;
+  const staff=SD.staff||[];
+  const isPrem=SD.config.plan==='premium';
+  const limit=isPrem?'∞':3;
+  if($('staff-count')) $('staff-count').textContent=`${staff.length}/${limit} (${isPrem?'Premium':'Basic'})`;
   const el=$('staff-list'); if(!el) return;
-  el.innerHTML=staff.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No staff added yet.</p>':
-  staff.map((s,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);">
-    <div style="flex:1;min-width:0;">
-      <strong style="font-size:0.85rem;">${esc(s.name)}</strong>
-      <span class="chip chip-ok" style="margin-left:5px;font-size:0.7rem;">${s.role}</span>
-      <div style="font-size:0.72rem;color:var(--sub);margin-top:2px;">${s.email||''}</div>
-    </div>
-    <div style="display:flex;gap:5px;flex-shrink:0;">
-      <button onclick="editStaff(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 8px;cursor:pointer;font-size:0.78rem;color:var(--brand);">✏️ Edit</button>
-      ${s.role!=='Principal'?`<button onclick="deleteStaff(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 8px;cursor:pointer;font-size:0.78rem;color:var(--danger);">🗑️</button>`:''}
-    </div>
-  </div>`).join('');
+  if(!staff.length){
+    el.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No staff added yet.</p>';return;
+  }
+  el.innerHTML=staff.map((s,i)=>`
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0;border-bottom:1px solid var(--border);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;font-size:0.88rem;">${esc(s.name)}</div>
+        <div style="font-size:0.72rem;color:var(--sub);">${s.email||''} · ${(s.role||'').replace('_',' ')}</div>
+      </div>
+      <div style="display:flex;gap:5px;flex-shrink:0;">
+        <button onclick="editStaff(${i})"
+          style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;
+          padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
+        ${s.role!=='Principal'?`<button onclick="deleteStaff(${i})"
+          style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;
+          padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#dc2626;white-space:nowrap;">🗑️</button>`:''}
+      </div>
+    </div>`).join('');
   const atLimit=!isPrem&&staff.length>=3;
   if($('staff-upgrade')) $('staff-upgrade').style.display=atLimit?'block':'none';
 }
 
 function renderExpenses(){
-  const exp=SD.expenses||[];let total=0;exp.forEach(e=>total+=e.amount||0);
+  const exp=SD.expenses||[];
+  let total=0; exp.forEach(e=>total+=e.amount||0);
   if($('exp-total')) $('exp-total').textContent=fmt(total);
   const el=$('exp-list'); if(!el) return;
-  el.innerHTML=exp.length===0?'<p style="text-align:center;color:var(--sub);padding:2rem;">No expenses logged yet.</p>':
-  exp.map((e,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:0.55rem 0;border-bottom:1px solid var(--border);gap:0.4rem;">
-    <div style="flex:1;min-width:0;">
-      <div style="font-size:0.82rem;font-weight:600;">${esc(e.description||'')}</div>
-      <div style="font-size:0.7rem;color:var(--sub);">${e.category||''} · ${e.date||''}</div>
-    </div>
-    <strong style="font-family:'DM Mono',monospace;color:var(--danger);font-size:0.82rem;flex-shrink:0;">${fmt(e.amount||0)}</strong>
-    <div style="display:flex;gap:4px;flex-shrink:0;">
-      <button onclick="editExpense(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 7px;cursor:pointer;font-size:0.75rem;color:var(--brand);">✏️</button>
-      <button onclick="deleteExpenseItem(${i})" style="background:none;border:1px solid var(--border);border-radius:5px;padding:3px 7px;cursor:pointer;font-size:0.75rem;color:var(--danger);">🗑️</button>
-    </div>
-  </div>`).join('');
+  if(!exp.length){
+    el.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No expenses logged yet.</p>';return;
+  }
+  el.innerHTML=exp.map((e,i)=>`
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;border-bottom:1px solid var(--border);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.82rem;font-weight:600;">${esc(e.description||'')}</div>
+        <div style="font-size:0.7rem;color:var(--sub);">${e.category||''} · ${e.date||''}</div>
+      </div>
+      <strong style="font-family:'DM Mono',monospace;color:var(--danger);font-size:0.82rem;flex-shrink:0;">${fmt(e.amount||0)}</strong>
+      <div style="display:flex;gap:5px;flex-shrink:0;">
+        <button onclick="editExpense(${i})"
+          style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;
+          padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
+        <button onclick="deleteExpenseItem(${i})"
+          style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;
+          padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#dc2626;white-space:nowrap;">🗑️ Del</button>
+      </div>
+    </div>`).join('');
 }
 
 async function addStaff(){
