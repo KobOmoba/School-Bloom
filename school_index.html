@@ -476,55 +476,6 @@ function toggleEye(inputId, btn) {
       </div>
     </section>
 
-  
-    <section id="sec-guarantee" class="sec">
-      <div class="ct">🏆 Exam Pass Guarantee</div>
-      <p style="color:var(--sub);font-size:0.82rem;margin-bottom:1rem;">
-        Enroll students in the guarantee program. If they complete 80% of modules and take 3 mock exams but still miss their target score, they qualify for a 70% refund.
-      </p>
-
-      <!-- Enroll a student -->
-      <div class="card" style="margin-bottom:1.2rem;">
-        <div class="ct" style="font-size:0.9rem;margin-bottom:0.7rem;">➕ New Enrollment</div>
-        <label class="lbl">Student</label>
-        <select class="inp" id="g-student-select" onchange="prefillGuaranteeClass()">
-          <option value="">— Select Student —</option>
-        </select>
-        <label class="lbl">Class</label>
-        <input class="inp" id="g-class" placeholder="e.g. SS2A" readonly>
-        <label class="lbl">Subject</label>
-        <input class="inp" id="g-subject" placeholder="e.g. Mathematics">
-        <label class="lbl">Target Score (pass mark)</label>
-        <input class="inp" type="number" id="g-target" value="50" min="30" max="100">
-        <label class="lbl">Amount Paid (₦)</label>
-        <input class="inp" type="number" id="g-amount" placeholder="e.g. 3000">
-        <button class="btn-brand" onclick="enrollGuarantee()">✅ Enroll Student</button>
-      </div>
-
-      <!-- Filters -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;">
-        <select class="inp" id="g-filter-status" style="flex:1;min-width:120px;" onchange="renderGuarantee()">
-          <option value="">All Status</option>
-          <option value="active">Active</option>
-          <option value="passed">Passed</option>
-          <option value="failed">Failed — Refund Due</option>
-          <option value="refunded">Refunded</option>
-        </select>
-        <select class="inp" id="g-filter-term" style="flex:1;min-width:120px;" onchange="renderGuarantee()">
-          <option value="">All Terms</option>
-          <option value="Term 1">Term 1</option>
-          <option value="Term 2">Term 2</option>
-          <option value="Term 3">Term 3</option>
-        </select>
-      </div>
-
-      <!-- Summary cards -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:1rem;" id="g-summary"></div>
-
-      <!-- List -->
-      <div id="guarantee-list"></div>
-    </section>
-
   </main>
 
   <!-- BOTTOM NAV — all 16 sections -->
@@ -546,7 +497,6 @@ function toggleEye(inputId, btn) {
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
     <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Scorecard</button>
     <button class="nlink" data-t="opps" onclick="go('opps')"><span class="ni">🔍</span>Scout</button>
-    <button class="nlink" data-t="guarantee" onclick="go('guarantee')"><span class="ni">🏆</span>Guarantee</button>
   </nav>
 </div>
 
