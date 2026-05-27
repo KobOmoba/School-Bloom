@@ -1720,6 +1720,8 @@ function bsgSaveAll(cls,term){
   saveLocal('scores',SD.scores);
   SQ.push({key:'scores',data:SD.scores});
   toast('✅ Scores saved!');
+  // 🤖 Auto-check guarantee for ALL students in this class
+  autoCheckGuaranteeForClass(term, cls);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2056,6 +2058,142 @@ function saveScores(idx){
   saveLocal('scores', SD.scores);
   SQ.push({key:'scores', data:SD.scores});
   toast('✅ Scores saved!');
+  // 🤖 Auto-run guarantee check for this student
+  autoCheckGuaranteeForStudent(idx);
+}
+
+// ── AUTO GUARANTEE CHECK ────────────────────────────────────────
+// Fires automatically every time scores are saved.
+// Checks Firestore for any active guarantee enrollment for this student
+// and runs pass/fail logic without any manual tap.
+async function autoCheckGuaranteeForStudent(idx){
+  if(!db || !navigator.onLine) return; // silent — don't block offline use
+  const student = SD.students[idx];
+  if(!student) return;
+  const sid  = student.id || idx;
+  const term = SD.config?.currentTerm || 'Term 1';
+
+  try{
+    // Find all active enrollments for this student this term
+    const snap = await db.collection('exam_enrollments')
+      .where('schoolId','==', schoolId)
+      .where('studentId','==', String(sid))
+      .where('term','==', term)
+      .where('status','==','active')
+      .get();
+
+    if(snap.empty) return; // not on guarantee — nothing to do
+
+    const scores = SD.scores?.[term]?.[sid] || {};
+    let notifications = [];
+
+    for(const doc of snap.docs){
+      const e    = doc.data();
+      const sub  = e.subject;
+      const subScores = scores[sub];
+      if(!subScores) continue; // score not entered for this subject yet
+
+      const ca   = (subScores.ca1||0)+(subScores.ca2||0)+(subScores.ca3||0);
+      const exam = subScores.exam||0;
+      const total= Math.min(ca,40)+Math.min(exam,60); // cap to valid range
+      const passed= total >= (e.targetScore||50);
+      const compMet  = (e.completionRate||0) >= 80;
+      const mocksMet = (e.mocksTaken||0) >= 3;
+      const refundEligible = !passed && compMet && mocksMet;
+
+      const update = {
+        status: passed ? 'passed' : 'failed',
+        refundEligible,
+        finalScore: total,
+        autoCheckedAt: new Date(),
+      };
+      if(passed) update.passedAt = new Date();
+
+      await doc.ref.update(update);
+      notifications.push({ name: student.name, subject: sub, total, passed, refundEligible, refundAmount: e.refundAmount||0 });
+    }
+
+    // Show a single combined toast after all checks
+    if(notifications.length){
+      const passed   = notifications.filter(n=>n.passed);
+      const refunds  = notifications.filter(n=>n.refundEligible);
+      const failed   = notifications.filter(n=>!n.passed&&!n.refundEligible);
+
+      let msg = '';
+      if(passed.length)   msg += `🎉 ${passed.map(n=>n.subject).join(', ')}: PASSED! `;
+      if(refunds.length)  msg += `⚠️ ${refunds.map(n=>n.subject).join(', ')}: Refund due (₦${fmt(refunds[0].refundAmount)}). `;
+      if(failed.length)   msg += `❌ ${failed.map(n=>n.subject).join(', ')}: Failed (not eligible for refund).`;
+      if(msg) toast(`🏆 Guarantee auto-checked: ${msg.trim()}`, 5000);
+    }
+  }catch(err){
+    console.warn('autoCheckGuaranteeForStudent silently failed:', err);
+    // Never show error to user — automation is background, not blocking
+  }
+}
+
+// ── AUTO CHECK FOR ALL STUDENTS IN A CLASS (batch) ──────────────
+// Called when admin uploads/saves scores for entire class at once
+async function autoCheckGuaranteeForClass(term, classArm){
+  if(!db || !navigator.onLine) return;
+  try{
+    // Get all active enrollments for this class this term
+    const snap = await db.collection('exam_enrollments')
+      .where('schoolId','==', schoolId)
+      .where('term','==', term)
+      .where('status','==','active')
+      .get();
+
+    if(snap.empty) return;
+
+    // Filter to this class
+    const enrollments = snap.docs.filter(d=>{
+      const cls = d.data().classArm||'';
+      return !classArm || cls===classArm;
+    });
+    if(!enrollments.length) return;
+
+    const scores = SD.scores?.[term] || {};
+    let passed=0, refunds=0, failed=0, totalRefundAmt=0;
+
+    for(const doc of enrollments){
+      const e   = doc.data();
+      const sid = e.studentId;
+      const sub = e.subject;
+      const subScores = scores[sid]?.[sub];
+      if(!subScores) continue;
+
+      const ca   = (subScores.ca1||0)+(subScores.ca2||0)+(subScores.ca3||0);
+      const exam = subScores.exam||0;
+      const total= Math.min(ca,40)+Math.min(exam,60);
+      const didPass   = total >= (e.targetScore||50);
+      const compMet   = (e.completionRate||0) >= 80;
+      const mocksMet  = (e.mocksTaken||0) >= 3;
+      const refundEligible = !didPass && compMet && mocksMet;
+
+      await doc.ref.update({
+        status: didPass?'passed':'failed',
+        refundEligible,
+        finalScore: total,
+        autoCheckedAt: new Date(),
+        ...(didPass?{passedAt:new Date()}:{})
+      });
+
+      if(didPass)           passed++;
+      else if(refundEligible){ refunds++; totalRefundAmt+=(e.refundAmount||0); }
+      else                    failed++;
+    }
+
+    const total = passed+refunds+failed;
+    if(total > 0){
+      let msg = `🏆 Guarantee auto-checked ${total} enrollment(s): `;
+      if(passed)  msg += `${passed} passed ✅ `;
+      if(refunds) msg += `${refunds} refund(s) due ⚠️ (₦${fmt(totalRefundAmt)}) `;
+      if(failed)  msg += `${failed} failed ❌`;
+      toast(msg.trim(), 6000);
+    }
+  }catch(err){
+    console.warn('autoCheckGuaranteeForClass silently failed:', err);
+  }
 }
 
 
