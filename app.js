@@ -963,6 +963,7 @@ function renderTab(tab){
   else if(tab==='scores')c.innerHTML=buildScores(s,activeIdx);
   else if(tab==='report')c.innerHTML=buildReport(s);
   else if(tab==='swot')c.innerHTML=buildSWOT(s,activeIdx);
+  else if(tab==='safety')c.innerHTML=buildSafety(s,activeIdx);
 }
 
 // FEES TAB
@@ -989,6 +990,7 @@ function buildFees(s,idx){
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
+    ${owe>0&&SD.config.plan==='premium'?`<button id="bc-btn-${idx}" class="btn-sm" style="background:linear-gradient(135deg,#059669,#065f46);color:#fff;border:none;border-radius:8px;padding:0.5rem;font-size:0.8rem;cursor:pointer;font-weight:700;width:100%;margin-top:0.4rem;" onclick="generatePaymentLink(${idx})">💳 Send BloomCollect Payment Link</button>`:''}
     ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`
   <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
     <div style="flex:1;min-width:0;">
@@ -1030,7 +1032,7 @@ function buildAttendance(s){
     <div class="stat"><div class="sn" style="color:var(--warn);">${late}</div><div class="sl">Late</div></div>
     </div><div class="prog-bg" style="margin-top:0.65rem;"><div class="prog-fill" style="width:${pct}%;"></div></div>
     <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% attendance (last 14 days)</div></div>
-    <div class="card"><div class="ct">📅 Mark Today (${today})</div>
+    <div class="card"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;"><span>📅 Mark Today (${today})</span><button onclick="checkMorningAbsentees()" style="background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.25);border-radius:7px;padding:3px 10px;font-size:0.7rem;color:#f87171;cursor:pointer;font-weight:700;white-space:nowrap;">🛡️ Absence Alert</button></div>
     <div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">
       <button class="btn-money btn-sm" onclick="markAtt(${activeIdx},'${today}','Present')">✅ Present</button>
       <button class="btn-danger btn-sm" onclick="markAtt(${activeIdx},'${today}','Absent')">❌ Absent</button>
@@ -1219,6 +1221,7 @@ function buildFees(s,idx){
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
+    ${owe>0&&SD.config.plan==='premium'?`<button id="bc-btn-${idx}" class="btn-sm" style="background:linear-gradient(135deg,#059669,#065f46);color:#fff;border:none;border-radius:8px;padding:0.5rem;font-size:0.8rem;cursor:pointer;font-weight:700;width:100%;margin-top:0.4rem;" onclick="generatePaymentLink(${idx})">💳 Send BloomCollect Payment Link</button>`:''}
     ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`
   <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
     <div style="flex:1;min-width:0;">
@@ -1260,7 +1263,7 @@ function buildAttendance(s){
     <div class="stat"><div class="sn" style="color:var(--warn);">${late}</div><div class="sl">Late</div></div>
     </div><div class="prog-bg" style="margin-top:0.65rem;"><div class="prog-fill" style="width:${pct}%;"></div></div>
     <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% attendance (last 14 days)</div></div>
-    <div class="card"><div class="ct">📅 Mark Today (${today})</div>
+    <div class="card"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;"><span>📅 Mark Today (${today})</span><button onclick="checkMorningAbsentees()" style="background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.25);border-radius:7px;padding:3px 10px;font-size:0.7rem;color:#f87171;cursor:pointer;font-weight:700;white-space:nowrap;">🛡️ Absence Alert</button></div>
     <div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">
       <button class="btn-money btn-sm" onclick="markAtt(${activeIdx},'${today}','Present')">✅ Present</button>
       <button class="btn-danger btn-sm" onclick="markAtt(${activeIdx},'${today}','Absent')">❌ Absent</button>
