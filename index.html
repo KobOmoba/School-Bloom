@@ -120,6 +120,32 @@ function toggleEye(inputId, btn) {
   </div>
 </div>
 
+
+<!-- STAFF LOGIN — Step 2: shown after School ID is verified and staff exist -->
+<div id="staff-login" style="display:none;position:fixed;inset:0;background:radial-gradient(ellipse at 30% 20%,#0f2847 0%,#050d18 60%);display:none;align-items:center;justify-content:center;padding:1.5rem;z-index:200;">
+  <div class="lbox">
+    <div class="lbox-logo">🌸 Who are you?</div>
+    <div class="lbox-sub" id="sl-school-name" style="margin-bottom:0.5rem;">Educational Bloom Portal</div>
+    <p style="font-size:0.8rem;color:var(--sub);margin-bottom:1.25rem;">Your School ID is verified. Now enter your staff login to continue.</p>
+    <label>Your Email</label>
+    <input type="email" id="sl-email" placeholder="e.g. teacher@school.edu.ng" onkeydown="if(event.key==='Enter')document.getElementById('sl-pwd').focus()">
+    <label>Your Password</label>
+    <div class="pwd-wrap">
+      <input type="password" id="sl-pwd" placeholder="Your staff password" onkeydown="if(event.key==='Enter')doStaffLogin()">
+      <button type="button" class="eye-btn" onclick="toggleEye('sl-pwd',this)" tabindex="-1">👁️</button>
+    </div>
+    <button class="btn-brand" onclick="doStaffLogin()" style="margin-top:0.5rem;">▶ Enter as Staff</button>
+    <div id="sl-err" class="err" style="display:none;margin-top:0.4rem;"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:0.75rem;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+      <span style="font-size:0.7rem;color:var(--sub);">or</span>
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+    <button type="button" onclick="loginAsPrincipal()" style="width:100%;background:transparent;border:1.5px solid var(--border);border-radius:10px;padding:0.6rem;font-size:0.82rem;color:var(--sub);cursor:pointer;font-weight:600;margin-top:0.5rem;">👑 Enter as Principal</button>
+    <button type="button" onclick="backToSchoolLogin()" style="width:100%;background:transparent;border:none;padding:0.4rem;font-size:0.78rem;color:var(--sub);cursor:pointer;margin-top:0.3rem;">← Change School ID</button>
+  </div>
+</div>
+
 <!-- APP -->
 <div id="app" style="display:none;">
 
@@ -549,7 +575,20 @@ function toggleEye(inputId, btn) {
       <button type="button" class="eye-btn" onclick="toggleEye('sf-pwd',this)" tabindex="-1">👁️</button>
     </div>
     <label>Role</label>
-    <select id="sf-role"><option>Teacher</option><option>Bursar</option><option>Head Teacher</option><option>Vice Principal</option><option>Admin</option><option>Sports Coach</option><option>Arts Teacher</option><option>Music Teacher</option></select>
+    <select id="sf-role" onchange="onRoleChange(this)">
+      <option value="Class Teacher">Class Teacher</option>
+      <option value="Subject Teacher">Subject Teacher</option>
+      <option value="Bursar">Bursar</option>
+      <option value="Principal">Principal</option>
+    </select>
+    <div id="sf-class-row" style="display:block;">
+      <label>Assigned Class <span style="font-size:0.68rem;color:var(--sub);">(required for Class Teacher)</span></label>
+      <input type="text" id="sf-class" placeholder="e.g. JSS 1A or Basic Three">
+    </div>
+    <div id="sf-subjects-row" style="display:none;">
+      <label>Assigned Subjects <span style="font-size:0.68rem;color:var(--sub);">(comma-separated)</span></label>
+      <input type="text" id="sf-subjects" placeholder="e.g. Mathematics, English">
+    </div>
     <button class="btn-brand" onclick="addStaff()">✅ Add Staff</button>
   </div>
 </div>
