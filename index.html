@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="style.css">
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-functions-compat.js"></script>
 <style>
 /* ── Password Eye Toggle ──────────────────────────────────── */
 .pwd-wrap{position:relative;display:flex;align-items:center;}
@@ -547,6 +548,7 @@ function toggleEye(inputId, btn) {
       <button class="ptab" data-pt="scores" onclick="setTab('scores')">📚 Scores</button>
       <button class="ptab" data-pt="report" onclick="setTab('report')">📋 Report Card</button>
       <button class="ptab" data-pt="swot" onclick="setTab('swot')">🧠 SWOT</button>
+      <button class="ptab" data-pt="safety" onclick="setTab('safety')">🛡️ Safety</button>
     </div>
     <div id="profile-content"></div>
     <button class="btn-ghost" style="margin-top:0.65rem;color:var(--danger);border-color:var(--danger);" onclick="deleteStudent(activeIdx)">🗑️ Remove Student</button>
