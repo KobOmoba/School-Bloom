@@ -248,7 +248,7 @@ async function doLogin(){
       const staff=JSON.parse(ls);
       const config=JSON.parse(lc);
       console.log('✅ Login from localStorage cache (offline-first, ID only)');
-      schoolId=sid;userRole='Principal';
+      schoolId=sid;
       _saveAuth(sid,'');
       loadSchoolIntoSD(sid,{
         config,staff,
@@ -260,6 +260,21 @@ async function doLogin(){
         scores:loadLocal('scores',{}),
       opportunities:loadLocal('opportunities',defaultOpps())
       });
+      // ── RBAC: check for cached staff session ──
+      const cachedSession=localStorage.getItem(`p_${sid}_staffSession`);
+      if(cachedSession){
+        try{
+          const sess=JSON.parse(cachedSession);
+          currentStaff=sess; userRole=sess.role||'Principal';
+          startApp(); btn.textContent='▶ Enter Portal';btn.disabled=false; return;
+        }catch(e){}
+      }
+      // No staff session cached — if staff exist, show staff login; else Principal
+      if(SD.staff&&SD.staff.length>0){
+        btn.textContent='▶ Enter Portal';btn.disabled=false;
+        showStaffLoginStep(); return;
+      }
+      userRole='Principal'; currentStaff=null;
       startApp();
       setTimeout(()=>SQ.silentPull(),1500);
       btn.textContent='▶ Enter Portal';btn.disabled=false;
@@ -310,9 +325,18 @@ async function doLogin(){
 
     // ✅ First-time login success — cache everything locally
     schoolId=sid;
-    userRole=(school.staff&&school.staff[0]?.role)||'Principal';
     _saveAuth(sid,'');
     loadSchoolIntoSD(sid,school);
+    // ── RBAC: route to staff login if staff exist ──
+    const fsSession=localStorage.getItem(`p_${sid}_staffSession`);
+    if(fsSession){
+      try{const sess=JSON.parse(fsSession);currentStaff=sess;userRole=sess.role||'Principal';startApp();btn.textContent='▶ Enter Portal';btn.disabled=false;return;}catch(e){}
+    }
+    if(SD.staff&&SD.staff.length>0){
+      btn.textContent='▶ Enter Portal';btn.disabled=false;
+      showStaffLoginStep(); return;
+    }
+    userRole='Principal'; currentStaff=null;
     startApp();
 
   }catch(e){
@@ -344,18 +368,32 @@ function defaultOpps(){
   ];
 }
 
-function logout(){if(!confirm('Clear session and reload?'))return;localStorage.removeItem('p_auth');sessionStorage.removeItem('p_auth');location.reload();}
+function logout(){
+  if(!confirm('Clear session and reload?'))return;
+  localStorage.removeItem('p_auth');
+  sessionStorage.removeItem('p_auth');
+  if(schoolId) localStorage.removeItem(`p_${schoolId}_staffSession`);
+  currentStaff=null; userRole=null;
+  location.reload();
+}
 
 function startApp(){
-  // Called after a manual login attempt — refresh header and data
-  $('login').style.display='none';$('app').style.display='block';
+  // Called after login — refresh header and apply RBAC restrictions
+  $('login').style.display='none';
+  const staffLogin=$('staff-login'); if(staffLogin) staffLogin.style.display='none';
+  $('app').style.display='block';
   const name=SD.config.schoolName||schoolId||'Educational Bloom';
-  $('hdr-school').textContent=name;$('hdr-role').textContent=userRole;
+  $('hdr-school').textContent=name;
+  $('hdr-role').textContent=userRole+(currentStaff?.assignedClass?' · '+currentStaff.assignedClass:'');
   $('hdr-term').textContent=SD.config.currentTerm||'Term 1';
   const isPrem=SD.config.plan==='premium';
   $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
   $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
-  SQ.ping();renderBanner();go('revenue');
+  applyRoleRestrictions();
+  SQ.ping();
+  // Route to best first tab for this role
+  const firstTabs={Principal:'revenue',Bursar:'revenue','Class Teacher':'students','Subject Teacher':'scorecard'};
+  go(firstTabs[userRole]||'revenue');
   setTimeout(()=>SQ.flush(),500);
   setTimeout(()=>SQ.silentPull(),2000);
 }
@@ -635,22 +673,35 @@ async function fixGarbledNames(){
 }
 function renderStudentList(){
   const q=($('stu-search')?.value||'').toLowerCase();
-  const cls=$('stu-class')?.value||'';
+  let cls=$('stu-class')?.value||'';
   const pay=$('stu-pay')?.value||'';
   let list=[...SD.students];
+
+  // ── RBAC: Class Teacher sees ONLY their assigned class ────────────────────
+  const assignedCls=getAssignedClass();
+  if(assignedCls&&(userRole==='Class Teacher'||userRole==='Subject Teacher')){
+    cls=assignedCls;
+    // Lock the class filter dropdown to their class
+    const clsSel=$('stu-class');
+    if(clsSel){clsSel.value=assignedCls;clsSel.disabled=true;}
+  }
+
   if(q)list=list.filter(s=>s.name.toLowerCase().includes(q)||(s.phone||'').includes(q));
   if(cls)list=list.filter(s=>s.class===cls);
   if(pay==='paid')list=list.filter(s=>(s.totalFee||0)<=(s.paid||0));
   else if(pay==='owing')list=list.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
   populateClassFilter();
   const c=$('students-list');
-  if(!list.length){c.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No students match. Add a student or adjust filters.</p>';return;}
+  if(!list.length){c.innerHTML='<p style="text-align:center;color:var(--sub);padding:2rem;">No students match.</p>';return;}
+
   c.innerHTML=list.map(s=>{
     const idx=SD.students.indexOf(s);
     const owe=(s.totalFee||0)-(s.paid||0);
     const pbc=owe<=0?'pb-paid':s.paid>0?'pb-part':'pb-owe';
     const pbt=owe<=0?'Paid':s.paid>0?'Partial':'Unpaid';
-    return`<div class="stu-row" onclick="openProfile(${idx})"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;min-width:0;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;"><span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}</div></div>`;
+    // ── RBAC: hide fee badge from Class/Subject Teachers ─────────────────────
+    const feeBadge=canSeeFees()?`<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}`:'' ;
+    return`<div class="stu-row" onclick="openProfile(${idx})"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;min-width:0;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div></div>`;
   }).join('');
 }
 
@@ -916,6 +967,14 @@ function renderTab(tab){
 
 // FEES TAB
 function buildFees(s,idx){
+  // ── RBAC: Class/Subject Teachers cannot see fee data ─────────────────────
+  if(!canSeeFees()){
+    return`<div class="card" style="text-align:center;padding:1.5rem;color:var(--sub);">
+      <div style="font-size:1.5rem;margin-bottom:0.5rem;">🔒</div>
+      <div style="font-weight:700;font-size:0.88rem;color:var(--text);">Fee data is private</div>
+      <div style="font-size:0.78rem;margin-top:0.3rem;">Only the Principal and Bursar can view fee information.</div>
+    </div>`;
+  }
   const owe=(s.totalFee||0)-(s.paid||0);
   const pct=s.totalFee?Math.min(100,Math.round(((s.paid||0)/s.totalFee)*100)):0;
   return`<div class="card" style="margin-bottom:0.65rem;"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.65rem;">
@@ -1138,6 +1197,14 @@ function scorecardSetTerm(term,idx){
 
 // FEES TAB
 function buildFees(s,idx){
+  // ── RBAC: Class/Subject Teachers cannot see fee data ─────────────────────
+  if(!canSeeFees()){
+    return`<div class="card" style="text-align:center;padding:1.5rem;color:var(--sub);">
+      <div style="font-size:1.5rem;margin-bottom:0.5rem;">🔒</div>
+      <div style="font-weight:700;font-size:0.88rem;color:var(--text);">Fee data is private</div>
+      <div style="font-size:0.78rem;margin-top:0.3rem;">Only the Principal and Bursar can view fee information.</div>
+    </div>`;
+  }
   const owe=(s.totalFee||0)-(s.paid||0);
   const pct=s.totalFee?Math.min(100,Math.round(((s.paid||0)/s.totalFee)*100)):0;
   return`<div class="card" style="margin-bottom:0.65rem;"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.65rem;">
@@ -2116,15 +2183,29 @@ function renderExpenses(){
 
 async function addStaff(){
   const name=$('sf-name').value.trim(),email=$('sf-email').value.trim(),pwd=$('sf-pwd').value,role=$('sf-role').value;
+  const assignedClass=($('sf-class')?.value||'').trim();
+  const assignedSubjectsRaw=($('sf-subjects')?.value||'').trim();
+  const assignedSubjects=assignedSubjectsRaw?assignedSubjectsRaw.split(',').map(s=>s.trim()).filter(Boolean):[];
   if(!name||!email||!pwd)return alert('Fill all fields.');if(pwd.length<4)return alert('Password min 4 chars.');
+  if(role==='Class Teacher'&&!assignedClass)return alert('Assign a class for this Class Teacher (e.g. JSS 1A).');
   if((SD.staff||[]).find(s=>s.email===email))return alert('Email already registered.');
   const isPrem=SD.config.plan==='premium';
   if(!isPrem&&(SD.staff||[]).length>=3){openUpgradeModal();return;}
   if(!SD.staff)SD.staff=[];
-  SD.staff.push({name,email,password:pwd,role});
+  SD.staff.push({name,email,password:pwd,role,assignedClass:assignedClass||null,assignedSubjects});
   await SQ.push('staff',SD.staff);
-  closeM('add-staff-modal');$('sf-name').value='';$('sf-email').value='';$('sf-pwd').value='';
-  renderStaff();alert(`✅ ${name} added as ${role}.`);
+  closeM('add-staff-modal');
+  $('sf-name').value='';$('sf-email').value='';$('sf-pwd').value='';
+  const sfc=$('sf-class'); if(sfc)sfc.value='';
+  const sfs=$('sf-subjects'); if(sfs)sfs.value='';
+  renderStaff();alert(`✅ ${name} added as ${role}${assignedClass?' ('+assignedClass+')':''}.`);
+}
+
+// Show/hide class and subject fields based on selected role
+function onRoleChange(sel){
+  const role=sel.value;
+  const classRow=$('sf-class-row'); if(classRow) classRow.style.display=role==='Class Teacher'?'block':'none';
+  const subjectRow=$('sf-subjects-row'); if(subjectRow) subjectRow.style.display=role==='Subject Teacher'?'block':'none';
 }
 async function addExpense(){
   const cat=$('exp-cat').value,desc=$('exp-desc').value.trim(),amt=parseFloat($('exp-amt').value);
