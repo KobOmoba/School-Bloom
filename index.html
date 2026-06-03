@@ -118,6 +118,12 @@ function toggleEye(inputId, btn) {
       Your <strong>School ID</strong> and <strong>Password</strong> were sent by your AariNAT agent via WhatsApp.<br><br>
       Need help? <strong>+234 814 507 3941</strong>
     </p>
+    <p style="font-size:0.68rem;color:var(--sub);text-align:center;margin-top:0.5rem;line-height:1.6;">
+      By logging in you agree to EduBloom's
+      <button type="button" onclick="openM('privacy-modal')" style="background:none;border:none;color:#60a5fa;font-size:0.68rem;cursor:pointer;padding:0;text-decoration:underline;font-family:inherit;">Privacy Policy</button>
+      ·
+      <button type="button" onclick="openM('privacy-modal')" style="background:none;border:none;color:#60a5fa;font-size:0.68rem;cursor:pointer;padding:0;text-decoration:underline;font-family:inherit;">NDPA Compliance</button>
+    </p>
   </div>
 </div>
 
@@ -478,6 +484,27 @@ function toggleEye(inputId, btn) {
         <p style="font-size:0.82rem;color:var(--sub);">Staff limit: <span id="settings-staff-limit">3</span> · Finance AI: <span id="settings-ai">Basic</span></p>
         <button class="btn-brand" style="margin-top:0.65rem;" onclick="openUpgradeModal()">✨ Upgrade to Premium</button>
       </div>
+
+      <!-- PRIVACY & DATA PROTECTION CARD -->
+      <div class="card" style="border-left:4px solid #2563eb;">
+        <div class="ct">🛡️ Privacy &amp; Data Protection</div>
+        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.65rem;line-height:1.6;">
+          EduBloom is compliant with the <strong style="color:var(--text);">Nigeria Data Protection Act 2023 (NDPA)</strong>.
+          Your school's student records, parent contacts, and financial data are stored securely
+          and never shared with third parties.
+        </p>
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.65rem;">
+          <span style="font-size:0.68rem;background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.3);color:#60a5fa;border-radius:20px;padding:3px 10px;font-weight:600;">NDPA 2023 Compliant</span>
+          <span style="font-size:0.68rem;background:rgba(5,150,105,0.1);border:1px solid rgba(5,150,105,0.3);color:#34d399;border-radius:20px;padding:3px 10px;font-weight:600;">NDPC Registered</span>
+          <span style="font-size:0.68rem;background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.3);color:#a78bfa;border-radius:20px;padding:3px 10px;font-weight:600;">Firebase Encrypted Storage</span>
+        </div>
+        <button class="btn-ghost" style="color:var(--text);width:100%;" onclick="openM('privacy-modal')">
+          📄 Read Full Privacy Policy &amp; NDPC Registration Guide
+        </button>
+        <p style="font-size:0.68rem;color:var(--sub);text-align:center;margin-top:0.5rem;">
+          Data queries: aarinat.company.limited@gmail.com · +234 814 507 3941
+        </p>
+      </div>
     </section>
 
     <!-- 16. OPPORTUNITIES -->
@@ -732,6 +759,144 @@ function toggleEye(inputId, btn) {
     <p style="font-size:0.82rem;color:var(--sub);margin-bottom:0.75rem;">Contact AariNAT via WhatsApp to activate Premium. Your account upgrades within minutes of payment.</p>
     <button class="btn-wa" onclick="window.open('https://wa.me/2348145073941?text=Hello%20AariNAT%2C%20I%20want%20to%20upgrade%20my%20Educational%20Bloom%20school%20to%20Premium.%20School%20ID%3A%20'+schoolId,'_blank')">💬 WhatsApp AariNAT to Upgrade</button>
     <button class="btn-ghost" style="margin-top:0.4rem;" onclick="closeM('upgrade-modal')">Maybe Later</button>
+  </div>
+</div>
+
+
+<!-- PRIVACY POLICY & NDPC COMPLIANCE MODAL -->
+<div class="modal" id="privacy-modal">
+  <div class="mbox" style="max-height:90vh;overflow-y:auto;">
+    <div class="mhead">
+      <h3 style="font-size:0.95rem;font-weight:800;">🛡️ Privacy Policy &amp; Data Protection</h3>
+      <button class="mclose" onclick="closeM('privacy-modal')">×</button>
+    </div>
+
+    <div style="font-size:0.7rem;background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.3);border-radius:8px;padding:0.6rem;margin-bottom:1rem;color:#60a5fa;">
+      Compliant with the <strong>Nigeria Data Protection Act 2023 (NDPA)</strong><br>
+      Regulated by the <strong>Nigeria Data Protection Commission (NDPC)</strong>
+    </div>
+
+    <!-- DATA CONTROLLER -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">Data Controller</div>
+      <div style="font-size:0.82rem;color:var(--text);line-height:1.6;">
+        <strong>AariNAT Company Limited</strong><br>
+        RC-1732521 · Abeokuta, Ogun State, Nigeria<br>
+        📱 +234 814 507 3941 · aarinat.company.limited@gmail.com<br>
+        🌐 edubloom.com.ng
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- WHAT DATA WE COLLECT -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">What Data We Collect</div>
+      <div style="font-size:0.8rem;color:var(--text);line-height:1.7;">
+        <strong>Student records:</strong> name, class, date of enrolment, attendance, exam scores, report cards<br>
+        <strong>Parent/guardian contact:</strong> WhatsApp phone number (for fee reminders and safety alerts)<br>
+        <strong>Staff records:</strong> name, email address, role, login credentials<br>
+        <strong>School financial data:</strong> fee amounts, payment records, expense logs<br>
+        <strong>Safety records:</strong> authorised collector lists, sign-out logs (Premium plan)
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- WHY WE PROCESS IT -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">Why We Process This Data</div>
+      <div style="font-size:0.8rem;color:var(--text);line-height:1.7;">
+        <strong>Lawful basis: Contract &amp; Legitimate Interest</strong><br>
+        Data is processed solely to deliver the EduBloom school management service that your school has subscribed to. Specifically:<br>
+        — Fee tracking, collection reminders, and payment records<br>
+        — Daily attendance registers and absence notifications<br>
+        — Examination score recording and automatic report card generation<br>
+        — Staff access management and role-based access control<br>
+        — Child safety alerts and authorised collection logs (Premium)<br><br>
+        We do <strong>not</strong> sell, rent, or share personal data with advertisers or third parties for commercial purposes.
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- WHO HAS ACCESS -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">Who Has Access to the Data</div>
+      <div style="font-size:0.8rem;color:var(--text);line-height:1.7;">
+        <strong>Your school staff</strong> — Principal, Bursar, and teachers access only the data their assigned role permits<br>
+        <strong>AariNAT admin</strong> — limited access for technical support and billing only<br>
+        <strong>Google Firebase (Firestore)</strong> — our data storage provider, acting as a data processor under a Data Processing Agreement with Google. Data is stored on Google's servers. See Google's privacy policy at firebase.google.com<br><br>
+        No other party has access to your school's data.
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- HOW LONG WE KEEP IT -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">How Long We Keep Your Data</div>
+      <div style="font-size:0.8rem;color:var(--text);line-height:1.7;">
+        Data is retained for the duration of your active subscription, plus a maximum of <strong>24 months</strong> after subscription ends, to allow for account reactivation and any legal or audit requirements.<br><br>
+        After this period, all school data is permanently deleted from our systems.
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- DATA SUBJECT RIGHTS -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">Your Rights Under the NDPA 2023</div>
+      <div style="font-size:0.8rem;color:var(--text);line-height:1.7;">
+        Under the Nigeria Data Protection Act 2023, you have the right to:<br>
+        ✅ <strong>Access</strong> — request a copy of personal data we hold about you<br>
+        ✅ <strong>Correction</strong> — request correction of inaccurate data<br>
+        ✅ <strong>Deletion</strong> — request deletion of your data (subject to legal obligations)<br>
+        ✅ <strong>Objection</strong> — object to certain types of processing<br>
+        ✅ <strong>Portability</strong> — receive your data in a portable format<br><br>
+        To exercise any right, contact AariNAT directly:<br>
+        📱 +234 814 507 3941 · aarinat.company.limited@gmail.com
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- COMPLAINT TO NDPC -->
+    <div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--sub);margin-bottom:0.3rem;">How to Lodge a Complaint</div>
+      <div style="font-size:0.8rem;color:var(--text);line-height:1.7;">
+        If you believe your data rights have been violated and we have not resolved your concern, you may lodge a formal complaint with the Nigeria Data Protection Commission (NDPC):<br><br>
+        🌐 <strong>ndpc.gov.ng</strong><br>
+        📍 No. 12 Clement Isong Street, Asokoro, Abuja, Nigeria
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0;">
+
+    <!-- NDPC REGISTRATION GUIDE -->
+    <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:0.85rem;margin-bottom:0.75rem;">
+      <div style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#34d399;margin-bottom:0.5rem;">📋 NDPC Registration Process (For AariNAT Admin)</div>
+      <div style="font-size:0.78rem;color:var(--text);line-height:1.75;">
+        <strong>Step 1 — Create Account</strong><br>
+        Visit <strong>ndpc.gov.ng</strong> → click "Register" → create a profile for AariNAT Company Limited as a Data Controller.<br><br>
+        <strong>Step 2 — Determine Registration Category</strong><br>
+        EduBloom processes children's data (sensitive category) and parent contact data across multiple schools. This likely qualifies AariNAT as a <strong>Data Controller of Major Importance (DCMI)</strong> once the platform reaches significant scale. At Stage 1–2 (under 50 schools), standard registration applies.<br><br>
+        <strong>Step 3 — File Data Controller Registration</strong><br>
+        Submit: company name, RC number, contact details, description of data processing activities, categories of data subjects (students, parents, staff), purpose of processing, and your Data Protection Officer (DPO) details.<br><br>
+        <strong>Step 4 — Appoint a Data Protection Officer (DPO)</strong><br>
+        Required for organisations processing sensitive data (children's data qualifies). The DPO can be Bayo himself at this stage. Contact: +234 814 507 3941.<br><br>
+        <strong>Step 5 — Annual Compliance Audit</strong><br>
+        Each year, file a compliance audit return with NDPC confirming that data protection practices are in place. A licensed Data Protection Compliance Organisation (DPCO) can assist with this for a fee.<br><br>
+        <strong>Cost:</strong> Registration is free on the NDPC portal. Annual audit filing through a licensed DPCO typically costs ₦150,000–₦500,000 depending on the firm.<br><br>
+        <strong>When to register:</strong> Before onboarding paying schools. The NDPC's enforcement sweep of September 2025 targeted organisations already in violation — early registration is the right position.
+      </div>
+    </div>
+
+    <div style="font-size:0.68rem;color:var(--sub);text-align:center;margin-top:0.5rem;">
+      Policy version 1.0 · Effective June 2026 · AariNAT Company Limited
+    </div>
+
+    <button class="btn-ghost" style="color:var(--text);margin-top:0.75rem;width:100%;" onclick="closeM('privacy-modal')">Close</button>
   </div>
 </div>
 
