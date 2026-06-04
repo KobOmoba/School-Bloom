@@ -1,7 +1,7 @@
 {
-  "name": "Educational Bloom · School Portal",
+  "name": "Educational Bloom \u00b7 School Portal",
   "short_name": "Edu-BLOOM",
-  "description": "School management portal by AariNAT Company — fees, attendance, scores, and report cards.",
+  "description": "School management portal by AariNAT Company \u2014 fees, attendance, scores, and report cards.",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -9,7 +9,10 @@
   "theme_color": "#4f46e5",
   "lang": "en",
   "scope": "./",
-  "categories": ["education", "productivity"],
+  "categories": [
+    "education",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "icon-192x192.png",
@@ -27,22 +30,6 @@
       "src": "apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "screenshot-mobile.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "School fee dashboard on mobile"
-    },
-    {
-      "src": "screenshot-desktop.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Student management on desktop"
     }
   ]
 }
