@@ -391,6 +391,8 @@ function startApp(){
   $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
   applyRoleRestrictions();
   SQ.ping();
+  setTimeout(checkTodayEvents, 800); // birthday + national day banners
+  setTimeout(renderBirthdayWidget, 900);
   // Route to best first tab for this role
   const firstTabs={Principal:'revenue',Bursar:'revenue','Class Teacher':'students','Subject Teacher':'scorecard'};
   go(firstTabs[userRole]||'revenue');
@@ -406,6 +408,221 @@ function go(tab){
   const btn=document.querySelector(`[data-t="${tab}"]`);if(btn)btn.classList.add('on');
   const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard};
   if(fn[tab])fn[tab]();
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BIRTHDAY & NATIONAL DAYS SYSTEM
+// ══════════════════════════════════════════════════════════════════════════════
+
+const BIRTHDAY_QUOTES = [
+  "The secret of getting ahead is getting started. Keep moving forward!",
+  "Every day is a new beginning. Make this year your greatest chapter yet.",
+  "Believe you can, and you are halfway there. The sky is your starting point.",
+  "It always seems impossible until it is done. You are capable of great things.",
+  "The future belongs to those who believe in the beauty of their dreams.",
+  "Do not watch the clock — do what it does. Keep going, one step at a time.",
+  "Excellence is not a gift but a skill that takes practice. You have what it takes.",
+  "A child who reads will be an adult who thinks. Keep learning, keep growing.",
+  "You were born an original. Do not die a copy. Shine your light on the world.",
+  "Hard work beats talent when talent does not work hard. Stay dedicated."
+];
+
+const NATIONAL_DAYS = [
+  { date:'01-01', name:"New Year's Day",           emoji:'🎊', color:'#7B2FBE',
+    message:"A brand new year begins today! May this year bring growth, achievement, and joy to every student, staff, and family at this school. The best is yet to come." },
+  { date:'01-15', name:'Armed Forces Remembrance Day', emoji:'🎖️', color:'#374151',
+    message:"Today we honour the men and women who gave their lives in service to Nigeria. Let us teach our students the value of courage, sacrifice, and national duty." },
+  { date:'05-01', name:"Workers' Day",             emoji:'✊', color:'#059669',
+    message:"Today we celebrate the dignity of labour. Every school worker — teachers, support staff, cleaners — deserves recognition. Education is the most important work in any nation." },
+  { date:'05-27', name:"Children's Day",           emoji:'🧒', color:'#FB923C',
+    message:"Happy Children's Day! Every child in this school represents Nigeria's future. Today is a reminder that protecting, educating, and celebrating children is the greatest investment a nation can make." },
+  { date:'06-12', name:'Democracy Day',            emoji:'🇳🇬', color:'#2563eb',
+    message:"Democracy Day reminds us that every Nigerian voice matters — including the young voices in our classrooms. Today, teach your students what it means to be a responsible citizen." },
+  { date:'10-01', name:'Independence Day',         emoji:'🇳🇬', color:'#16a34a',
+    message:"Happy 🇳🇬 Independence Day! 63 years of nationhood. The children in this school are the leaders Nigeria is waiting for. Invest in them today, and they will build the Nigeria we all deserve." },
+  { date:'12-25', name:'Christmas Day',            emoji:'🎄', color:'#dc2626',
+    message:"Merry Christmas from EduBloom! May this season bring warmth, rest, and renewal to every teacher, student, and family. Thank you for a wonderful year." },
+  { date:'12-26', name:'Boxing Day',               emoji:'🎁', color:'#7B2FBE',
+    message:"Happy Boxing Day! A day for giving, reflecting, and being grateful for the community we share. Rest well before the new term ahead." },
+  { date:'12-31', name:"New Year's Eve",           emoji:'🥂', color:'#CFB778',
+    message:"The last day of the year. Reflect on how far this school has come. Every student who learned something new, every fee collected, every report card generated — that is progress. Here is to an even better year ahead!" },
+];
+
+// Nigerian school academic calendar inspiration days
+const INSPIRATION_DAYS = [
+  { date:'09-01', msg:"New term energy! The first day of a new academic term is a new beginning for every student. Start strong." },
+  { date:'04-01', msg:"Mid-year progress check: Have your students grown since September? Use EduBloom analytics to see who needs extra support." },
+  { date:'07-01', msg:"Third term begins! The most important term — where final grades are set and promotions decided. Make it count." },
+];
+
+function todayMMDD(){
+  const d=new Date();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return m+'-'+day;
+}
+
+function getAge(dob){
+  if(!dob) return null;
+  const d=new Date(dob), n=new Date();
+  let age=n.getFullYear()-d.getFullYear();
+  const m=n.getMonth()-d.getMonth();
+  if(m<0||(m===0&&n.getDate()<d.getDate())) age--;
+  return age;
+}
+
+function studentDOBMatchesToday(s){
+  if(!s.dob) return false;
+  const dob=new Date(s.dob);
+  const t=new Date();
+  return dob.getMonth()===t.getMonth() && dob.getDate()===t.getDate();
+}
+
+// Students with birthdays in the next N days
+function getUpcomingBirthdays(days=7){
+  const today=new Date(); today.setHours(0,0,0,0);
+  return (SD.students||[]).filter(s=>{
+    if(!s.dob) return false;
+    const dob=new Date(s.dob);
+    // Set to this year
+    const bday=new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+    if(bday < today) bday.setFullYear(today.getFullYear()+1);
+    const diff=(bday-today)/(1000*60*60*24);
+    return diff>=0 && diff<=days;
+  }).map(s=>{
+    const dob=new Date(s.dob);
+    const bday=new Date(new Date().getFullYear(),dob.getMonth(),dob.getDate());
+    if(bday<new Date()) bday.setFullYear(new Date().getFullYear()+1);
+    const diff=Math.ceil((bday-new Date())/(1000*60*60*24));
+    return {...s, _daysUntilBirthday:diff, _age:getAge(s.dob)+1};
+  }).sort((a,b)=>a._daysUntilBirthday-b._daysUntilBirthday);
+}
+
+function sendBirthdayWish(studentIdx){
+  const s=SD.students[studentIdx]; if(!s) return;
+  const age=getAge(s.dob);
+  const ageStr=age?` ${age+1} years old today`:'';
+  const school=SD.config.schoolName||'your school';
+  const pronoun=s.gender==='Female'?'her':'his';
+  const pronoun2=s.gender==='Female'?'her':'him';
+  const quote=BIRTHDAY_QUOTES[Math.floor(Math.random()*BIRTHDAY_QUOTES.length)];
+  const msg=
+    `🎂 *Happy Birthday ${s.name}!* 🎉\n\n`+
+    `Dear Parent of *${s.name}*,\n\n`+
+    `Today, *${s.name}* turns${ageStr}! 🌟\n\n`+
+    `Everyone at *${school}* wishes ${pronoun2} a day filled with joy, laughter, and love. `+
+    `May this new year of ${pronoun} life bring great achievements and beautiful memories.\n\n`+
+    `💫 *"${quote}"*\n\n`+
+    `Keep shining, ${s.name.split(' ')[0]}! ✨\n\n`+
+    `– ${school}\nEduBloom School Portal`;
+  const ph=(s.phone||'').replace(/\D/g,'');
+  if(ph) window.open(`https://wa.me/${ph}?text=${encodeURIComponent(msg)}`,'_blank');
+  else alert('No parent phone on record for '+s.name+'. Edit the student profile to add one.');
+  // Log it
+  if(!SD.commsLog) SD.commsLog=[];
+  SD.commsLog.unshift({type:'Birthday Wish',message:`Birthday WhatsApp sent — ${s.name}`,date:new Date().toISOString().split('T')[0],time:new Date().toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'})});
+  SQ.push('commsLog',SD.commsLog);
+}
+
+function sendAllBirthdayWishes(){
+  const today=SD.students.filter(s=>studentDOBMatchesToday(s)&&s.phone);
+  if(!today.length){toast('No students with birthdays today.');return;}
+  if(!confirm(`Send birthday WhatsApp to parents of ${today.length} student${today.length>1?'s':''}?\n\n${today.map(s=>s.name).join(', ')}`))return;
+  today.forEach((s,i)=>{
+    const idx=SD.students.indexOf(s);
+    setTimeout(()=>sendBirthdayWish(idx),i*1500);
+  });
+}
+
+function checkTodayEvents(){
+  const mmdd=todayMMDD();
+  const todayBirthdays=(SD.students||[]).filter(s=>studentDOBMatchesToday(s));
+  const nationalDay=NATIONAL_DAYS.find(d=>d.date===mmdd);
+  const inspDay=INSPIRATION_DAYS.find(d=>d.date===mmdd);
+
+  // Show birthday banner
+  if(todayBirthdays.length>0){
+    showEventBanner({
+      type:'birthday',
+      emoji:'🎂',
+      color:'#7B2FBE',
+      title:`🎉 ${todayBirthdays.length===1?todayBirthdays[0].name+"'s Birthday!":`${todayBirthdays.length} Students' Birthdays Today!`}`,
+      body: todayBirthdays.length===1
+        ?`Wishing ${todayBirthdays[0].name} a wonderful birthday! Send a WhatsApp celebration to their parent.`
+        :`${todayBirthdays.map(s=>s.name).join(', ')} are celebrating today! Tap to send birthday wishes.`,
+      action:'sendAllBirthdayWishes()',
+      actionLabel:'🎂 Send Birthday Wishes'
+    });
+  }
+
+  // Show national day banner (separate from birthday)
+  if(nationalDay){
+    showEventBanner({
+      type:'national',
+      emoji:nationalDay.emoji,
+      color:nationalDay.color,
+      title:nationalDay.name,
+      body:nationalDay.message,
+      action:null,
+      actionLabel:null
+    });
+  }
+
+  // Inspiration day
+  if(inspDay && !nationalDay){
+    toast(inspDay.msg, 8000);
+  }
+}
+
+function showEventBanner(ev){
+  const id='event-banner-'+ev.type;
+  let b=document.getElementById(id);
+  if(!b){
+    b=document.createElement('div');
+    b.id=id;
+    // Insert at top of app, after header
+    const app=$('app');
+    const firstChild=app?app.firstElementChild:null;
+    if(app) app.insertBefore(b, firstChild?firstChild.nextSibling:null);
+  }
+  b.style.cssText=`background:linear-gradient(135deg,${ev.color}22,${ev.color}11);border-top:3px solid ${ev.color};padding:0.85rem 1.25rem;position:relative;animation:fadeIn 0.4s ease;`;
+  b.innerHTML=`
+    <button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:10px;background:none;border:none;color:var(--sub);font-size:1.1rem;cursor:pointer;width:auto;margin:0;">×</button>
+    <div style="font-size:0.82rem;font-weight:800;color:var(--text);margin-bottom:0.25rem;">${ev.emoji} ${esc(ev.title)}</div>
+    <div style="font-size:0.78rem;color:var(--sub);line-height:1.5;margin-bottom:${ev.action?'0.6rem':'0'};">${esc(ev.body)}</div>
+    ${ev.action?`<button onclick="${ev.action}" style="background:${ev.color};color:#fff;border:none;border-radius:8px;padding:5px 14px;font-size:0.78rem;font-weight:700;cursor:pointer;width:auto;margin:0;">${ev.actionLabel}</button>`:''}
+  `;
+}
+
+// Widget for upcoming birthdays — added to revenue/dashboard section
+function renderBirthdayWidget(){
+  const upcoming=getUpcomingBirthdays(30); // next 30 days
+  const el=document.getElementById('birthday-widget');
+  if(!el || !upcoming.length) return;
+  el.innerHTML=`
+    <div class="card" style="border-left:4px solid #7B2FBE;">
+      <div class="ct" style="justify-content:space-between;">
+        <span>🎂 Upcoming Birthdays</span>
+        <span style="font-size:0.72rem;color:var(--sub);">Next 30 days</span>
+      </div>
+      ${upcoming.slice(0,5).map(s=>{
+        const idx=SD.students.indexOf(s);
+        const dob=new Date(s.dob);
+        const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const dateStr=months[dob.getMonth()]+' '+dob.getDate();
+        const isToday=s._daysUntilBirthday===0;
+        return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0;border-bottom:1px solid var(--border);">
+          <div style="width:36px;height:36px;border-radius:50%;background:${isToday?'#7B2FBE':'var(--s2)'};display:flex;align-items:center;justify-content:center;font-size:${isToday?'1.1':'0.9'}rem;flex-shrink:0;">${isToday?'🎂':'🎈'}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:700;font-size:0.82rem;color:${isToday?'#c084fc':'var(--text)'};">${esc(s.name)} ${isToday?'<span style="font-size:0.65rem;background:#7B2FBE;color:#fff;border-radius:10px;padding:1px 7px;font-weight:800;">TODAY!</span>':''}</div>
+            <div style="font-size:0.7rem;color:var(--sub);">${esc(s.class||'—')} · ${dateStr}${s._age?' · Turning '+s._age:''}</div>
+          </div>
+          ${isToday&&s.phone?`<button onclick="sendBirthdayWish(${idx})" style="background:#7B2FBE;color:#fff;border:none;border-radius:7px;padding:3px 9px;font-size:0.7rem;font-weight:700;cursor:pointer;flex-shrink:0;width:auto;margin:0;">🎂 Wish</button>`:''}
+        </div>`;
+      }).join('')}
+      ${upcoming.length>5?`<div style="font-size:0.72rem;color:var(--sub);text-align:center;padding-top:0.4rem;">+ ${upcoming.length-5} more birthdays this month</div>`:''}
+    </div>`;
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────
@@ -700,8 +917,16 @@ function renderStudentList(){
     const pbc=owe<=0?'pb-paid':s.paid>0?'pb-part':'pb-owe';
     const pbt=owe<=0?'Paid':s.paid>0?'Partial':'Unpaid';
     // ── RBAC: hide fee badge from Class/Subject Teachers ─────────────────────
+    const isBday=studentDOBMatchesToday(s);
     const feeBadge=canSeeFees()?`<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}`:'' ;
-    return`<div class="stu-row" onclick="openProfile(${idx})"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;min-width:0;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div></div>`;
+    return`<div class="stu-row" onclick="openProfile(${idx})" style="${isBday?'border-left:3px solid #7B2FBE;':''}">
+    <div class="stu-av" style="${isBday?'background:#7B2FBE;':''}">  ${isBday?'🎂':s.name.charAt(0).toUpperCase()}</div>
+    <div style="flex:1;min-width:0;">
+      <div class="stu-name">${esc(s.name)}${isBday?' <span style="font-size:0.6rem;background:#7B2FBE;color:#fff;border-radius:10px;padding:1px 7px;font-weight:800;">🎂 BIRTHDAY</span>':''}</div>
+      <div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div>
+  </div>`;
   }).join('');
 }
 
@@ -715,8 +940,9 @@ function populateClassFilter(){
 async function addStudent(){
   const name=$('ns-name').value.trim(),phone=$('ns-phone').value.trim().replace(/\D/g,'');
   const cls=$('ns-class').value.trim(),fee=parseFloat($('ns-fee').value)||SD.config.fee||50000;
+  const dob=$('ns-dob').value||null;
   if(!name||!phone)return alert('Name and phone required.');
-  SD.students.push({name,phone,class:cls,totalFee:fee,paid:0,scores:{},swot:{}});
+  SD.students.push({name,phone,class:cls,totalFee:fee,paid:0,scores:{},swot:{},dob});
   await SQ.push('students',SD.students); checkTierStatus();
   closeM('add-student-modal');
   $('ns-name').value='';$('ns-phone').value='';$('ns-class').value='';$('ns-fee').value='';
@@ -945,6 +1171,24 @@ function openProfile(idx){
   const s=SD.students[idx];if(!s)return;
   $('prof-name').textContent=s.name;
   $('prof-meta').textContent=`${s.class||'—'} · ${s.phone||'—'}`;
+  // ── Birthday display in profile header ──
+  const bdayEl=$('prof-bday');
+  if(bdayEl){
+    if(s.dob){
+      const dob=new Date(s.dob);
+      const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const dobStr=months[dob.getMonth()]+' '+dob.getDate()+', '+dob.getFullYear();
+      const age=getAge(s.dob);
+      const isToday=studentDOBMatchesToday(s);
+      bdayEl.style.display='block';
+      bdayEl.innerHTML=isToday
+        ?`🎂 <strong>BIRTHDAY TODAY!</strong> Turning ${age+1} · ${dobStr} &nbsp;<button onclick="sendBirthdayWish(${idx})" style="background:#7B2FBE;color:#fff;border:none;border-radius:6px;padding:2px 8px;font-size:0.68rem;font-weight:700;cursor:pointer;width:auto;margin:0;">🎉 Send Wish</button>`
+        :`🎂 ${dobStr}${age!==null?' · Age '+age:''}`;
+      bdayEl.style.color=isToday?'#c084fc':'var(--sub)';
+    } else {
+      bdayEl.style.display='none';
+    }
+  }
   document.querySelectorAll('.ptab').forEach(t=>t.classList.toggle('on',t.dataset.pt==='fees'));
   renderTab('fees');openM('student-modal');
 }
