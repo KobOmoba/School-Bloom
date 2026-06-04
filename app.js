@@ -757,6 +757,7 @@ function renderBanner(){
 // ── 1. REVENUE ─────────────────────────────────────────────────────────────
 function renderRevenue(){
   renderBanner();
+  renderBirthdayWidget();
   const s=SD.students||[];
   let exp=0,col=0;s.forEach(x=>{exp+=(x.totalFee||0);col+=(x.paid||0);});
   const pct=exp>0?Math.round((col/exp)*100):0;
