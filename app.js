@@ -390,6 +390,7 @@ function startApp(){
   $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
   $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
   applyRoleRestrictions();
+  renderSchoolLogo(); // show school logo in header
   SQ.ping();
   setTimeout(checkTodayEvents, 800); // birthday + national day banners
   setTimeout(renderBirthdayWidget, 900);
@@ -408,6 +409,7 @@ function go(tab){
   const btn=document.querySelector(`[data-t="${tab}"]`);if(btn)btn.classList.add('on');
   const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard};
   if(fn[tab])fn[tab]();
+  if(tab==='settings') setTimeout(renderSchoolLogo,100);
 }
 
 
