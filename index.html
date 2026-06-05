@@ -167,9 +167,25 @@ function toggleEye(inputId, btn) {
   </div>
 
   <header class="hdr">
-    <div>
-      <div class="hdr-name" id="hdr-school">Loading...</div>
-      <div class="hdr-sub"><span id="hdr-role">—</span> · <span id="hdr-term">—</span></div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <!-- School logo/badge — tap to upload (Principal only) -->
+      <div id="school-logo-badge"
+        onclick="handleLogoBadgeTap()"
+        title="Tap to upload your school logo"
+        style="width:42px;height:42px;border-radius:50%;
+          background:rgba(255,255,255,0.15);
+          border:2px solid rgba(255,255,255,0.35);
+          display:flex;align-items:center;justify-content:center;
+          font-weight:800;font-size:1rem;color:#fff;
+          cursor:pointer;flex-shrink:0;
+          background-size:cover;background-position:center;
+          overflow:hidden;transition:border-color 0.2s;">
+        <span id="school-logo-initial" style="pointer-events:none;">S</span>
+      </div>
+      <div>
+        <div class="hdr-name" id="hdr-school">Loading...</div>
+        <div class="hdr-sub"><span id="hdr-role">—</span> · <span id="hdr-term">—</span></div>
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:7px;">
       <span id="planBadge" class="plan-badge plan-basic">Basic</span>
@@ -484,6 +500,47 @@ function toggleEye(inputId, btn) {
         <div class="ct">Current Plan: <span id="settings-plan">Basic</span></div>
         <p style="font-size:0.82rem;color:var(--sub);">Staff limit: <span id="settings-staff-limit">3</span> · Finance AI: <span id="settings-ai">Basic</span></p>
         <button class="btn-brand" style="margin-top:0.65rem;" onclick="openUpgradeModal()">✨ Upgrade to Premium</button>
+      </div>
+
+      <!-- SCHOOL BRANDING CARD -->
+      <div class="card" style="border-left:4px solid var(--brand);">
+        <div class="ct">🏫 School Branding</div>
+        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.6;">
+          Upload your school logo or badge. It appears in the app header so staff and teachers
+          see it as <strong style="color:var(--text);">your school's app</strong>, not a generic tool.
+        </p>
+        <!-- Logo preview -->
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.85rem;">
+          <div id="settings-logo-preview"
+            style="width:72px;height:72px;border-radius:50%;
+              background:var(--s2);border:2px solid var(--border);
+              display:flex;align-items:center;justify-content:center;
+              font-weight:800;font-size:1.5rem;color:var(--sub);
+              background-size:cover;background-position:center;overflow:hidden;flex-shrink:0;">
+            <span id="settings-logo-initial">S</span>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:0.82rem;font-weight:700;color:var(--text);" id="settings-logo-name">No logo uploaded</div>
+            <div style="font-size:0.72rem;color:var(--sub);margin-top:2px;">
+              Accepts PNG, JPG, WebP. Automatically resized to 150×150px.
+            </div>
+          </div>
+        </div>
+        <!-- Hidden file input -->
+        <input type="file" id="logo-file-input" accept="image/*"
+          style="display:none;" onchange="handleLogoUpload(event)">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button class="btn-b btn-sm" onclick="document.getElementById('logo-file-input').click()">
+            📸 Upload Logo / Badge
+          </button>
+          <button class="btn-ghost btn-sm" style="color:var(--danger);" onclick="removeLogo()">
+            🗑️ Remove
+          </button>
+        </div>
+        <p style="font-size:0.7rem;color:var(--sub);margin-top:0.5rem;">
+          Only the Principal can change the school logo.
+          The logo is stored on this device and synced to the school record.
+        </p>
       </div>
 
       <!-- PRIVACY & DATA PROTECTION CARD -->
