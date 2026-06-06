@@ -2,9 +2,9 @@
 const FB={apiKey:"AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o",authDomain:"educationbloom-699ed.firebaseapp.com",projectId:"educationbloom-699ed",storageBucket:"educationbloom-699ed.firebasestorage.app",messagingSenderId:"33750392965",appId:"1:33750392965:web:2b3da887ede996ea8389ec"};
 let db=null;
 try{
-  // If already initialized (e.g. hot reload), reuse existing app
   const fbApp=firebase.apps.length?firebase.app():firebase.initializeApp(FB);
   db=firebase.firestore(fbApp);
+  db.enablePersistence({synchronizeTabs:true}).then(()=>console.log('✅ Offline persistence enabled')).catch(err=>{if(err.code!=='failed-precondition'&&err.code!=='unimplemented')console.warn('Persistence:',err.code);});
   console.log('✅ Firebase ready');
 }catch(e){console.error('❌ Firebase init failed:',e.message);}
 
@@ -410,6 +410,328 @@ function go(tab){
   const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard};
   if(fn[tab])fn[tab]();
   if(tab==='settings') setTimeout(renderSchoolLogo,100);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SCHOOL LOGO / BADGE SYSTEM
+// ══════════════════════════════════════════════════════════════════════════════
+function renderSchoolLogo(){
+  const logo=SD.config?.logo||null;
+  const name=SD.config?.schoolName||schoolId||'School';
+  const initial=name.trim().charAt(0).toUpperCase();
+  const badge=document.getElementById('school-logo-badge');
+  const initEl=document.getElementById('school-logo-initial');
+  if(badge){
+    if(logo){badge.style.backgroundImage=`url(${logo})`;badge.style.backgroundSize='cover';badge.style.backgroundPosition='center';if(initEl)initEl.style.display='none';}
+    else{badge.style.backgroundImage='none';if(initEl){initEl.style.display='';initEl.textContent=initial;}}
+  }
+  const prev=document.getElementById('settings-logo-preview');
+  const prevIni=document.getElementById('settings-logo-initial');
+  const prevLbl=document.getElementById('settings-logo-name');
+  if(prev){
+    if(logo){prev.style.backgroundImage=`url(${logo})`;prev.style.backgroundSize='cover';prev.style.backgroundPosition='center';if(prevIni)prevIni.style.display='none';if(prevLbl)prevLbl.textContent=name+' logo ✅';}
+    else{prev.style.backgroundImage='none';if(prevIni){prevIni.style.display='';prevIni.textContent=initial;}if(prevLbl)prevLbl.textContent='No logo uploaded';}
+  }
+}
+function handleLogoBadgeTap(){
+  if(userRole!=='Principal'){toast('Only the Principal can change the school logo.');return;}
+  document.getElementById('logo-file-input')?.click();
+}
+function compressImage(file,maxSize=150,quality=0.85){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error('Could not read file'));
+    reader.onload=ev=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('Could not load image'));
+      img.onload=()=>{
+        let w=img.width,h=img.height;
+        if(w>h){h=Math.round(h*maxSize/w);w=maxSize;}else{w=Math.round(w*maxSize/h);h=maxSize;}
+        const canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg',quality));
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function handleLogoUpload(event){
+  const file=event.target.files?.[0];if(!file)return;
+  if(userRole!=='Principal'){toast('Only the Principal can change the logo.');return;}
+  const btn=document.querySelector('[onclick*="logo-file-input"]');
+  if(btn){btn.textContent='⏳ Uploading…';btn.disabled=true;}
+  try{
+    const base64=await compressImage(file);
+    SD.config.logo=base64;
+    await SQ.push('config',SD.config);
+    renderSchoolLogo();
+    toast('✅ School logo updated! Syncing to all devices.');
+  }catch(e){alert('Could not process image: '+(e.message||'unknown error'));console.error('Logo:',e);}
+  finally{if(btn){btn.textContent='📸 Upload Logo / Badge';btn.disabled=false;}event.target.value='';}
+}
+async function removeLogo(){
+  if(userRole!=='Principal'){toast('Only the Principal can remove the logo.');return;}
+  if(!SD.config?.logo){toast('No logo to remove.');return;}
+  if(!confirm('Remove the school logo?'))return;
+  delete SD.config.logo;
+  await SQ.push('config',SD.config);
+  renderSchoolLogo();toast('Logo removed.');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RBAC — ROLE-BASED ACCESS CONTROL
+// ══════════════════════════════════════════════════════════════════════════════
+const ROLE_TABS={
+  'Principal':    ['revenue','students','staff','sports','arts','music','health','alumni','expenses','finance','comms','analytics','security','support','settings','scorecard','opps'],
+  'Bursar':       ['revenue','students','expenses','finance','analytics','settings','support','opps'],
+  'Class Teacher':['students','sports','arts','music','health','alumni','scorecard','comms','opps'],
+  'Subject Teacher':['students','scorecard','opps']
+};
+function canSeeFees(){return userRole==='Principal'||userRole==='Bursar';}
+function canSeeScores(){return userRole==='Principal'||userRole==='Class Teacher'||userRole==='Subject Teacher';}
+function getAssignedClass(){return currentStaff?.assignedClass||null;}
+function getAssignedSubjects(){return currentStaff?.assignedSubjects||[];}
+function applyRoleRestrictions(){
+  const allowed=ROLE_TABS[userRole]||ROLE_TABS['Principal'];
+  document.querySelectorAll('.nlink[data-t]').forEach(btn=>{
+    const tab=btn.getAttribute('data-t');
+    btn.style.display=allowed.includes(tab)?'':'none';
+  });
+  const hdrRole=$('hdr-role');
+  if(hdrRole)hdrRole.textContent=userRole+(currentStaff&&currentStaff.assignedClass?' · '+currentStaff.assignedClass:'');
+}
+function showStaffLoginStep(){
+  $('login').style.display='none';
+  const sl=$('staff-login');if(sl)sl.style.display='flex';
+  const err=$('sl-err');if(err)err.style.display='none';
+  const email=$('sl-email');if(email)email.focus();
+}
+function backToSchoolLogin(){
+  const sl=$('staff-login');if(sl)sl.style.display='none';
+  $('login').style.display='flex';
+  schoolId=null;
+  const se=$('sl-email');if(se)se.value='';
+  const sp=$('sl-pwd');if(sp)sp.value='';
+}
+function doStaffLogin(){
+  const email=($('sl-email')?.value||'').trim().toLowerCase();
+  const pwd=($('sl-pwd')?.value||'');
+  const errEl=$('sl-err');
+  if(!email||!pwd){if(errEl){errEl.textContent='Enter your email and password.';errEl.style.display='block';}return;}
+  const match=(SD.staff||[]).find(s=>(s.email||'').trim().toLowerCase()===email&&(s.password||'')===pwd);
+  if(!match){if(errEl){errEl.textContent='Email or password incorrect. Contact your Principal.';errEl.style.display='block';}return;}
+  currentStaff=match;userRole=match.role||'Class Teacher';
+  try{localStorage.setItem(`p_${schoolId}_staffSession`,JSON.stringify({email:match.email,role:match.role,assignedClass:match.assignedClass||null,assignedSubjects:match.assignedSubjects||[]}));}catch(e){}
+  const sl=$('staff-login');if(sl)sl.style.display='none';
+  startApp();
+}
+function loginAsPrincipal(){
+  currentStaff=null;userRole='Principal';
+  const sl=$('staff-login');if(sl)sl.style.display='none';
+  startApp();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BLOOMCOLLECT — ONLINE FEE PAYMENT (Premium)
+// ══════════════════════════════════════════════════════════════════════════════
+let functions_sdk=null;
+try{functions_sdk=firebase.functions();}catch(e){}
+async function generatePaymentLink(studentIdx){
+  const s=SD.students[studentIdx];if(!s)return;
+  const isPrem=SD.config.plan==='premium';
+  if(!isPrem){alert('BloomCollect requires Premium plan. Contact AariNAT: +234 814 507 3941');return;}
+  const owe=(s.totalFee||0)-(s.paid||0);
+  if(owe<=0){toast('✅ This student has paid in full.');return;}
+  if(!functions_sdk){alert('BloomCollect not yet activated for this school.\nContact AariNAT: +234 814 507 3941');return;}
+  const btn=document.getElementById(`bc-btn-${studentIdx}`);
+  if(btn){btn.textContent='⏳ Generating...';btn.disabled=true;}
+  try{
+    const fn=functions_sdk.httpsCallable('generatePaymentLink');
+    const result=await fn({schoolId,studentId:s.id||String(studentIdx),studentName:s.name,studentPhone:s.phone||'',amount:owe});
+    const {paymentUrl,platformFee}=result.data;
+    const schoolName=SD.config.schoolName||'School';
+    const msg=`Dear Parent of *${s.name}*,\n\nYour child has an outstanding fee balance of *₦${owe.toLocaleString('en-NG')}* at *${schoolName}*.\n\nPay securely online:\n👉 ${paymentUrl}\n\nAccepts OPay · PalmPay · Bank Transfer · Debit Card\n\n– ${schoolName}`;
+    const phone=(s.phone||'').replace(/\D/g,'');
+    if(phone)window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,'_blank');
+    let m=document.getElementById('bloomcollect-modal');
+    if(!m){m=document.createElement('div');m.id='bloomcollect-modal';m.className='modal';document.body.appendChild(m);}
+    m.innerHTML=`<div class="mbox"><div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">💳 BloomCollect</h3><button class="mclose" onclick="closeM('bloomcollect-modal')">×</button></div>
+      <div style="background:var(--s2);border-radius:10px;padding:0.75rem;margin-bottom:0.75rem;"><div style="font-weight:700;">${esc(s.name)}</div><div style="font-size:0.8rem;color:var(--danger);font-weight:700;margin-top:4px;">Amount: ₦${owe.toLocaleString('en-NG')}</div><div style="font-size:0.7rem;color:var(--sub);margin-top:2px;">AariNAT fee: ₦${(platformFee||0).toLocaleString('en-NG')}</div></div>
+      <div style="background:#1a3048;border-radius:8px;padding:0.65rem;margin-bottom:0.75rem;word-break:break-all;font-size:0.78rem;color:#60a5fa;">${esc(paymentUrl)}</div>
+      <button class="btn-brand" onclick="navigator.clipboard.writeText('${paymentUrl}').then(()=>toast('✅ Copied!'))">📋 Copy Link</button>
+      <button class="btn-ghost" style="color:var(--text);margin-top:0.3rem;width:100%;" onclick="closeM('bloomcollect-modal')">Close</button></div>`;
+    openM('bloomcollect-modal');
+  }catch(e){console.error('BloomCollect:',e);alert('Could not generate link. Check internet.\n'+(e.message||''));}
+  finally{if(btn){btn.textContent='💳 Pay Online';btn.disabled=false;}}
+}
+function toast(msg,duration=3000){
+  let t=document.getElementById('toast-el');
+  if(!t){t=document.createElement('div');t.id='toast-el';t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:20px;font-size:0.82rem;font-weight:600;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.4);transition:opacity 0.3s;pointer-events:none;max-width:90vw;text-align:center;';document.body.appendChild(t);}
+  t.textContent=msg;t.style.opacity='1';clearTimeout(t._timer);t._timer=setTimeout(()=>{t.style.opacity='0';},duration);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EDUBLOOM SAFETY — PREMIUM FEATURES
+// ══════════════════════════════════════════════════════════════════════════════
+function buildSafety(s,idx){
+  const isPrem=SD.config.plan==='premium';
+  if(!isPrem){
+    return`<div class="card" style="text-align:center;padding:1.75rem;">
+      <div style="font-size:2rem;margin-bottom:0.5rem;">🛡️</div>
+      <div style="font-weight:700;font-size:0.9rem;color:var(--text);">EduBloom Safety</div>
+      <div style="font-size:0.78rem;color:var(--sub);margin:0.4rem 0 0.75rem;">Authorised collector list and mid-day sign-out require Premium plan.</div>
+      <div style="font-size:0.75rem;color:var(--sub);">Contact AariNAT: <strong style="color:var(--text);">+234 814 507 3941</strong></div></div>`;
+  }
+  const cols=s.collectors||[];
+  const today=new Date().toISOString().split('T')[0];
+  const todaySignOuts=(s.signOutLog||[]).filter(e=>e.date===today);
+  return`
+  <div class="card" style="margin-bottom:0.6rem;">
+    <div class="ct">✅ Authorised Collectors</div>
+    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.6rem;">People permitted to collect this child. Check every visitor against this list before release.</p>
+    ${cols.length===0?'<p style="color:var(--sub);font-size:0.8rem;padding:0.4rem 0;">No collectors added yet.</p>':
+      cols.map((c,ci)=>`<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border);">
+        <div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:0.85rem;">${esc(c.name)}</div>
+        <div style="font-size:0.72rem;color:var(--sub);">${esc(c.relationship)} · 📱 ${esc(c.phone||'—')}</div>
+        ${c.times?`<div style="font-size:0.7rem;color:#fbbf24;">⏰ ${esc(c.times)}</div>`:''}
+        ${c.notes?`<div style="font-size:0.7rem;color:var(--sub);font-style:italic;">${esc(c.notes)}</div>`:''}</div>
+        <button onclick="deleteCollector(${idx},${ci})" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:0.72rem;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑️</button>
+      </div>`).join('')}
+    <div style="display:flex;gap:0.5rem;margin-top:0.7rem;flex-wrap:wrap;">
+      <button class="btn-brand btn-sm" onclick="openAddCollectorModal(${idx})">➕ Add Collector</button>
+      <button style="background:#dc2626;color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:0.78rem;cursor:pointer;font-weight:700;" onclick="openUnlistedAlert(${idx})">🚨 Unlisted Visitor Alert</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ct">🚪 Mid-Day Sign-Out</div>
+    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.6rem;">Parent is WhatsApp-notified immediately when a student leaves during school hours.</p>
+    ${todaySignOuts.length?`<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:0.6rem;margin-bottom:0.6rem;">
+      <div style="font-size:0.7rem;font-weight:700;color:#f87171;margin-bottom:3px;">TODAY'S SIGN-OUTS</div>
+      ${todaySignOuts.map(e=>`<div style="font-size:0.78rem;color:var(--text);">${e.time} · <strong>${esc(e.collectorName)}</strong> · ${esc(e.reason)}</div>`).join('')}
+    </div>`:''}
+    <button style="background:#dc2626;color:#fff;border:none;border-radius:9px;padding:0.65rem;font-size:0.85rem;cursor:pointer;font-weight:700;width:100%;" onclick="openSignOutModal(${idx})">🚪 Sign Out ${esc(s.name)}</button>
+  </div>`;
+}
+function openAddCollectorModal(idx){
+  const s=SD.students[idx];if(!s)return;
+  let m=document.getElementById('add-collector-modal');
+  if(!m){m=document.createElement('div');m.id='add-collector-modal';m.className='modal';document.body.appendChild(m);}
+  m.innerHTML=`<div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Authorised Collector</h3><button class="mclose" onclick="closeM('add-collector-modal')">×</button></div>
+    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.75rem;">Adding collector for: <strong style="color:var(--text);">${esc(s.name)}</strong></p>
+    <label>Full Name *</label><input id="col-name" placeholder="e.g. Mrs. Amaka Okonkwo">
+    <label>Relationship *</label>
+    <select id="col-rel"><option>Mother</option><option>Father</option><option>Grandmother</option><option>Grandfather</option><option>Uncle</option><option>Aunt</option><option>Older Sibling</option><option>Driver</option><option>House Help</option><option>Neighbour</option><option>Other</option></select>
+    <label>Phone Number *</label><input type="tel" id="col-phone" placeholder="08012345678">
+    <label>Valid Collection Times (optional)</label><input id="col-times" placeholder="e.g. Only after 2pm">
+    <label>Notes (optional)</label><input id="col-notes" placeholder="e.g. Drives a black Toyota">
+    <button class="btn-brand" onclick="saveCollector(${idx})">✅ Add Collector</button>
+    <button class="btn-ghost" style="color:var(--sub);margin-top:0.3rem;" onclick="closeM('add-collector-modal')">Cancel</button>
+  </div>`;
+  openM('add-collector-modal');
+}
+async function saveCollector(idx){
+  const name=($('col-name')?.value||'').trim();
+  const rel=$('col-rel')?.value;
+  const phone=($('col-phone')?.value||'').trim();
+  const times=($('col-times')?.value||'').trim();
+  const notes=($('col-notes')?.value||'').trim();
+  if(!name||!phone)return alert('Name and phone number are required.');
+  const s=SD.students[idx];if(!s)return;
+  if(!s.collectors)s.collectors=[];
+  s.collectors.push({name,relationship:rel,phone,times:times||null,notes:notes||null,addedAt:new Date().toISOString().split('T')[0]});
+  await SQ.push('students',SD.students);
+  closeM('add-collector-modal');
+  renderTab('safety');
+  toast(`✅ ${name} added as authorised collector.`);
+}
+async function deleteCollector(idx,ci){
+  const s=SD.students[idx];if(!s||!s.collectors)return;
+  const c=s.collectors[ci];if(!c)return;
+  if(!confirm(`Remove ${c.name} from authorised collectors for ${s.name}?`))return;
+  s.collectors.splice(ci,1);
+  await SQ.push('students',SD.students);
+  renderTab('safety');toast(`${c.name} removed.`);
+}
+function openUnlistedAlert(idx){
+  const s=SD.students[idx];if(!s)return;
+  const visitorName=prompt('UNLISTED VISITOR ALERT\n\nEnter the visitor\'s name as they gave it:');
+  if(!visitorName||!visitorName.trim())return;
+  const schoolName=SD.config.schoolName||'your school';
+  const principalPhone=(SD.config.whatsapp||SD.config.phone||'').replace(/\D/g,'');
+  const timeStr=new Date().toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
+  const msg=`🚨 *URGENT: ${schoolName} Safety Alert*\n\nSomeone has arrived at *${schoolName}* to collect *${s.name}*.\n\n*Name given:* ${visitorName.trim()}\n*Time:* ${timeStr}\n\nThis person is *NOT* on your child's authorised collector list.\n\n*Your child has NOT been released.*\n\nPlease call the school immediately.\n\n– EduBloom Safety, powered by AariNAT`;
+  const parentPhone=(s.phone||'').replace(/\D/g,'');
+  if(!parentPhone){alert('No parent phone on record for '+s.name+'.');return;}
+  if(!s.signOutLog)s.signOutLog=[];
+  s.signOutLog.unshift({type:'unlisted_alert',collectorName:visitorName.trim(),date:new Date().toISOString().split('T')[0],time:timeStr,status:'alert_sent',by:currentStaff?.name||userRole});
+  SQ.push('students',SD.students);
+  window.open(`https://wa.me/${parentPhone}?text=${encodeURIComponent(msg)}`,'_blank');
+  alert('WhatsApp alert sent to '+s.name+'\'s parent.\n\nDO NOT release the child until parent responds or Principal confirms.');
+  renderTab('safety');
+}
+function openSignOutModal(idx){
+  const s=SD.students[idx];if(!s)return;
+  let m=document.getElementById('sign-out-modal');
+  if(!m){m=document.createElement('div');m.id='sign-out-modal';m.className='modal';document.body.appendChild(m);}
+  const cols=(s.collectors||[]).map(c=>c.name);
+  const now=new Date().toTimeString().slice(0,5);
+  m.innerHTML=`<div class="mbox">
+    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🚪 Sign-Out: ${esc(s.name)}</h3><button class="mclose" onclick="closeM('sign-out-modal')">×</button></div>
+    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.75rem;">Parent will be notified by WhatsApp immediately.</p>
+    <label>Reason</label>
+    <select id="so-reason">
+      <option>Medical appointment — returning today</option><option>Medical appointment — not returning today</option>
+      <option>Parent request — family matter</option><option>Early dismissal — school authorised</option>
+      <option>Emergency — details in notes</option><option>Other — see notes</option>
+    </select>
+    <label>Collected By</label>
+    <input id="so-collector" placeholder="Full name of person collecting" list="so-col-list">
+    <datalist id="so-col-list">${cols.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+    <label>Time</label><input type="time" id="so-time" value="${now}">
+    <label>Notes (optional)</label><input id="so-notes" placeholder="Any additional details">
+    <button class="btn-brand" onclick="confirmSignOut(${idx})" style="background:#dc2626;">🚪 Confirm Sign-Out & Notify Parent</button>
+    <button class="btn-ghost" style="color:var(--sub);margin-top:0.3rem;" onclick="closeM('sign-out-modal')">Cancel</button>
+  </div>`;
+  openM('sign-out-modal');
+}
+async function confirmSignOut(idx){
+  const s=SD.students[idx];if(!s)return;
+  const reason=$('so-reason')?.value;
+  const collector=($('so-collector')?.value||'').trim();
+  const time=$('so-time')?.value||new Date().toTimeString().slice(0,5);
+  const notes=($('so-notes')?.value||'').trim();
+  if(!collector)return alert('Enter the name of the person collecting the student.');
+  const today=new Date().toISOString().split('T')[0];
+  const schoolName=SD.config.schoolName||'School';
+  const principalPhone=(SD.config.whatsapp||'').replace(/\D/g,'');
+  const msg=`Dear Parent of *${s.name}*,\n\n*${s.name}* has been signed out of *${schoolName}* at *${time}*.\n\n*Collected by:* ${collector}\n*Reason:* ${reason}${notes?('\n*Notes:* '+notes):''}\n\nIf you did NOT authorise this, call immediately: ${principalPhone||'the school'}\n\nOr reply *NOT AUTHORISED*.\n\n– EduBloom Safety, powered by AariNAT`;
+  if(!s.signOutLog)s.signOutLog=[];
+  s.signOutLog.unshift({type:'sign_out',collectorName:collector,reason,date:today,time,notes:notes||null,status:'notified',by:currentStaff?.name||userRole});
+  await SQ.push('students',SD.students);
+  const parentPhone=(s.phone||'').replace(/\D/g,'');
+  if(parentPhone)window.open(`https://wa.me/${parentPhone}?text=${encodeURIComponent(msg)}`,'_blank');
+  closeM('sign-out-modal');renderTab('safety');
+  toast(`✅ ${s.name} signed out. Parent notified via WhatsApp.`);
+}
+function checkMorningAbsentees(){
+  const isPrem=SD.config.plan==='premium';
+  if(!isPrem){alert('Morning Absence Alerts require Premium plan.\nContact AariNAT: +234 814 507 3941');return;}
+  const today=new Date().toISOString().split('T')[0];
+  const schoolName=SD.config.schoolName||'School';
+  const principalPhone=(SD.config.whatsapp||'').replace(/\D/g,'');
+  const timeStr=new Date().toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
+  const noRecord=SD.students.filter(s=>{const att=SD.attendance?.[today]?.[s.id];return !att&&s.phone;});
+  if(!noRecord.length){toast('✅ All students are accounted for today.');return;}
+  if(!confirm(`${noRecord.length} student${noRecord.length>1?'s have':' has'} no attendance record yet today.\n\nSend WhatsApp alerts to their parents now?\n\n${noRecord.slice(0,5).map(s=>s.name).join(', ')}${noRecord.length>5?'...':''}`))return;
+  noRecord.forEach((s,i)=>{
+    const msg=`Dear Parent of *${s.name}*,\n\n*${s.name}* has not been marked present at *${schoolName}* this morning (as at ${timeStr}).\n\nIf your child is absent today, no action is needed.\n\nIf your child left for school this morning, please call the school immediately.\n\n– EduBloom Safety, powered by AariNAT`;
+    setTimeout(()=>{const ph=(s.phone||'').replace(/\D/g,'');if(ph)window.open(`https://wa.me/${ph}?text=${encodeURIComponent(msg)}`,'_blank');},i*1200);
+  });
+  setTimeout(()=>toast(`✅ Absence alerts sent for ${noRecord.length} students.`),noRecord.length*1200+500);
 }
 
 
