@@ -1348,23 +1348,82 @@ function importStudentsFromText(f){
   })().catch(()=>alert('Could not read file. Try saving it as UTF-8 CSV.'));
 }
 
+// ── Image preprocessing — greyscale + contrast boost ─────────────────────────
+function preprocessImage(dataUrl){
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const canvas=document.createElement('canvas');
+      const maxW=2400;const scale=img.width>maxW?maxW/img.width:1;
+      canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
+      const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      const id=ctx.getImageData(0,0,canvas.width,canvas.height);const d=id.data;
+      for(let i=0;i<d.length;i+=4){
+        const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+        const e=Math.min(255,Math.max(0,(g-128)*1.6+128));
+        d[i]=d[i+1]=d[i+2]=e;
+      }
+      ctx.putImageData(id,0,0);resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror=()=>resolve(dataUrl);img.src=dataUrl;
+  });
+}
+
+// ── Claude Vision — AI-powered OCR when API key available ─────────────────────
+async function tryClaudeVisionSchool(dataUrl){
+  const key=localStorage.getItem('edubloom_ai_key');if(!key)return null;
+  try{
+    const b64=dataUrl.split(',')[1];
+    const mt=dataUrl.startsWith('data:image/png')?'image/png':'image/jpeg';
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,
+        'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-ipc':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:2000,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:mt,data:b64}},
+          {type:'text',text:'This is a Nigerian school class register. It may be printed or handwritten. Extract every student name you can read, one per line. Names only — no serial numbers, no class labels, no column headers. Each line should be exactly one student name.'}
+        ]}]})
+    });
+    const data=await res.json();if(data.error)return null;
+    return data.content?.map(b=>b.text||'').join('\n')||null;
+  }catch(e){return null;}
+}
+
 async function importStudentsFromImage(f){
-  $('csv-fb').textContent='📸 Reading photo… loading OCR (first time ~30s)';
+  $('csv-fb').textContent='📸 Reading photo…';
   const loadTesseract=()=>new Promise((resolve,reject)=>{
     if(window.Tesseract){resolve();return;}
     const s=document.createElement('script');
     s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload=resolve;s.onerror=reject;
-    document.head.appendChild(s);
+    s.onload=resolve;s.onerror=reject;document.head.appendChild(s);
   });
   const reader=new FileReader();
   reader.onload=async ev=>{
     try{
-      await loadTesseract();
-      const{data:{text}}=await Tesseract.recognize(ev.target.result,'eng',{
-        logger:m=>{if(m.status==='recognizing text')$('csv-fb').textContent='📸 Reading photo… '+Math.round((m.progress||0)*100)+'%';}
-      });
-      const names=extractStudentNames(text);
+      let rawText='';
+      // Claude Vision first (handles handwriting, better accuracy)
+      if(localStorage.getItem('edubloom_ai_key')){
+        $('csv-fb').textContent='🤖 Using AI vision (higher accuracy)…';
+        const cv=await tryClaudeVisionSchool(ev.target.result);
+        if(cv&&cv.trim().length>5){rawText=cv;}
+      }
+      // Tesseract fallback with preprocessing
+      if(!rawText){
+        $('csv-fb').textContent='📸 Preprocessing image…';
+        const processed=await preprocessImage(ev.target.result);
+        await loadTesseract();
+        $('csv-fb').textContent='📸 Reading photo… 0%';
+        const{data}=await Tesseract.recognize(processed,'eng',{
+          tessedit_pageseg_mode:'6',
+          logger:m=>{if(m.status==='recognizing text')
+            $('csv-fb').textContent='📸 Reading photo… '+Math.round((m.progress||0)*100)+'%';}
+        });
+        // Confidence gate
+        if((data.confidence||0)<40)
+          $('csv-fb').textContent='⚠️ Low confidence ('+Math.round(data.confidence||0)+'%) — check names carefully';
+        rawText=data.text;
+      }
+      const names=extractStudentNames(rawText);
       let count=0;
       const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
       names.forEach(nm=>{
@@ -1372,12 +1431,11 @@ async function importStudentsFromImage(f){
         const key=safe.toLowerCase().replace(/[^a-z]/g,'');
         if(safe.length>1&&!existingKeys.has(key)){
           SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
-          existingKeys.add(key);
-          count++;
+          existingKeys.add(key);count++;
         }
       });
-      await SQ.push('students',SD.students); checkTierStatus();
-      $('csv-fb').textContent=`✅ Found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
+      await SQ.push('students',SD.students);checkTierStatus();
+      $('csv-fb').textContent=`✅ Imported ${count} student${count!==1?'s':''} from photo. Add phone/class in each profile.`;
       renderStudentList();renderBanner();renderRevenue();
     }catch(err){
       $('csv-fb').textContent='❌ Photo reading failed. Try a clearer image or use CSV.';
@@ -1451,27 +1509,33 @@ function looksLikeValidName(str){
 }
 
 function extractStudentNames(raw){
-  // Split on newlines and process each line independently
-  const lines=raw.split(/\r?\n/);
-  const candidates=[];
-
-  lines.forEach(line=>{
+  // FIX 3: Join continuation lines before processing
+  // Handles long Yoruba/Igbo names split across lines by OCR
+  const rawLines=raw.split(/\r?\n/);
+  const joined=[];let cur=null;
+  rawLines.forEach(line=>{
     const t=line.trim();
-    if(!t)return;
+    if(!t){if(cur!==null){joined.push(cur);cur=null;}return;}
+    const isNum=/^\s*\d+[.)\s]/.test(t);
+    const isBul=/^\s*[\u2022\-\*]\s/.test(t);
+    const isCSV=t.includes(',')&&!isNum&&!isBul;
+    if(isNum||isBul||isCSV){if(cur!==null)joined.push(cur);cur=t;}
+    else{if(cur!==null){const w=t.replace(/[^a-zA-Z\s]/g,'').trim();
+      if(w.length>1&&t.length<35){cur=cur+' '+t;}else{joined.push(cur);cur=t;}}
+    else{cur=t;}}
+  });
+  if(cur!==null)joined.push(cur);
 
+  const candidates=[];
+  joined.forEach(line=>{
+    const t=line.trim();if(!t)return;
     // CSV: take only first column
     if(t.includes(',')&&!/^\d+[.)\s]/.test(t)){
       const col=t.split(',')[0].replace(/"/g,'').trim();
-      if(col)candidates.push(col);
-      return;
+      if(col)candidates.push(col);return;
     }
-
-    // Strip leading number/bullet: "1. Name" or "• Name"
-    const stripped=t
-      .replace(/^\d+[.):\s]+/,'')
-      .replace(/^[-*•]\s*/,'')
-      .trim();
-
+    // Strip leading number/bullet
+    const stripped=t.replace(/^\d+[.):\s]+/,'').replace(/^[-*•]\s*/,'').trim();
     if(stripped)candidates.push(stripped);
   });
 
