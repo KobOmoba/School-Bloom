@@ -2,9 +2,9 @@
 const FB={apiKey:"AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o",authDomain:"educationbloom-699ed.firebaseapp.com",projectId:"educationbloom-699ed",storageBucket:"educationbloom-699ed.firebasestorage.app",messagingSenderId:"33750392965",appId:"1:33750392965:web:2b3da887ede996ea8389ec"};
 let db=null;
 try{
+  // If already initialized (e.g. hot reload), reuse existing app
   const fbApp=firebase.apps.length?firebase.app():firebase.initializeApp(FB);
   db=firebase.firestore(fbApp);
-  db.enablePersistence({synchronizeTabs:true}).then(()=>console.log('✅ Offline persistence enabled')).catch(err=>{if(err.code!=='failed-precondition'&&err.code!=='unimplemented')console.warn('Persistence:',err.code);});
   console.log('✅ Firebase ready');
 }catch(e){console.error('❌ Firebase init failed:',e.message);}
 
@@ -390,10 +390,7 @@ function startApp(){
   $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
   $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
   applyRoleRestrictions();
-  renderSchoolLogo(); // show school logo in header
   SQ.ping();
-  setTimeout(checkTodayEvents, 800); // birthday + national day banners
-  setTimeout(renderBirthdayWidget, 900);
   // Route to best first tab for this role
   const firstTabs={Principal:'revenue',Bursar:'revenue','Class Teacher':'students','Subject Teacher':'scorecard'};
   go(firstTabs[userRole]||'revenue');
@@ -409,544 +406,6 @@ function go(tab){
   const btn=document.querySelector(`[data-t="${tab}"]`);if(btn)btn.classList.add('on');
   const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard};
   if(fn[tab])fn[tab]();
-  if(tab==='settings') setTimeout(renderSchoolLogo,100);
-}
-
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SCHOOL LOGO / BADGE SYSTEM
-// ══════════════════════════════════════════════════════════════════════════════
-function renderSchoolLogo(){
-  const logo=SD.config?.logo||null;
-  const name=SD.config?.schoolName||schoolId||'School';
-  const initial=name.trim().charAt(0).toUpperCase();
-  const badge=document.getElementById('school-logo-badge');
-  const initEl=document.getElementById('school-logo-initial');
-  if(badge){
-    if(logo){badge.style.backgroundImage=`url(${logo})`;badge.style.backgroundSize='cover';badge.style.backgroundPosition='center';if(initEl)initEl.style.display='none';}
-    else{badge.style.backgroundImage='none';if(initEl){initEl.style.display='';initEl.textContent=initial;}}
-  }
-  const prev=document.getElementById('settings-logo-preview');
-  const prevIni=document.getElementById('settings-logo-initial');
-  const prevLbl=document.getElementById('settings-logo-name');
-  if(prev){
-    if(logo){prev.style.backgroundImage=`url(${logo})`;prev.style.backgroundSize='cover';prev.style.backgroundPosition='center';if(prevIni)prevIni.style.display='none';if(prevLbl)prevLbl.textContent=name+' logo ✅';}
-    else{prev.style.backgroundImage='none';if(prevIni){prevIni.style.display='';prevIni.textContent=initial;}if(prevLbl)prevLbl.textContent='No logo uploaded';}
-  }
-}
-function handleLogoBadgeTap(){
-  if(userRole!=='Principal'){toast('Only the Principal can change the school logo.');return;}
-  document.getElementById('logo-file-input')?.click();
-}
-function compressImage(file,maxSize=150,quality=0.85){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onerror=()=>reject(new Error('Could not read file'));
-    reader.onload=ev=>{
-      const img=new Image();
-      img.onerror=()=>reject(new Error('Could not load image'));
-      img.onload=()=>{
-        let w=img.width,h=img.height;
-        if(w>h){h=Math.round(h*maxSize/w);w=maxSize;}else{w=Math.round(w*maxSize/h);h=maxSize;}
-        const canvas=document.createElement('canvas');
-        canvas.width=w;canvas.height=h;
-        canvas.getContext('2d').drawImage(img,0,0,w,h);
-        resolve(canvas.toDataURL('image/jpeg',quality));
-      };
-      img.src=ev.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-async function handleLogoUpload(event){
-  const file=event.target.files?.[0];if(!file)return;
-  if(userRole!=='Principal'){toast('Only the Principal can change the logo.');return;}
-  const btn=document.querySelector('[onclick*="logo-file-input"]');
-  if(btn){btn.textContent='⏳ Uploading…';btn.disabled=true;}
-  try{
-    const base64=await compressImage(file);
-    SD.config.logo=base64;
-    await SQ.push('config',SD.config);
-    renderSchoolLogo();
-    toast('✅ School logo updated! Syncing to all devices.');
-  }catch(e){alert('Could not process image: '+(e.message||'unknown error'));console.error('Logo:',e);}
-  finally{if(btn){btn.textContent='📸 Upload Logo / Badge';btn.disabled=false;}event.target.value='';}
-}
-async function removeLogo(){
-  if(userRole!=='Principal'){toast('Only the Principal can remove the logo.');return;}
-  if(!SD.config?.logo){toast('No logo to remove.');return;}
-  if(!confirm('Remove the school logo?'))return;
-  delete SD.config.logo;
-  await SQ.push('config',SD.config);
-  renderSchoolLogo();toast('Logo removed.');
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// RBAC — ROLE-BASED ACCESS CONTROL
-// ══════════════════════════════════════════════════════════════════════════════
-const ROLE_TABS={
-  'Principal':    ['revenue','students','staff','sports','arts','music','health','alumni','expenses','finance','comms','analytics','security','support','settings','scorecard','opps'],
-  'Bursar':       ['revenue','students','expenses','finance','analytics','settings','support','opps'],
-  'Class Teacher':['students','sports','arts','music','health','alumni','scorecard','comms','opps'],
-  'Subject Teacher':['students','scorecard','opps']
-};
-function canSeeFees(){return userRole==='Principal'||userRole==='Bursar';}
-function canSeeScores(){return userRole==='Principal'||userRole==='Class Teacher'||userRole==='Subject Teacher';}
-function getAssignedClass(){return currentStaff?.assignedClass||null;}
-function getAssignedSubjects(){return currentStaff?.assignedSubjects||[];}
-function applyRoleRestrictions(){
-  const allowed=ROLE_TABS[userRole]||ROLE_TABS['Principal'];
-  document.querySelectorAll('.nlink[data-t]').forEach(btn=>{
-    const tab=btn.getAttribute('data-t');
-    btn.style.display=allowed.includes(tab)?'':'none';
-  });
-  const hdrRole=$('hdr-role');
-  if(hdrRole)hdrRole.textContent=userRole+(currentStaff&&currentStaff.assignedClass?' · '+currentStaff.assignedClass:'');
-}
-function showStaffLoginStep(){
-  $('login').style.display='none';
-  const sl=$('staff-login');if(sl)sl.style.display='flex';
-  const err=$('sl-err');if(err)err.style.display='none';
-  const email=$('sl-email');if(email)email.focus();
-}
-function backToSchoolLogin(){
-  const sl=$('staff-login');if(sl)sl.style.display='none';
-  $('login').style.display='flex';
-  schoolId=null;
-  const se=$('sl-email');if(se)se.value='';
-  const sp=$('sl-pwd');if(sp)sp.value='';
-}
-function doStaffLogin(){
-  const email=($('sl-email')?.value||'').trim().toLowerCase();
-  const pwd=($('sl-pwd')?.value||'');
-  const errEl=$('sl-err');
-  if(!email||!pwd){if(errEl){errEl.textContent='Enter your email and password.';errEl.style.display='block';}return;}
-  const match=(SD.staff||[]).find(s=>(s.email||'').trim().toLowerCase()===email&&(s.password||'')===pwd);
-  if(!match){if(errEl){errEl.textContent='Email or password incorrect. Contact your Principal.';errEl.style.display='block';}return;}
-  currentStaff=match;userRole=match.role||'Class Teacher';
-  try{localStorage.setItem(`p_${schoolId}_staffSession`,JSON.stringify({email:match.email,role:match.role,assignedClass:match.assignedClass||null,assignedSubjects:match.assignedSubjects||[]}));}catch(e){}
-  const sl=$('staff-login');if(sl)sl.style.display='none';
-  startApp();
-}
-function loginAsPrincipal(){
-  currentStaff=null;userRole='Principal';
-  const sl=$('staff-login');if(sl)sl.style.display='none';
-  startApp();
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// BLOOMCOLLECT — ONLINE FEE PAYMENT (Premium)
-// ══════════════════════════════════════════════════════════════════════════════
-let functions_sdk=null;
-try{functions_sdk=firebase.functions();}catch(e){}
-async function generatePaymentLink(studentIdx){
-  const s=SD.students[studentIdx];if(!s)return;
-  const isPrem=SD.config.plan==='premium';
-  if(!isPrem){alert('BloomCollect requires Premium plan. Contact AariNAT: +234 814 507 3941');return;}
-  const owe=(s.totalFee||0)-(s.paid||0);
-  if(owe<=0){toast('✅ This student has paid in full.');return;}
-  if(!functions_sdk){alert('BloomCollect not yet activated for this school.\nContact AariNAT: +234 814 507 3941');return;}
-  const btn=document.getElementById(`bc-btn-${studentIdx}`);
-  if(btn){btn.textContent='⏳ Generating...';btn.disabled=true;}
-  try{
-    const fn=functions_sdk.httpsCallable('generatePaymentLink');
-    const result=await fn({schoolId,studentId:s.id||String(studentIdx),studentName:s.name,studentPhone:s.phone||'',amount:owe});
-    const {paymentUrl,platformFee}=result.data;
-    const schoolName=SD.config.schoolName||'School';
-    const msg=`Dear Parent of *${s.name}*,\n\nYour child has an outstanding fee balance of *₦${owe.toLocaleString('en-NG')}* at *${schoolName}*.\n\nPay securely online:\n👉 ${paymentUrl}\n\nAccepts OPay · PalmPay · Bank Transfer · Debit Card\n\n– ${schoolName}`;
-    const phone=(s.phone||'').replace(/\D/g,'');
-    if(phone)window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,'_blank');
-    let m=document.getElementById('bloomcollect-modal');
-    if(!m){m=document.createElement('div');m.id='bloomcollect-modal';m.className='modal';document.body.appendChild(m);}
-    m.innerHTML=`<div class="mbox"><div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">💳 BloomCollect</h3><button class="mclose" onclick="closeM('bloomcollect-modal')">×</button></div>
-      <div style="background:var(--s2);border-radius:10px;padding:0.75rem;margin-bottom:0.75rem;"><div style="font-weight:700;">${esc(s.name)}</div><div style="font-size:0.8rem;color:var(--danger);font-weight:700;margin-top:4px;">Amount: ₦${owe.toLocaleString('en-NG')}</div><div style="font-size:0.7rem;color:var(--sub);margin-top:2px;">AariNAT fee: ₦${(platformFee||0).toLocaleString('en-NG')}</div></div>
-      <div style="background:#1a3048;border-radius:8px;padding:0.65rem;margin-bottom:0.75rem;word-break:break-all;font-size:0.78rem;color:#60a5fa;">${esc(paymentUrl)}</div>
-      <button class="btn-brand" onclick="navigator.clipboard.writeText('${paymentUrl}').then(()=>toast('✅ Copied!'))">📋 Copy Link</button>
-      <button class="btn-ghost" style="color:var(--text);margin-top:0.3rem;width:100%;" onclick="closeM('bloomcollect-modal')">Close</button></div>`;
-    openM('bloomcollect-modal');
-  }catch(e){console.error('BloomCollect:',e);alert('Could not generate link. Check internet.\n'+(e.message||''));}
-  finally{if(btn){btn.textContent='💳 Pay Online';btn.disabled=false;}}
-}
-function toast(msg,duration=3000){
-  let t=document.getElementById('toast-el');
-  if(!t){t=document.createElement('div');t.id='toast-el';t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:20px;font-size:0.82rem;font-weight:600;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.4);transition:opacity 0.3s;pointer-events:none;max-width:90vw;text-align:center;';document.body.appendChild(t);}
-  t.textContent=msg;t.style.opacity='1';clearTimeout(t._timer);t._timer=setTimeout(()=>{t.style.opacity='0';},duration);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// EDUBLOOM SAFETY — PREMIUM FEATURES
-// ══════════════════════════════════════════════════════════════════════════════
-function buildSafety(s,idx){
-  const isPrem=SD.config.plan==='premium';
-  if(!isPrem){
-    return`<div class="card" style="text-align:center;padding:1.75rem;">
-      <div style="font-size:2rem;margin-bottom:0.5rem;">🛡️</div>
-      <div style="font-weight:700;font-size:0.9rem;color:var(--text);">EduBloom Safety</div>
-      <div style="font-size:0.78rem;color:var(--sub);margin:0.4rem 0 0.75rem;">Authorised collector list and mid-day sign-out require Premium plan.</div>
-      <div style="font-size:0.75rem;color:var(--sub);">Contact AariNAT: <strong style="color:var(--text);">+234 814 507 3941</strong></div></div>`;
-  }
-  const cols=s.collectors||[];
-  const today=new Date().toISOString().split('T')[0];
-  const todaySignOuts=(s.signOutLog||[]).filter(e=>e.date===today);
-  return`
-  <div class="card" style="margin-bottom:0.6rem;">
-    <div class="ct">✅ Authorised Collectors</div>
-    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.6rem;">People permitted to collect this child. Check every visitor against this list before release.</p>
-    ${cols.length===0?'<p style="color:var(--sub);font-size:0.8rem;padding:0.4rem 0;">No collectors added yet.</p>':
-      cols.map((c,ci)=>`<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border);">
-        <div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:0.85rem;">${esc(c.name)}</div>
-        <div style="font-size:0.72rem;color:var(--sub);">${esc(c.relationship)} · 📱 ${esc(c.phone||'—')}</div>
-        ${c.times?`<div style="font-size:0.7rem;color:#fbbf24;">⏰ ${esc(c.times)}</div>`:''}
-        ${c.notes?`<div style="font-size:0.7rem;color:var(--sub);font-style:italic;">${esc(c.notes)}</div>`:''}</div>
-        <button onclick="deleteCollector(${idx},${ci})" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:0.72rem;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑️</button>
-      </div>`).join('')}
-    <div style="display:flex;gap:0.5rem;margin-top:0.7rem;flex-wrap:wrap;">
-      <button class="btn-brand btn-sm" onclick="openAddCollectorModal(${idx})">➕ Add Collector</button>
-      <button style="background:#dc2626;color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:0.78rem;cursor:pointer;font-weight:700;" onclick="openUnlistedAlert(${idx})">🚨 Unlisted Visitor Alert</button>
-    </div>
-  </div>
-  <div class="card">
-    <div class="ct">🚪 Mid-Day Sign-Out</div>
-    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.6rem;">Parent is WhatsApp-notified immediately when a student leaves during school hours.</p>
-    ${todaySignOuts.length?`<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:0.6rem;margin-bottom:0.6rem;">
-      <div style="font-size:0.7rem;font-weight:700;color:#f87171;margin-bottom:3px;">TODAY'S SIGN-OUTS</div>
-      ${todaySignOuts.map(e=>`<div style="font-size:0.78rem;color:var(--text);">${e.time} · <strong>${esc(e.collectorName)}</strong> · ${esc(e.reason)}</div>`).join('')}
-    </div>`:''}
-    <button style="background:#dc2626;color:#fff;border:none;border-radius:9px;padding:0.65rem;font-size:0.85rem;cursor:pointer;font-weight:700;width:100%;" onclick="openSignOutModal(${idx})">🚪 Sign Out ${esc(s.name)}</button>
-  </div>`;
-}
-function openAddCollectorModal(idx){
-  const s=SD.students[idx];if(!s)return;
-  let m=document.getElementById('add-collector-modal');
-  if(!m){m=document.createElement('div');m.id='add-collector-modal';m.className='modal';document.body.appendChild(m);}
-  m.innerHTML=`<div class="mbox">
-    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Authorised Collector</h3><button class="mclose" onclick="closeM('add-collector-modal')">×</button></div>
-    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.75rem;">Adding collector for: <strong style="color:var(--text);">${esc(s.name)}</strong></p>
-    <label>Full Name *</label><input id="col-name" placeholder="e.g. Mrs. Amaka Okonkwo">
-    <label>Relationship *</label>
-    <select id="col-rel"><option>Mother</option><option>Father</option><option>Grandmother</option><option>Grandfather</option><option>Uncle</option><option>Aunt</option><option>Older Sibling</option><option>Driver</option><option>House Help</option><option>Neighbour</option><option>Other</option></select>
-    <label>Phone Number *</label><input type="tel" id="col-phone" placeholder="08012345678">
-    <label>Valid Collection Times (optional)</label><input id="col-times" placeholder="e.g. Only after 2pm">
-    <label>Notes (optional)</label><input id="col-notes" placeholder="e.g. Drives a black Toyota">
-    <button class="btn-brand" onclick="saveCollector(${idx})">✅ Add Collector</button>
-    <button class="btn-ghost" style="color:var(--sub);margin-top:0.3rem;" onclick="closeM('add-collector-modal')">Cancel</button>
-  </div>`;
-  openM('add-collector-modal');
-}
-async function saveCollector(idx){
-  const name=($('col-name')?.value||'').trim();
-  const rel=$('col-rel')?.value;
-  const phone=($('col-phone')?.value||'').trim();
-  const times=($('col-times')?.value||'').trim();
-  const notes=($('col-notes')?.value||'').trim();
-  if(!name||!phone)return alert('Name and phone number are required.');
-  const s=SD.students[idx];if(!s)return;
-  if(!s.collectors)s.collectors=[];
-  s.collectors.push({name,relationship:rel,phone,times:times||null,notes:notes||null,addedAt:new Date().toISOString().split('T')[0]});
-  await SQ.push('students',SD.students);
-  closeM('add-collector-modal');
-  renderTab('safety');
-  toast(`✅ ${name} added as authorised collector.`);
-}
-async function deleteCollector(idx,ci){
-  const s=SD.students[idx];if(!s||!s.collectors)return;
-  const c=s.collectors[ci];if(!c)return;
-  if(!confirm(`Remove ${c.name} from authorised collectors for ${s.name}?`))return;
-  s.collectors.splice(ci,1);
-  await SQ.push('students',SD.students);
-  renderTab('safety');toast(`${c.name} removed.`);
-}
-function openUnlistedAlert(idx){
-  const s=SD.students[idx];if(!s)return;
-  const visitorName=prompt('UNLISTED VISITOR ALERT\n\nEnter the visitor\'s name as they gave it:');
-  if(!visitorName||!visitorName.trim())return;
-  const schoolName=SD.config.schoolName||'your school';
-  const principalPhone=(SD.config.whatsapp||SD.config.phone||'').replace(/\D/g,'');
-  const timeStr=new Date().toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
-  const msg=`🚨 *URGENT: ${schoolName} Safety Alert*\n\nSomeone has arrived at *${schoolName}* to collect *${s.name}*.\n\n*Name given:* ${visitorName.trim()}\n*Time:* ${timeStr}\n\nThis person is *NOT* on your child's authorised collector list.\n\n*Your child has NOT been released.*\n\nPlease call the school immediately.\n\n– EduBloom Safety, powered by AariNAT`;
-  const parentPhone=(s.phone||'').replace(/\D/g,'');
-  if(!parentPhone){alert('No parent phone on record for '+s.name+'.');return;}
-  if(!s.signOutLog)s.signOutLog=[];
-  s.signOutLog.unshift({type:'unlisted_alert',collectorName:visitorName.trim(),date:new Date().toISOString().split('T')[0],time:timeStr,status:'alert_sent',by:currentStaff?.name||userRole});
-  SQ.push('students',SD.students);
-  window.open(`https://wa.me/${parentPhone}?text=${encodeURIComponent(msg)}`,'_blank');
-  alert('WhatsApp alert sent to '+s.name+'\'s parent.\n\nDO NOT release the child until parent responds or Principal confirms.');
-  renderTab('safety');
-}
-function openSignOutModal(idx){
-  const s=SD.students[idx];if(!s)return;
-  let m=document.getElementById('sign-out-modal');
-  if(!m){m=document.createElement('div');m.id='sign-out-modal';m.className='modal';document.body.appendChild(m);}
-  const cols=(s.collectors||[]).map(c=>c.name);
-  const now=new Date().toTimeString().slice(0,5);
-  m.innerHTML=`<div class="mbox">
-    <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">🚪 Sign-Out: ${esc(s.name)}</h3><button class="mclose" onclick="closeM('sign-out-modal')">×</button></div>
-    <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.75rem;">Parent will be notified by WhatsApp immediately.</p>
-    <label>Reason</label>
-    <select id="so-reason">
-      <option>Medical appointment — returning today</option><option>Medical appointment — not returning today</option>
-      <option>Parent request — family matter</option><option>Early dismissal — school authorised</option>
-      <option>Emergency — details in notes</option><option>Other — see notes</option>
-    </select>
-    <label>Collected By</label>
-    <input id="so-collector" placeholder="Full name of person collecting" list="so-col-list">
-    <datalist id="so-col-list">${cols.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
-    <label>Time</label><input type="time" id="so-time" value="${now}">
-    <label>Notes (optional)</label><input id="so-notes" placeholder="Any additional details">
-    <button class="btn-brand" onclick="confirmSignOut(${idx})" style="background:#dc2626;">🚪 Confirm Sign-Out & Notify Parent</button>
-    <button class="btn-ghost" style="color:var(--sub);margin-top:0.3rem;" onclick="closeM('sign-out-modal')">Cancel</button>
-  </div>`;
-  openM('sign-out-modal');
-}
-async function confirmSignOut(idx){
-  const s=SD.students[idx];if(!s)return;
-  const reason=$('so-reason')?.value;
-  const collector=($('so-collector')?.value||'').trim();
-  const time=$('so-time')?.value||new Date().toTimeString().slice(0,5);
-  const notes=($('so-notes')?.value||'').trim();
-  if(!collector)return alert('Enter the name of the person collecting the student.');
-  const today=new Date().toISOString().split('T')[0];
-  const schoolName=SD.config.schoolName||'School';
-  const principalPhone=(SD.config.whatsapp||'').replace(/\D/g,'');
-  const msg=`Dear Parent of *${s.name}*,\n\n*${s.name}* has been signed out of *${schoolName}* at *${time}*.\n\n*Collected by:* ${collector}\n*Reason:* ${reason}${notes?('\n*Notes:* '+notes):''}\n\nIf you did NOT authorise this, call immediately: ${principalPhone||'the school'}\n\nOr reply *NOT AUTHORISED*.\n\n– EduBloom Safety, powered by AariNAT`;
-  if(!s.signOutLog)s.signOutLog=[];
-  s.signOutLog.unshift({type:'sign_out',collectorName:collector,reason,date:today,time,notes:notes||null,status:'notified',by:currentStaff?.name||userRole});
-  await SQ.push('students',SD.students);
-  const parentPhone=(s.phone||'').replace(/\D/g,'');
-  if(parentPhone)window.open(`https://wa.me/${parentPhone}?text=${encodeURIComponent(msg)}`,'_blank');
-  closeM('sign-out-modal');renderTab('safety');
-  toast(`✅ ${s.name} signed out. Parent notified via WhatsApp.`);
-}
-function checkMorningAbsentees(){
-  const isPrem=SD.config.plan==='premium';
-  if(!isPrem){alert('Morning Absence Alerts require Premium plan.\nContact AariNAT: +234 814 507 3941');return;}
-  const today=new Date().toISOString().split('T')[0];
-  const schoolName=SD.config.schoolName||'School';
-  const principalPhone=(SD.config.whatsapp||'').replace(/\D/g,'');
-  const timeStr=new Date().toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
-  const noRecord=SD.students.filter(s=>{const att=SD.attendance?.[today]?.[s.id];return !att&&s.phone;});
-  if(!noRecord.length){toast('✅ All students are accounted for today.');return;}
-  if(!confirm(`${noRecord.length} student${noRecord.length>1?'s have':' has'} no attendance record yet today.\n\nSend WhatsApp alerts to their parents now?\n\n${noRecord.slice(0,5).map(s=>s.name).join(', ')}${noRecord.length>5?'...':''}`))return;
-  noRecord.forEach((s,i)=>{
-    const msg=`Dear Parent of *${s.name}*,\n\n*${s.name}* has not been marked present at *${schoolName}* this morning (as at ${timeStr}).\n\nIf your child is absent today, no action is needed.\n\nIf your child left for school this morning, please call the school immediately.\n\n– EduBloom Safety, powered by AariNAT`;
-    setTimeout(()=>{const ph=(s.phone||'').replace(/\D/g,'');if(ph)window.open(`https://wa.me/${ph}?text=${encodeURIComponent(msg)}`,'_blank');},i*1200);
-  });
-  setTimeout(()=>toast(`✅ Absence alerts sent for ${noRecord.length} students.`),noRecord.length*1200+500);
-}
-
-
-// ══════════════════════════════════════════════════════════════════════════════
-// BIRTHDAY & NATIONAL DAYS SYSTEM
-// ══════════════════════════════════════════════════════════════════════════════
-
-const BIRTHDAY_QUOTES = [
-  "The secret of getting ahead is getting started. Keep moving forward!",
-  "Every day is a new beginning. Make this year your greatest chapter yet.",
-  "Believe you can, and you are halfway there. The sky is your starting point.",
-  "It always seems impossible until it is done. You are capable of great things.",
-  "The future belongs to those who believe in the beauty of their dreams.",
-  "Do not watch the clock — do what it does. Keep going, one step at a time.",
-  "Excellence is not a gift but a skill that takes practice. You have what it takes.",
-  "A child who reads will be an adult who thinks. Keep learning, keep growing.",
-  "You were born an original. Do not die a copy. Shine your light on the world.",
-  "Hard work beats talent when talent does not work hard. Stay dedicated."
-];
-
-const NATIONAL_DAYS = [
-  { date:'01-01', name:"New Year's Day",           emoji:'🎊', color:'#7B2FBE',
-    message:"A brand new year begins today! May this year bring growth, achievement, and joy to every student, staff, and family at this school. The best is yet to come." },
-  { date:'01-15', name:'Armed Forces Remembrance Day', emoji:'🎖️', color:'#374151',
-    message:"Today we honour the men and women who gave their lives in service to Nigeria. Let us teach our students the value of courage, sacrifice, and national duty." },
-  { date:'05-01', name:"Workers' Day",             emoji:'✊', color:'#059669',
-    message:"Today we celebrate the dignity of labour. Every school worker — teachers, support staff, cleaners — deserves recognition. Education is the most important work in any nation." },
-  { date:'05-27', name:"Children's Day",           emoji:'🧒', color:'#FB923C',
-    message:"Happy Children's Day! Every child in this school represents Nigeria's future. Today is a reminder that protecting, educating, and celebrating children is the greatest investment a nation can make." },
-  { date:'06-12', name:'Democracy Day',            emoji:'🇳🇬', color:'#2563eb',
-    message:"Democracy Day reminds us that every Nigerian voice matters — including the young voices in our classrooms. Today, teach your students what it means to be a responsible citizen." },
-  { date:'10-01', name:'Independence Day',         emoji:'🇳🇬', color:'#16a34a',
-    message:"Happy 🇳🇬 Independence Day! 63 years of nationhood. The children in this school are the leaders Nigeria is waiting for. Invest in them today, and they will build the Nigeria we all deserve." },
-  { date:'12-25', name:'Christmas Day',            emoji:'🎄', color:'#dc2626',
-    message:"Merry Christmas from EduBloom! May this season bring warmth, rest, and renewal to every teacher, student, and family. Thank you for a wonderful year." },
-  { date:'12-26', name:'Boxing Day',               emoji:'🎁', color:'#7B2FBE',
-    message:"Happy Boxing Day! A day for giving, reflecting, and being grateful for the community we share. Rest well before the new term ahead." },
-  { date:'12-31', name:"New Year's Eve",           emoji:'🥂', color:'#CFB778',
-    message:"The last day of the year. Reflect on how far this school has come. Every student who learned something new, every fee collected, every report card generated — that is progress. Here is to an even better year ahead!" },
-];
-
-// Nigerian school academic calendar inspiration days
-const INSPIRATION_DAYS = [
-  { date:'09-01', msg:"New term energy! The first day of a new academic term is a new beginning for every student. Start strong." },
-  { date:'04-01', msg:"Mid-year progress check: Have your students grown since September? Use EduBloom analytics to see who needs extra support." },
-  { date:'07-01', msg:"Third term begins! The most important term — where final grades are set and promotions decided. Make it count." },
-];
-
-function todayMMDD(){
-  const d=new Date();
-  const m=String(d.getMonth()+1).padStart(2,'0');
-  const day=String(d.getDate()).padStart(2,'0');
-  return m+'-'+day;
-}
-
-function getAge(dob){
-  if(!dob) return null;
-  const d=new Date(dob), n=new Date();
-  let age=n.getFullYear()-d.getFullYear();
-  const m=n.getMonth()-d.getMonth();
-  if(m<0||(m===0&&n.getDate()<d.getDate())) age--;
-  return age;
-}
-
-function studentDOBMatchesToday(s){
-  if(!s.dob) return false;
-  const dob=new Date(s.dob);
-  const t=new Date();
-  return dob.getMonth()===t.getMonth() && dob.getDate()===t.getDate();
-}
-
-// Students with birthdays in the next N days
-function getUpcomingBirthdays(days=7){
-  const today=new Date(); today.setHours(0,0,0,0);
-  return (SD.students||[]).filter(s=>{
-    if(!s.dob) return false;
-    const dob=new Date(s.dob);
-    // Set to this year
-    const bday=new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
-    if(bday < today) bday.setFullYear(today.getFullYear()+1);
-    const diff=(bday-today)/(1000*60*60*24);
-    return diff>=0 && diff<=days;
-  }).map(s=>{
-    const dob=new Date(s.dob);
-    const bday=new Date(new Date().getFullYear(),dob.getMonth(),dob.getDate());
-    if(bday<new Date()) bday.setFullYear(new Date().getFullYear()+1);
-    const diff=Math.ceil((bday-new Date())/(1000*60*60*24));
-    return {...s, _daysUntilBirthday:diff, _age:getAge(s.dob)+1};
-  }).sort((a,b)=>a._daysUntilBirthday-b._daysUntilBirthday);
-}
-
-function sendBirthdayWish(studentIdx){
-  const s=SD.students[studentIdx]; if(!s) return;
-  const age=getAge(s.dob);
-  const ageStr=age?` ${age+1} years old today`:'';
-  const school=SD.config.schoolName||'your school';
-  const pronoun=s.gender==='Female'?'her':'his';
-  const pronoun2=s.gender==='Female'?'her':'him';
-  const quote=BIRTHDAY_QUOTES[Math.floor(Math.random()*BIRTHDAY_QUOTES.length)];
-  const msg=
-    `🎂 *Happy Birthday ${s.name}!* 🎉\n\n`+
-    `Dear Parent of *${s.name}*,\n\n`+
-    `Today, *${s.name}* turns${ageStr}! 🌟\n\n`+
-    `Everyone at *${school}* wishes ${pronoun2} a day filled with joy, laughter, and love. `+
-    `May this new year of ${pronoun} life bring great achievements and beautiful memories.\n\n`+
-    `💫 *"${quote}"*\n\n`+
-    `Keep shining, ${s.name.split(' ')[0]}! ✨\n\n`+
-    `– ${school}\nEduBloom School Portal`;
-  const ph=(s.phone||'').replace(/\D/g,'');
-  if(ph) window.open(`https://wa.me/${ph}?text=${encodeURIComponent(msg)}`,'_blank');
-  else alert('No parent phone on record for '+s.name+'. Edit the student profile to add one.');
-  // Log it
-  if(!SD.commsLog) SD.commsLog=[];
-  SD.commsLog.unshift({type:'Birthday Wish',message:`Birthday WhatsApp sent — ${s.name}`,date:new Date().toISOString().split('T')[0],time:new Date().toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'})});
-  SQ.push('commsLog',SD.commsLog);
-}
-
-function sendAllBirthdayWishes(){
-  const today=SD.students.filter(s=>studentDOBMatchesToday(s)&&s.phone);
-  if(!today.length){toast('No students with birthdays today.');return;}
-  if(!confirm(`Send birthday WhatsApp to parents of ${today.length} student${today.length>1?'s':''}?\n\n${today.map(s=>s.name).join(', ')}`))return;
-  today.forEach((s,i)=>{
-    const idx=SD.students.indexOf(s);
-    setTimeout(()=>sendBirthdayWish(idx),i*1500);
-  });
-}
-
-function checkTodayEvents(){
-  const mmdd=todayMMDD();
-  const todayBirthdays=(SD.students||[]).filter(s=>studentDOBMatchesToday(s));
-  const nationalDay=NATIONAL_DAYS.find(d=>d.date===mmdd);
-  const inspDay=INSPIRATION_DAYS.find(d=>d.date===mmdd);
-
-  // Show birthday banner
-  if(todayBirthdays.length>0){
-    showEventBanner({
-      type:'birthday',
-      emoji:'🎂',
-      color:'#7B2FBE',
-      title:`🎉 ${todayBirthdays.length===1?todayBirthdays[0].name+"'s Birthday!":`${todayBirthdays.length} Students' Birthdays Today!`}`,
-      body: todayBirthdays.length===1
-        ?`Wishing ${todayBirthdays[0].name} a wonderful birthday! Send a WhatsApp celebration to their parent.`
-        :`${todayBirthdays.map(s=>s.name).join(', ')} are celebrating today! Tap to send birthday wishes.`,
-      action:'sendAllBirthdayWishes()',
-      actionLabel:'🎂 Send Birthday Wishes'
-    });
-  }
-
-  // Show national day banner (separate from birthday)
-  if(nationalDay){
-    showEventBanner({
-      type:'national',
-      emoji:nationalDay.emoji,
-      color:nationalDay.color,
-      title:nationalDay.name,
-      body:nationalDay.message,
-      action:null,
-      actionLabel:null
-    });
-  }
-
-  // Inspiration day
-  if(inspDay && !nationalDay){
-    toast(inspDay.msg, 8000);
-  }
-}
-
-function showEventBanner(ev){
-  const id='event-banner-'+ev.type;
-  let b=document.getElementById(id);
-  if(!b){
-    b=document.createElement('div');
-    b.id=id;
-    // Insert at top of app, after header
-    const app=$('app');
-    const firstChild=app?app.firstElementChild:null;
-    if(app) app.insertBefore(b, firstChild?firstChild.nextSibling:null);
-  }
-  b.style.cssText=`background:linear-gradient(135deg,${ev.color}22,${ev.color}11);border-top:3px solid ${ev.color};padding:0.85rem 1.25rem;position:relative;animation:fadeIn 0.4s ease;`;
-  b.innerHTML=`
-    <button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:10px;background:none;border:none;color:var(--sub);font-size:1.1rem;cursor:pointer;width:auto;margin:0;">×</button>
-    <div style="font-size:0.82rem;font-weight:800;color:var(--text);margin-bottom:0.25rem;">${ev.emoji} ${esc(ev.title)}</div>
-    <div style="font-size:0.78rem;color:var(--sub);line-height:1.5;margin-bottom:${ev.action?'0.6rem':'0'};">${esc(ev.body)}</div>
-    ${ev.action?`<button onclick="${ev.action}" style="background:${ev.color};color:#fff;border:none;border-radius:8px;padding:5px 14px;font-size:0.78rem;font-weight:700;cursor:pointer;width:auto;margin:0;">${ev.actionLabel}</button>`:''}
-  `;
-}
-
-// Widget for upcoming birthdays — added to revenue/dashboard section
-function renderBirthdayWidget(){
-  const upcoming=getUpcomingBirthdays(30); // next 30 days
-  const el=document.getElementById('birthday-widget');
-  if(!el || !upcoming.length) return;
-  el.innerHTML=`
-    <div class="card" style="border-left:4px solid #7B2FBE;">
-      <div class="ct" style="justify-content:space-between;">
-        <span>🎂 Upcoming Birthdays</span>
-        <span style="font-size:0.72rem;color:var(--sub);">Next 30 days</span>
-      </div>
-      ${upcoming.slice(0,5).map(s=>{
-        const idx=SD.students.indexOf(s);
-        const dob=new Date(s.dob);
-        const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const dateStr=months[dob.getMonth()]+' '+dob.getDate();
-        const isToday=s._daysUntilBirthday===0;
-        return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0;border-bottom:1px solid var(--border);">
-          <div style="width:36px;height:36px;border-radius:50%;background:${isToday?'#7B2FBE':'var(--s2)'};display:flex;align-items:center;justify-content:center;font-size:${isToday?'1.1':'0.9'}rem;flex-shrink:0;">${isToday?'🎂':'🎈'}</div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:700;font-size:0.82rem;color:${isToday?'#c084fc':'var(--text)'};">${esc(s.name)} ${isToday?'<span style="font-size:0.65rem;background:#7B2FBE;color:#fff;border-radius:10px;padding:1px 7px;font-weight:800;">TODAY!</span>':''}</div>
-            <div style="font-size:0.7rem;color:var(--sub);">${esc(s.class||'—')} · ${dateStr}${s._age?' · Turning '+s._age:''}</div>
-          </div>
-          ${isToday&&s.phone?`<button onclick="sendBirthdayWish(${idx})" style="background:#7B2FBE;color:#fff;border:none;border-radius:7px;padding:3px 9px;font-size:0.7rem;font-weight:700;cursor:pointer;flex-shrink:0;width:auto;margin:0;">🎂 Wish</button>`:''}
-        </div>`;
-      }).join('')}
-      ${upcoming.length>5?`<div style="font-size:0.72rem;color:var(--sub);text-align:center;padding-top:0.4rem;">+ ${upcoming.length-5} more birthdays this month</div>`:''}
-    </div>`;
 }
 
 // ── Banner ─────────────────────────────────────────────────────────────────
@@ -1081,7 +540,6 @@ function renderBanner(){
 // ── 1. REVENUE ─────────────────────────────────────────────────────────────
 function renderRevenue(){
   renderBanner();
-  renderBirthdayWidget();
   const s=SD.students||[];
   let exp=0,col=0;s.forEach(x=>{exp+=(x.totalFee||0);col+=(x.paid||0);});
   const pct=exp>0?Math.round((col/exp)*100):0;
@@ -1242,16 +700,8 @@ function renderStudentList(){
     const pbc=owe<=0?'pb-paid':s.paid>0?'pb-part':'pb-owe';
     const pbt=owe<=0?'Paid':s.paid>0?'Partial':'Unpaid';
     // ── RBAC: hide fee badge from Class/Subject Teachers ─────────────────────
-    const isBday=studentDOBMatchesToday(s);
     const feeBadge=canSeeFees()?`<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}`:'' ;
-    return`<div class="stu-row" onclick="openProfile(${idx})" style="${isBday?'border-left:3px solid #7B2FBE;':''}">
-    <div class="stu-av" style="${isBday?'background:#7B2FBE;':''}">  ${isBday?'🎂':s.name.charAt(0).toUpperCase()}</div>
-    <div style="flex:1;min-width:0;">
-      <div class="stu-name">${esc(s.name)}${isBday?' <span style="font-size:0.6rem;background:#7B2FBE;color:#fff;border-radius:10px;padding:1px 7px;font-weight:800;">🎂 BIRTHDAY</span>':''}</div>
-      <div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div>
-  </div>`;
+    return`<div class="stu-row" onclick="openProfile(${idx})"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;min-width:0;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div></div>`;
   }).join('');
 }
 
@@ -1265,9 +715,8 @@ function populateClassFilter(){
 async function addStudent(){
   const name=$('ns-name').value.trim(),phone=$('ns-phone').value.trim().replace(/\D/g,'');
   const cls=$('ns-class').value.trim(),fee=parseFloat($('ns-fee').value)||SD.config.fee||50000;
-  const dob=$('ns-dob').value||null;
   if(!name||!phone)return alert('Name and phone required.');
-  SD.students.push({name,phone,class:cls,totalFee:fee,paid:0,scores:{},swot:{},dob});
+  SD.students.push({name,phone,class:cls,totalFee:fee,paid:0,scores:{},swot:{}});
   await SQ.push('students',SD.students); checkTierStatus();
   closeM('add-student-modal');
   $('ns-name').value='';$('ns-phone').value='';$('ns-class').value='';$('ns-fee').value='';
@@ -1348,102 +797,118 @@ function importStudentsFromText(f){
   })().catch(()=>alert('Could not read file. Try saving it as UTF-8 CSV.'));
 }
 
-// ── Image preprocessing — greyscale + contrast boost ─────────────────────────
-function preprocessImage(dataUrl){
-  return new Promise(resolve=>{
-    const img=new Image();
-    img.onload=()=>{
-      const canvas=document.createElement('canvas');
-      const maxW=2400;const scale=img.width>maxW?maxW/img.width:1;
-      canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
-      const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);
-      const id=ctx.getImageData(0,0,canvas.width,canvas.height);const d=id.data;
-      for(let i=0;i<d.length;i+=4){
-        const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-        const e=Math.min(255,Math.max(0,(g-128)*1.6+128));
-        d[i]=d[i+1]=d[i+2]=e;
-      }
-      ctx.putImageData(id,0,0);resolve(canvas.toDataURL('image/png'));
-    };
-    img.onerror=()=>resolve(dataUrl);img.src=dataUrl;
-  });
-}
-
-// ── Claude Vision — AI-powered OCR when API key available ─────────────────────
-async function tryClaudeVisionSchool(dataUrl){
-  const key=localStorage.getItem('edubloom_ai_key');if(!key)return null;
-  try{
-    const b64=dataUrl.split(',')[1];
-    const mt=dataUrl.startsWith('data:image/png')?'image/png':'image/jpeg';
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':key,
-        'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-ipc':'true'},
-      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:2000,
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:mt,data:b64}},
-          {type:'text',text:'This is a Nigerian school class register. It may be printed or handwritten. Extract every student name you can read, one per line. Names only — no serial numbers, no class labels, no column headers. Each line should be exactly one student name.'}
-        ]}]})
-    });
-    const data=await res.json();if(data.error)return null;
-    return data.content?.map(b=>b.text||'').join('\n')||null;
-  }catch(e){return null;}
-}
+// OCR config — set GOOGLE_VISION_KEY for best handwriting accuracy (free 1000/month)
+// Get key: console.cloud.google.com → Enable "Cloud Vision API" → Credentials → Create Key
+const GOOGLE_VISION_KEY = ''; // paste key here when ready
 
 async function importStudentsFromImage(f){
-  $('csv-fb').textContent='📸 Reading photo…';
+  const fbEl = $('csv-fb');
+  if(fbEl) fbEl.textContent = '📸 Reading photo...';
+
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const imgData = ev.target.result;
+    const base64  = imgData.split(',')[1];
+    let text = '';
+
+    if(navigator.onLine){
+      // ── 1st: Google Cloud Vision (best for Nigerian handwriting) ──────
+      if(GOOGLE_VISION_KEY){
+        try{
+          if(fbEl) fbEl.textContent = '📸 Reading with Google Vision...';
+          const r = await fetch(
+            `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_KEY}`,
+            { method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({requests:[{
+                image:{content:base64},
+                features:[{type:'DOCUMENT_TEXT_DETECTION'}]
+              }]})
+            }
+          );
+          const d = await r.json();
+          text = d.responses?.[0]?.fullTextAnnotation?.text || '';
+        }catch(e){ console.warn('Google Vision failed:', e); }
+      }
+
+      // ── 2nd: OCR.space free tier (no setup, handles handwriting) ─────
+      if(!text.trim()){
+        try{
+          if(fbEl) fbEl.textContent = '📸 Processing with cloud OCR...';
+          const arr=imgData.split(','); const mtype=arr[0].match(/:(.*?);/)[1];
+          const bstr=atob(arr[1]); let n=bstr.length;
+          const u8=new Uint8Array(n); while(n--) u8[n]=bstr.charCodeAt(n);
+          const blob=new Blob([u8],{type:mtype});
+          const fd=new FormData();
+          fd.append('file',blob,'register.jpg');
+          fd.append('language','eng');
+          fd.append('apikey','helloworld'); // free demo key — register at ocr.space for 25k/month free
+          fd.append('isHandwritten','true');
+          const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:fd});
+          const result=await resp.json();
+          text = result.ParsedResults?.[0]?.ParsedText || '';
+        }catch(e){ console.warn('OCR.space failed, using Tesseract:', e); }
+      }
+    }
+
+    if(text.trim()){
+      // Cloud OCR succeeded — extract names
+      const names = extractStudentNames(text);
+      let count = 0;
+      const existingKeys = new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+      names.forEach(nm=>{
+        const safe = nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+        const key  = safe.toLowerCase().replace(/[^a-z]/g,'');
+        if(safe.length>1 && !existingKeys.has(key)){
+          SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+          existingKeys.add(key); count++;
+        }
+      });
+      await SQ.push('students',SD.students); checkTierStatus();
+      if(fbEl) fbEl.textContent = `✅ Found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
+      renderStudentList(); renderBanner(); renderRevenue();
+    } else {
+      // ── 3rd: Tesseract.js (offline fallback, slower) ──────────────────
+      await importStudentsFromImageTesseract(imgData);
+    }
+  };
+  reader.onerror = () => alert('Could not read image.');
+  reader.readAsDataURL(f);
+}
+
+async function importStudentsFromImageTesseract(imgData){
+  const fbEl = $('csv-fb');
   const loadTesseract=()=>new Promise((resolve,reject)=>{
     if(window.Tesseract){resolve();return;}
     const s=document.createElement('script');
     s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload=resolve;s.onerror=reject;document.head.appendChild(s);
+    s.onload=resolve;s.onerror=reject;
+    document.head.appendChild(s);
   });
-  const reader=new FileReader();
-  reader.onload=async ev=>{
-    try{
-      let rawText='';
-      // Claude Vision first (handles handwriting, better accuracy)
-      if(localStorage.getItem('edubloom_ai_key')){
-        $('csv-fb').textContent='🤖 Using AI vision (higher accuracy)…';
-        const cv=await tryClaudeVisionSchool(ev.target.result);
-        if(cv&&cv.trim().length>5){rawText=cv;}
+  try{
+    if(fbEl) fbEl.textContent='📸 Offline OCR loading (first time ~30s)...';
+    await loadTesseract();
+    const{data:{text}}=await Tesseract.recognize(imgData,'eng',{
+      logger:m=>{if(m.status==='recognizing text'&&fbEl)
+        fbEl.textContent='📸 Offline OCR... '+Math.round((m.progress||0)*100)+'%';}
+    });
+    const names=extractStudentNames(text);
+    let count=0;
+    const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+    names.forEach(nm=>{
+      const safe=nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+      const key=safe.toLowerCase().replace(/[^a-z]/g,'');
+      if(safe.length>1&&!existingKeys.has(key)){
+        SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+        existingKeys.add(key);count++;
       }
-      // Tesseract fallback with preprocessing
-      if(!rawText){
-        $('csv-fb').textContent='📸 Preprocessing image…';
-        const processed=await preprocessImage(ev.target.result);
-        await loadTesseract();
-        $('csv-fb').textContent='📸 Reading photo… 0%';
-        const{data}=await Tesseract.recognize(processed,'eng',{
-          tessedit_pageseg_mode:'6',
-          logger:m=>{if(m.status==='recognizing text')
-            $('csv-fb').textContent='📸 Reading photo… '+Math.round((m.progress||0)*100)+'%';}
-        });
-        // Confidence gate
-        if((data.confidence||0)<40)
-          $('csv-fb').textContent='⚠️ Low confidence ('+Math.round(data.confidence||0)+'%) — check names carefully';
-        rawText=data.text;
-      }
-      const names=extractStudentNames(rawText);
-      let count=0;
-      const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
-      names.forEach(nm=>{
-        const safe=nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
-        const key=safe.toLowerCase().replace(/[^a-z]/g,'');
-        if(safe.length>1&&!existingKeys.has(key)){
-          SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
-          existingKeys.add(key);count++;
-        }
-      });
-      await SQ.push('students',SD.students);checkTierStatus();
-      $('csv-fb').textContent=`✅ Imported ${count} student${count!==1?'s':''} from photo. Add phone/class in each profile.`;
-      renderStudentList();renderBanner();renderRevenue();
-    }catch(err){
-      $('csv-fb').textContent='❌ Photo reading failed. Try a clearer image or use CSV.';
-      console.error('OCR error:',err);
-    }
-  };
-  reader.onerror=()=>alert('Could not read image.');
-  reader.readAsDataURL(f);
+    });
+    await SQ.push('students',SD.students); checkTierStatus();
+    if(fbEl) fbEl.textContent=`✅ Found ${count} student${count!==1?'s':''} from photo.`;
+    renderStudentList();renderBanner();renderRevenue();
+  }catch(err){
+    if(fbEl) fbEl.textContent='❌ Photo reading failed. Try a clearer image or use CSV.';
+    console.error('Tesseract OCR error:',err);
+  }
 }
 
 // ── Name validation helpers ──────────────────────────────────────────────
@@ -1509,33 +974,27 @@ function looksLikeValidName(str){
 }
 
 function extractStudentNames(raw){
-  // FIX 3: Join continuation lines before processing
-  // Handles long Yoruba/Igbo names split across lines by OCR
-  const rawLines=raw.split(/\r?\n/);
-  const joined=[];let cur=null;
-  rawLines.forEach(line=>{
-    const t=line.trim();
-    if(!t){if(cur!==null){joined.push(cur);cur=null;}return;}
-    const isNum=/^\s*\d+[.)\s]/.test(t);
-    const isBul=/^\s*[\u2022\-\*]\s/.test(t);
-    const isCSV=t.includes(',')&&!isNum&&!isBul;
-    if(isNum||isBul||isCSV){if(cur!==null)joined.push(cur);cur=t;}
-    else{if(cur!==null){const w=t.replace(/[^a-zA-Z\s]/g,'').trim();
-      if(w.length>1&&t.length<35){cur=cur+' '+t;}else{joined.push(cur);cur=t;}}
-    else{cur=t;}}
-  });
-  if(cur!==null)joined.push(cur);
-
+  // Split on newlines and process each line independently
+  const lines=raw.split(/\r?\n/);
   const candidates=[];
-  joined.forEach(line=>{
-    const t=line.trim();if(!t)return;
+
+  lines.forEach(line=>{
+    const t=line.trim();
+    if(!t)return;
+
     // CSV: take only first column
     if(t.includes(',')&&!/^\d+[.)\s]/.test(t)){
       const col=t.split(',')[0].replace(/"/g,'').trim();
-      if(col)candidates.push(col);return;
+      if(col)candidates.push(col);
+      return;
     }
-    // Strip leading number/bullet
-    const stripped=t.replace(/^\d+[.):\s]+/,'').replace(/^[-*•]\s*/,'').trim();
+
+    // Strip leading number/bullet: "1. Name" or "• Name"
+    const stripped=t
+      .replace(/^\d+[.):\s]+/,'')
+      .replace(/^[-*•]\s*/,'')
+      .trim();
+
     if(stripped)candidates.push(stripped);
   });
 
@@ -1560,24 +1019,6 @@ function openProfile(idx){
   const s=SD.students[idx];if(!s)return;
   $('prof-name').textContent=s.name;
   $('prof-meta').textContent=`${s.class||'—'} · ${s.phone||'—'}`;
-  // ── Birthday display in profile header ──
-  const bdayEl=$('prof-bday');
-  if(bdayEl){
-    if(s.dob){
-      const dob=new Date(s.dob);
-      const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      const dobStr=months[dob.getMonth()]+' '+dob.getDate()+', '+dob.getFullYear();
-      const age=getAge(s.dob);
-      const isToday=studentDOBMatchesToday(s);
-      bdayEl.style.display='block';
-      bdayEl.innerHTML=isToday
-        ?`🎂 <strong>BIRTHDAY TODAY!</strong> Turning ${age+1} · ${dobStr} &nbsp;<button onclick="sendBirthdayWish(${idx})" style="background:#7B2FBE;color:#fff;border:none;border-radius:6px;padding:2px 8px;font-size:0.68rem;font-weight:700;cursor:pointer;width:auto;margin:0;">🎉 Send Wish</button>`
-        :`🎂 ${dobStr}${age!==null?' · Age '+age:''}`;
-      bdayEl.style.color=isToday?'#c084fc':'var(--sub)';
-    } else {
-      bdayEl.style.display='none';
-    }
-  }
   document.querySelectorAll('.ptab').forEach(t=>t.classList.toggle('on',t.dataset.pt==='fees'));
   renderTab('fees');openM('student-modal');
 }
@@ -3226,4 +2667,261 @@ async function refreshPlanFromFirestore(btn){
     startApp();
     setTimeout(() => SQ.silentPull(), 2000);
   } catch(e) { console.warn('Auto-login failed:', e); }
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+// BLOOM VOICE AGENT — SCHOOL APP
+// Tap 🎙️ and speak. Works on Android Chrome.
+// "Record payment of 15000 for Amaka"  · "Who owes"  · "How much collected"
+// "Mark Emeka present"  · "Send reminders"  · "Go to students"  · "Help"
+// ══════════════════════════════════════════════════════════════════════════
+(function initBloomSchoolVoice(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const synth=window.speechSynthesis;
+  if(!SR) return;
+
+  const css=`
+    #svab{position:fixed;bottom:130px;right:14px;z-index:200;
+      width:54px;height:54px;border-radius:50%;
+      background:var(--brand,#4f46e5);color:#fff;
+      font-size:1.4rem;border:none;cursor:pointer;
+      box-shadow:0 4px 18px rgba(79,70,229,.5);
+      display:flex;align-items:center;justify-content:center;
+      transition:background .2s,transform .15s;
+      animation:svbpulse 2.5s infinite;}
+    @keyframes svbpulse{
+      0%{box-shadow:0 0 0 0 rgba(79,70,229,.5)}
+      70%{box-shadow:0 0 0 16px rgba(79,70,229,0)}
+      100%{box-shadow:0 0 0 0 rgba(79,70,229,0)}}
+    #svab.svlist{background:#ef4444!important;animation:none;
+      box-shadow:0 0 0 10px rgba(239,68,68,.3);transform:scale(1.08);}
+    #svab.svspeak{background:#10b981!important;animation:none;}
+    #svfb{position:fixed;bottom:192px;right:8px;left:8px;
+      max-width:320px;margin:0 auto;
+      background:#1e293b;color:#f1f5f9;border-radius:14px;
+      padding:12px 15px;font-size:.86rem;z-index:201;display:none;
+      box-shadow:0 8px 24px rgba(0,0,0,.35);}
+    #svfb.svshow{display:block;}
+    #svfb .svtx{font-style:italic;opacity:.6;margin-bottom:.3rem;font-size:.76rem;}
+    #svfb .svrx{font-weight:600;line-height:1.5;}
+    #svfb .svax{font-size:.71rem;color:#34d399;margin-top:.3rem;}`;
+
+  const s=document.createElement('style'); s.textContent=css;
+  document.head.appendChild(s);
+
+  const btn=document.createElement('button'); btn.id='svab'; btn.textContent='🎙️';
+  btn.title='Voice Assistant — Tap and speak';
+  document.body.appendChild(btn);
+
+  const fb=document.createElement('div'); fb.id='svfb';
+  fb.innerHTML='<div class="svtx" id="sv-tx"></div><div class="svrx" id="sv-rx"></div><div class="svax" id="sv-ax"></div>';
+  document.body.appendChild(fb);
+
+  let rec=null, listening=false, htimer=null;
+
+  function say(text){
+    if(!synth)return; synth.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang='en-NG'; u.rate=0.93;
+    btn.classList.add('svspeak');
+    u.onend=u.onerror=()=>btn.classList.remove('svspeak');
+    synth.speak(u);
+  }
+
+  function show(tx,rx,ax){
+    document.getElementById('sv-tx').textContent=tx?`"${tx}"` :'';
+    document.getElementById('sv-rx').textContent=rx||'';
+    document.getElementById('sv-ax').textContent=ax||'';
+    fb.classList.add('svshow');
+    clearTimeout(htimer);
+    htimer=setTimeout(()=>fb.classList.remove('svshow'),7500);
+  }
+
+  function fmtV(n){return 'N'+Number(n||0).toLocaleString('en-NG');}
+
+  function parse(text){
+    const t=text.toLowerCase().trim();
+
+    // Payment: "record payment of 15000 for Amaka" / "pay 20000 for Emeka"
+    const payM=t.match(/(?:record\s+)?(?:payment|pay)\s+(?:of\s+)?(?:N)?([\d,]+)\s+(?:for\s+)?(.+)/i);
+    if(payM) return{intent:'pay',amount:parseInt(payM[1].replace(/,/g,'')),name:payM[2].trim()};
+
+    // Collection queries
+    if(t.match(/how\s+much\s+(have\s+we\s+)?collected|collection\s+(rate|percentage|progress)/i))
+      return{intent:'collection'};
+
+    // Who owes
+    if(t.match(/who\s+(owes|hasn.t\s+paid|is\s+owing)/i)) return{intent:'owing'};
+
+    // Outstanding total
+    if(t.match(/how\s+much\s+(is\s+)?(owed|outstanding|remaining)/i)) return{intent:'outstanding'};
+
+    // Student count
+    if(t.match(/how\s+many\s+students|total\s+students/i)) return{intent:'students'};
+
+    // Send reminders
+    if(t.match(/send\s+reminders?|remind\s+(all\s+)?(owing\s+)?parents/i)) return{intent:'reminders'};
+
+    // Mark attendance: "mark Amaka present" / "Emeka is absent today"
+    const attM=t.match(/mark\s+(.+?)\s+(present|absent|late)|(.+?)\s+is\s+(present|absent|late)/i);
+    if(attM){
+      return{intent:'attendance',
+        name:(attM[1]||attM[3]||'').trim(),
+        status:(attM[2]||attM[4]||'').charAt(0).toUpperCase()+(attM[2]||attM[4]||'').slice(1)};
+    }
+
+    // Navigate
+    const navM=t.match(/(?:go\s+to|open|show\s+(?:me\s+)?)(revenue|fees|students|staff|sports|arts|music|health|alumni|expenses|comms|analytics|settings|support|opportunities|scorecard)/i);
+    if(navM){
+      const m={revenue:'revenue',fees:'revenue',students:'students',staff:'staff',
+        sports:'sports',arts:'arts',music:'music',health:'health',alumni:'alumni',
+        expenses:'expenses',comms:'comms',analytics:'analytics',settings:'settings',
+        support:'support',opportunities:'opps',scorecard:'scorecard'};
+      return{intent:'nav',tab:m[navM[1].toLowerCase()]||navM[1].toLowerCase()};
+    }
+
+    if(t.match(/help|what\s+can\s+you/i)) return{intent:'help'};
+    return{intent:'unknown',raw:text};
+  }
+
+  function exec(p){
+    const students=(typeof SD!=='undefined'&&SD.students)||[];
+    const today=new Date().toISOString().split('T')[0];
+
+    switch(p.intent){
+
+      case 'pay':{
+        const matches=students.filter(s=>
+          s.name.toLowerCase().includes(p.name.toLowerCase()));
+        if(matches.length===1){
+          const s=matches[0];
+          s.paid=(s.paid||0)+p.amount;
+          if(!s.paymentHistory) s.paymentHistory=[];
+          s.paymentHistory.unshift({amount:p.amount,method:'Voice',date:today,by:(typeof userRole!=='undefined'?userRole:'Voice')});
+          if(typeof SQ!=='undefined') SQ.push('students',students);
+          const bal=Math.max(0,(s.totalFee||0)-s.paid);
+          const msg=`Recorded ${fmtV(p.amount)} for ${s.name}. ${bal<=0?'Fully paid!':'Balance: '+fmtV(bal)}`;
+          show(null,msg,'Saved ✓'); say(msg);
+          if(typeof renderRevenue==='function') renderRevenue();
+        } else if(!matches.length){
+          const m=`No student named ${p.name}. Check the name.`;
+          show(null,m); say(m);
+        } else {
+          const names=matches.map(s=>s.name).join(', ');
+          const m=`Found several: ${names}. Be more specific.`;
+          show(null,m); say(m);
+        }
+        break;
+      }
+
+      case 'collection':{
+        const exp=students.reduce((a,s)=>a+(s.totalFee||0),0);
+        const col=students.reduce((a,s)=>a+(s.paid||0),0);
+        const pct=exp>0?Math.round(col/exp*100):0;
+        const msg=`Collection is at ${pct} percent. ${fmtV(col)} of ${fmtV(exp)} collected.`;
+        show(null,msg,`Outstanding: ${fmtV(exp-col)}`); say(msg);
+        break;
+      }
+
+      case 'owing':{
+        const owing=students.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
+        if(!owing.length){const m='All students have fully paid!';show(null,m);say(m);break;}
+        if(owing.length<=4){
+          const names=owing.map(s=>`${s.name.split(' ')[0]}, ${fmtV((s.totalFee||0)-(s.paid||0))}`).join('. ');
+          const m=`${owing.length} students owe: ${names}`;
+          show(null,m); say(m);
+        } else {
+          const tot=owing.reduce((a,s)=>a+(s.totalFee||0)-(s.paid||0),0);
+          const m=`${owing.length} students owe a total of ${fmtV(tot)}. Say "send reminders" to notify them.`;
+          show(null,m); say(m);
+        }
+        break;
+      }
+
+      case 'outstanding':{
+        const tot=students.reduce((a,s)=>a+Math.max(0,(s.totalFee||0)-(s.paid||0)),0);
+        const msg=`Total outstanding is ${fmtV(tot)}.`;
+        show(null,msg); say(msg); break;
+      }
+
+      case 'students':{
+        const msg=`You have ${students.length} enrolled students.`;
+        show(null,msg); say(msg); break;
+      }
+
+      case 'reminders':{
+        if(typeof sendAllReminders==='function') sendAllReminders();
+        const ow=students.filter(s=>(s.totalFee||0)-(s.paid||0)>0).length;
+        const msg=ow?`Sending WhatsApp reminders to ${ow} parents.`:'No one is owing.';
+        show(null,msg); say(msg); break;
+      }
+
+      case 'attendance':{
+        const matches=students.filter(s=>
+          s.name.toLowerCase().includes(p.name.toLowerCase()));
+        if(matches.length===1){
+          const s=matches[0];
+          if(typeof SD!=='undefined'){
+            if(!SD.attendance) SD.attendance={};
+            if(!SD.attendance[today]) SD.attendance[today]={};
+            SD.attendance[today][s.name]=p.status;
+            if(typeof SQ!=='undefined') SQ.push('attendance',SD.attendance);
+          }
+          const msg=`Marked ${s.name} as ${p.status} today.`;
+          show(null,msg,'Saved ✓'); say(msg);
+        } else {
+          const m=matches.length===0?`No student named ${p.name}.`:'Multiple matches — use the full name.';
+          show(null,m); say(m);
+        }
+        break;
+      }
+
+      case 'nav':{
+        if(typeof go==='function') go(p.tab);
+        const msg=`Opening ${p.tab}.`;
+        show(null,msg); say(msg); break;
+      }
+
+      case 'help':{
+        const msg='Record payment of 15000 for Amaka. How much have we collected. Who owes. Send reminders. Mark Emeka present. Go to students.';
+        show(null,'🎙️ Try saying:',msg);
+        say('Some things you can say: record payment, check collections, who owes, send reminders, mark attendance, or go to any section.'); break;
+      }
+
+      default:{
+        const m=`I did not understand. Say "help" for commands.`;
+        show(p.raw||null,m); say(m);
+      }
+    }
+  }
+
+  function startL(){
+    if(!rec){
+      rec=new SR();
+      rec.lang='en-NG'; rec.continuous=false;
+      rec.interimResults=false; rec.maxAlternatives=1;
+      rec.onresult=(e)=>{
+        const spoken=e.results[0][0].transcript;
+        show(spoken,'Processing...'); exec(parse(spoken)); stopL();
+      };
+      rec.onerror=(e)=>{
+        show(null,e.error==='no-speech'?'Nothing heard. Tap and try again.':'Microphone issue. Try again.'); stopL();
+      };
+      rec.onend=()=>stopL();
+    }
+    try{
+      rec.start(); listening=true;
+      btn.classList.add('svlist'); btn.textContent='🔴';
+      show(null,'Listening... speak now');
+    }catch(e){ stopL(); }
+  }
+
+  function stopL(){
+    listening=false; btn.classList.remove('svlist'); btn.textContent='🎙️';
+    try{ rec?.stop(); }catch(e){}
+  }
+
+  btn.addEventListener('click',()=>{ if(listening) stopL(); else startL(); });
+  window.bloomSchoolVoice={start:startL,stop:stopL,say};
+  console.log('🎙️ Bloom School Voice ready.');
 })();
