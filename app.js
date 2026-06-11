@@ -8,6 +8,46 @@ try{
   console.log('✅ Firebase ready');
 }catch(e){console.error('❌ Firebase init failed:',e.message);}
 
+// ── Claude Vision OCR ─────────────────────────────────────────────────────
+// Set this key to activate Claude Vision for handwritten register OCR.
+// Get from: console.anthropic.com → API Keys
+// Without it, falls back to OCR.space free tier then Tesseract.
+const ANTHROPIC_KEY = ''; // 'sk-ant-...'
+const OCR_MODEL = 'claude-haiku-4-5-20251001';
+
+async function claudeVisionOCR(base64, mediaType) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (ANTHROPIC_KEY) headers['x-api-key'] = ANTHROPIC_KEY;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      model: OCR_MODEL, max_tokens: 2000,
+      system: `You are an OCR specialist for Nigerian handwritten school registers.
+Extract ONLY student names. Rules:
+- Image may be rotated any direction — read correctly regardless
+- Nigerian surname often FIRST (e.g. DADA Aishat = fullName "Dada Aishat")
+- Ignore serial numbers, dates, fee amounts, column headers
+- Nigerian names: Yoruba (Olayiwola, Gbelekale), Hausa (Zainab, Rasaq), Igbo (Chisom), English (Dominion, Gold)
+- Read EVERY name — do not skip unclear ones
+- Return names top to bottom as they appear
+Return ONLY valid JSON array: [{"surname":"DADA","firstname":"Aishat","fullName":"Dada Aishat"},...]
+If no names found: []`,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: 'Extract all student names from this school register photo.' }
+        ]
+      }]
+    })
+  });
+  const data = await res.json();
+  const raw = data.content?.[0]?.text || '[]';
+  try { return JSON.parse(raw.replace(/```json|```/g, '').trim()); }
+  catch { return []; }
+}
+
+
 // ── State ──────────────────────────────────────────────────────────────────
 let schoolId=null,userRole=null;
 let SD={config:{},students:[],staff:[],expenses:[],attendance:{},scores:{},affective:{},sports:{teams:{},custom:[]},arts:{gallery:[]},music:{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]};
@@ -404,7 +444,7 @@ function go(tab){
   document.querySelectorAll('.nlink').forEach(b=>b.classList.remove('on'));
   $(`sec-${tab}`).classList.add('on');
   const btn=document.querySelector(`[data-t="${tab}"]`);if(btn)btn.classList.add('on');
-  const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard};
+  const fn={revenue:renderRevenue,students:renderStudentList,staff:renderStaff,sports:loadSports,arts:renderArts,music:renderMusic,health:renderHealth,alumni:renderAlumni,expenses:renderExpenses,finance:checkFinance,comms:renderComms,analytics:renderAnalytics,security:()=>{},support:renderSupport,settings:loadSettings,opps:renderOpps,scorecard:renderScorecard,aitools:()=>{if(typeof renderAITools==='function')renderAITools();}};
   if(fn[tab])fn[tab]();
 }
 
@@ -797,79 +837,70 @@ function importStudentsFromText(f){
   })().catch(()=>alert('Could not read file. Try saving it as UTF-8 CSV.'));
 }
 
-// OCR config — set GOOGLE_VISION_KEY for best handwriting accuracy (free 1000/month)
-// Get key: console.cloud.google.com → Enable "Cloud Vision API" → Credentials → Create Key
-const GOOGLE_VISION_KEY = ''; // paste key here when ready
-
 async function importStudentsFromImage(f){
   const fbEl = $('csv-fb');
   if(fbEl) fbEl.textContent = '📸 Reading photo...';
-
   const reader = new FileReader();
   reader.onload = async ev => {
     const imgData = ev.target.result;
-    const base64  = imgData.split(',')[1];
-    let text = '';
-
-    if(navigator.onLine){
-      // ── 1st: Google Cloud Vision (best for Nigerian handwriting) ──────
-      if(GOOGLE_VISION_KEY){
-        try{
-          if(fbEl) fbEl.textContent = '📸 Reading with Google Vision...';
-          const r = await fetch(
-            `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_KEY}`,
-            { method:'POST', headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({requests:[{
-                image:{content:base64},
-                features:[{type:'DOCUMENT_TEXT_DETECTION'}]
-              }]})
-            }
-          );
-          const d = await r.json();
-          text = d.responses?.[0]?.fullTextAnnotation?.text || '';
-        }catch(e){ console.warn('Google Vision failed:', e); }
+    const b64    = imgData.split(',')[1];
+    const mime   = f.type || 'image/jpeg';
+    try {
+      // ── Claude Vision (best for Nigerian handwriting) ──────────────────
+      if(fbEl) fbEl.textContent = '📸 Aari is reading the handwriting...';
+      const names = await claudeVisionOCR(b64, mime);
+      if(names.length){
+        let count = 0;
+        const existingKeys = new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+        names.forEach(n=>{
+          const safe = (n.fullName||'').replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
+          const key  = safe.toLowerCase().replace(/[^a-z]/g,'');
+          if(safe.length > 1 && !existingKeys.has(key)){
+            SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+            existingKeys.add(key); count++;
+          }
+        });
+        await SQ.push('students',SD.students); checkTierStatus();
+        if(fbEl) fbEl.textContent = `✅ Aari found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
+        renderStudentList(); renderBanner(); renderRevenue();
+        return;
       }
+    } catch(e){ console.warn('Claude Vision OCR failed, falling back:', e); }
 
-      // ── 2nd: OCR.space free tier (no setup, handles handwriting) ─────
-      if(!text.trim()){
-        try{
-          if(fbEl) fbEl.textContent = '📸 Processing with cloud OCR...';
-          const arr=imgData.split(','); const mtype=arr[0].match(/:(.*?);/)[1];
-          const bstr=atob(arr[1]); let n=bstr.length;
-          const u8=new Uint8Array(n); while(n--) u8[n]=bstr.charCodeAt(n);
-          const blob=new Blob([u8],{type:mtype});
-          const fd=new FormData();
-          fd.append('file',blob,'register.jpg');
-          fd.append('language','eng');
-          fd.append('apikey','helloworld'); // free demo key — register at ocr.space for 25k/month free
-          fd.append('isHandwritten','true');
-          const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:fd});
-          const result=await resp.json();
-          text = result.ParsedResults?.[0]?.ParsedText || '';
-        }catch(e){ console.warn('OCR.space failed, using Tesseract:', e); }
+    // ── Fallback: OCR.space free tier ──────────────────────────────────────
+    try {
+      if(fbEl) fbEl.textContent = '📸 Processing with cloud OCR...';
+      const arr=imgData.split(','); const mtype=arr[0].match(/:(.*?);/)[1];
+      const bstr=atob(arr[1]); let n=bstr.length;
+      const u8=new Uint8Array(n); while(n--) u8[n]=bstr.charCodeAt(n);
+      const blob=new Blob([u8],{type:mtype});
+      const fd=new FormData();
+      fd.append('file',blob,'register.jpg');
+      fd.append('language','eng'); fd.append('apikey','helloworld');
+      fd.append('isHandwritten','true');
+      const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:fd});
+      const result=await resp.json();
+      const text = result.ParsedResults?.[0]?.ParsedText||'';
+      if(text.trim()){
+        const nameList = extractStudentNames(text);
+        let count=0;
+        const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+        nameList.forEach(nm=>{
+          const safe=nm.replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
+          const key=safe.toLowerCase().replace(/[^a-z]/g,'');
+          if(safe.length>1&&!existingKeys.has(key)){
+            SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+            existingKeys.add(key); count++;
+          }
+        });
+        await SQ.push('students',SD.students); checkTierStatus();
+        if(fbEl) fbEl.textContent=`✅ Found ${count} student${count!==1?'s':''} from photo.`;
+        renderStudentList(); renderBanner(); renderRevenue(); return;
       }
-    }
+    } catch(e){ console.warn('OCR.space failed, using Tesseract:', e); }
 
-    if(text.trim()){
-      // Cloud OCR succeeded — extract names
-      const names = extractStudentNames(text);
-      let count = 0;
-      const existingKeys = new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
-      names.forEach(nm=>{
-        const safe = nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
-        const key  = safe.toLowerCase().replace(/[^a-z]/g,'');
-        if(safe.length>1 && !existingKeys.has(key)){
-          SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
-          existingKeys.add(key); count++;
-        }
-      });
-      await SQ.push('students',SD.students); checkTierStatus();
-      if(fbEl) fbEl.textContent = `✅ Found ${count} student${count!==1?'s':''} from photo. Add phone/class in profiles.`;
-      renderStudentList(); renderBanner(); renderRevenue();
-    } else {
-      // ── 3rd: Tesseract.js (offline fallback, slower) ──────────────────
-      await importStudentsFromImageTesseract(imgData);
-    }
+    // ── Last resort: Tesseract (offline) ───────────────────────────────────
+    await importStudentsFromImageTesseract(imgData);
   };
   reader.onerror = () => alert('Could not read image.');
   reader.readAsDataURL(f);
@@ -885,7 +916,7 @@ async function importStudentsFromImageTesseract(imgData){
     document.head.appendChild(s);
   });
   try{
-    if(fbEl) fbEl.textContent='📸 Offline OCR loading (first time ~30s)...';
+    if(fbEl) fbEl.textContent='📸 Offline OCR loading (~30s)...';
     await loadTesseract();
     const{data:{text}}=await Tesseract.recognize(imgData,'eng',{
       logger:m=>{if(m.status==='recognizing text'&&fbEl)
@@ -895,7 +926,7 @@ async function importStudentsFromImageTesseract(imgData){
     let count=0;
     const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
     names.forEach(nm=>{
-      const safe=nm.replace(/[^a-zA-Z\s'\-\.]/g,'').replace(/\s+/g,' ').trim();
+      const safe=nm.replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
       const key=safe.toLowerCase().replace(/[^a-z]/g,'');
       if(safe.length>1&&!existingKeys.has(key)){
         SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
@@ -907,7 +938,6 @@ async function importStudentsFromImageTesseract(imgData){
     renderStudentList();renderBanner();renderRevenue();
   }catch(err){
     if(fbEl) fbEl.textContent='❌ Photo reading failed. Try a clearer image or use CSV.';
-    console.error('Tesseract OCR error:',err);
   }
 }
 
@@ -2667,261 +2697,4 @@ async function refreshPlanFromFirestore(btn){
     startApp();
     setTimeout(() => SQ.silentPull(), 2000);
   } catch(e) { console.warn('Auto-login failed:', e); }
-})();
-
-// ══════════════════════════════════════════════════════════════════════════
-// BLOOM VOICE AGENT — SCHOOL APP
-// Tap 🎙️ and speak. Works on Android Chrome.
-// "Record payment of 15000 for Amaka"  · "Who owes"  · "How much collected"
-// "Mark Emeka present"  · "Send reminders"  · "Go to students"  · "Help"
-// ══════════════════════════════════════════════════════════════════════════
-(function initBloomSchoolVoice(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const synth=window.speechSynthesis;
-  if(!SR) return;
-
-  const css=`
-    #svab{position:fixed;bottom:130px;right:14px;z-index:200;
-      width:54px;height:54px;border-radius:50%;
-      background:var(--brand,#4f46e5);color:#fff;
-      font-size:1.4rem;border:none;cursor:pointer;
-      box-shadow:0 4px 18px rgba(79,70,229,.5);
-      display:flex;align-items:center;justify-content:center;
-      transition:background .2s,transform .15s;
-      animation:svbpulse 2.5s infinite;}
-    @keyframes svbpulse{
-      0%{box-shadow:0 0 0 0 rgba(79,70,229,.5)}
-      70%{box-shadow:0 0 0 16px rgba(79,70,229,0)}
-      100%{box-shadow:0 0 0 0 rgba(79,70,229,0)}}
-    #svab.svlist{background:#ef4444!important;animation:none;
-      box-shadow:0 0 0 10px rgba(239,68,68,.3);transform:scale(1.08);}
-    #svab.svspeak{background:#10b981!important;animation:none;}
-    #svfb{position:fixed;bottom:192px;right:8px;left:8px;
-      max-width:320px;margin:0 auto;
-      background:#1e293b;color:#f1f5f9;border-radius:14px;
-      padding:12px 15px;font-size:.86rem;z-index:201;display:none;
-      box-shadow:0 8px 24px rgba(0,0,0,.35);}
-    #svfb.svshow{display:block;}
-    #svfb .svtx{font-style:italic;opacity:.6;margin-bottom:.3rem;font-size:.76rem;}
-    #svfb .svrx{font-weight:600;line-height:1.5;}
-    #svfb .svax{font-size:.71rem;color:#34d399;margin-top:.3rem;}`;
-
-  const s=document.createElement('style'); s.textContent=css;
-  document.head.appendChild(s);
-
-  const btn=document.createElement('button'); btn.id='svab'; btn.textContent='🎙️';
-  btn.title='Voice Assistant — Tap and speak';
-  document.body.appendChild(btn);
-
-  const fb=document.createElement('div'); fb.id='svfb';
-  fb.innerHTML='<div class="svtx" id="sv-tx"></div><div class="svrx" id="sv-rx"></div><div class="svax" id="sv-ax"></div>';
-  document.body.appendChild(fb);
-
-  let rec=null, listening=false, htimer=null;
-
-  function say(text){
-    if(!synth)return; synth.cancel();
-    const u=new SpeechSynthesisUtterance(text);
-    u.lang='en-NG'; u.rate=0.93;
-    btn.classList.add('svspeak');
-    u.onend=u.onerror=()=>btn.classList.remove('svspeak');
-    synth.speak(u);
-  }
-
-  function show(tx,rx,ax){
-    document.getElementById('sv-tx').textContent=tx?`"${tx}"` :'';
-    document.getElementById('sv-rx').textContent=rx||'';
-    document.getElementById('sv-ax').textContent=ax||'';
-    fb.classList.add('svshow');
-    clearTimeout(htimer);
-    htimer=setTimeout(()=>fb.classList.remove('svshow'),7500);
-  }
-
-  function fmtV(n){return 'N'+Number(n||0).toLocaleString('en-NG');}
-
-  function parse(text){
-    const t=text.toLowerCase().trim();
-
-    // Payment: "record payment of 15000 for Amaka" / "pay 20000 for Emeka"
-    const payM=t.match(/(?:record\s+)?(?:payment|pay)\s+(?:of\s+)?(?:N)?([\d,]+)\s+(?:for\s+)?(.+)/i);
-    if(payM) return{intent:'pay',amount:parseInt(payM[1].replace(/,/g,'')),name:payM[2].trim()};
-
-    // Collection queries
-    if(t.match(/how\s+much\s+(have\s+we\s+)?collected|collection\s+(rate|percentage|progress)/i))
-      return{intent:'collection'};
-
-    // Who owes
-    if(t.match(/who\s+(owes|hasn.t\s+paid|is\s+owing)/i)) return{intent:'owing'};
-
-    // Outstanding total
-    if(t.match(/how\s+much\s+(is\s+)?(owed|outstanding|remaining)/i)) return{intent:'outstanding'};
-
-    // Student count
-    if(t.match(/how\s+many\s+students|total\s+students/i)) return{intent:'students'};
-
-    // Send reminders
-    if(t.match(/send\s+reminders?|remind\s+(all\s+)?(owing\s+)?parents/i)) return{intent:'reminders'};
-
-    // Mark attendance: "mark Amaka present" / "Emeka is absent today"
-    const attM=t.match(/mark\s+(.+?)\s+(present|absent|late)|(.+?)\s+is\s+(present|absent|late)/i);
-    if(attM){
-      return{intent:'attendance',
-        name:(attM[1]||attM[3]||'').trim(),
-        status:(attM[2]||attM[4]||'').charAt(0).toUpperCase()+(attM[2]||attM[4]||'').slice(1)};
-    }
-
-    // Navigate
-    const navM=t.match(/(?:go\s+to|open|show\s+(?:me\s+)?)(revenue|fees|students|staff|sports|arts|music|health|alumni|expenses|comms|analytics|settings|support|opportunities|scorecard)/i);
-    if(navM){
-      const m={revenue:'revenue',fees:'revenue',students:'students',staff:'staff',
-        sports:'sports',arts:'arts',music:'music',health:'health',alumni:'alumni',
-        expenses:'expenses',comms:'comms',analytics:'analytics',settings:'settings',
-        support:'support',opportunities:'opps',scorecard:'scorecard'};
-      return{intent:'nav',tab:m[navM[1].toLowerCase()]||navM[1].toLowerCase()};
-    }
-
-    if(t.match(/help|what\s+can\s+you/i)) return{intent:'help'};
-    return{intent:'unknown',raw:text};
-  }
-
-  function exec(p){
-    const students=(typeof SD!=='undefined'&&SD.students)||[];
-    const today=new Date().toISOString().split('T')[0];
-
-    switch(p.intent){
-
-      case 'pay':{
-        const matches=students.filter(s=>
-          s.name.toLowerCase().includes(p.name.toLowerCase()));
-        if(matches.length===1){
-          const s=matches[0];
-          s.paid=(s.paid||0)+p.amount;
-          if(!s.paymentHistory) s.paymentHistory=[];
-          s.paymentHistory.unshift({amount:p.amount,method:'Voice',date:today,by:(typeof userRole!=='undefined'?userRole:'Voice')});
-          if(typeof SQ!=='undefined') SQ.push('students',students);
-          const bal=Math.max(0,(s.totalFee||0)-s.paid);
-          const msg=`Recorded ${fmtV(p.amount)} for ${s.name}. ${bal<=0?'Fully paid!':'Balance: '+fmtV(bal)}`;
-          show(null,msg,'Saved ✓'); say(msg);
-          if(typeof renderRevenue==='function') renderRevenue();
-        } else if(!matches.length){
-          const m=`No student named ${p.name}. Check the name.`;
-          show(null,m); say(m);
-        } else {
-          const names=matches.map(s=>s.name).join(', ');
-          const m=`Found several: ${names}. Be more specific.`;
-          show(null,m); say(m);
-        }
-        break;
-      }
-
-      case 'collection':{
-        const exp=students.reduce((a,s)=>a+(s.totalFee||0),0);
-        const col=students.reduce((a,s)=>a+(s.paid||0),0);
-        const pct=exp>0?Math.round(col/exp*100):0;
-        const msg=`Collection is at ${pct} percent. ${fmtV(col)} of ${fmtV(exp)} collected.`;
-        show(null,msg,`Outstanding: ${fmtV(exp-col)}`); say(msg);
-        break;
-      }
-
-      case 'owing':{
-        const owing=students.filter(s=>(s.totalFee||0)-(s.paid||0)>0);
-        if(!owing.length){const m='All students have fully paid!';show(null,m);say(m);break;}
-        if(owing.length<=4){
-          const names=owing.map(s=>`${s.name.split(' ')[0]}, ${fmtV((s.totalFee||0)-(s.paid||0))}`).join('. ');
-          const m=`${owing.length} students owe: ${names}`;
-          show(null,m); say(m);
-        } else {
-          const tot=owing.reduce((a,s)=>a+(s.totalFee||0)-(s.paid||0),0);
-          const m=`${owing.length} students owe a total of ${fmtV(tot)}. Say "send reminders" to notify them.`;
-          show(null,m); say(m);
-        }
-        break;
-      }
-
-      case 'outstanding':{
-        const tot=students.reduce((a,s)=>a+Math.max(0,(s.totalFee||0)-(s.paid||0)),0);
-        const msg=`Total outstanding is ${fmtV(tot)}.`;
-        show(null,msg); say(msg); break;
-      }
-
-      case 'students':{
-        const msg=`You have ${students.length} enrolled students.`;
-        show(null,msg); say(msg); break;
-      }
-
-      case 'reminders':{
-        if(typeof sendAllReminders==='function') sendAllReminders();
-        const ow=students.filter(s=>(s.totalFee||0)-(s.paid||0)>0).length;
-        const msg=ow?`Sending WhatsApp reminders to ${ow} parents.`:'No one is owing.';
-        show(null,msg); say(msg); break;
-      }
-
-      case 'attendance':{
-        const matches=students.filter(s=>
-          s.name.toLowerCase().includes(p.name.toLowerCase()));
-        if(matches.length===1){
-          const s=matches[0];
-          if(typeof SD!=='undefined'){
-            if(!SD.attendance) SD.attendance={};
-            if(!SD.attendance[today]) SD.attendance[today]={};
-            SD.attendance[today][s.name]=p.status;
-            if(typeof SQ!=='undefined') SQ.push('attendance',SD.attendance);
-          }
-          const msg=`Marked ${s.name} as ${p.status} today.`;
-          show(null,msg,'Saved ✓'); say(msg);
-        } else {
-          const m=matches.length===0?`No student named ${p.name}.`:'Multiple matches — use the full name.';
-          show(null,m); say(m);
-        }
-        break;
-      }
-
-      case 'nav':{
-        if(typeof go==='function') go(p.tab);
-        const msg=`Opening ${p.tab}.`;
-        show(null,msg); say(msg); break;
-      }
-
-      case 'help':{
-        const msg='Record payment of 15000 for Amaka. How much have we collected. Who owes. Send reminders. Mark Emeka present. Go to students.';
-        show(null,'🎙️ Try saying:',msg);
-        say('Some things you can say: record payment, check collections, who owes, send reminders, mark attendance, or go to any section.'); break;
-      }
-
-      default:{
-        const m=`I did not understand. Say "help" for commands.`;
-        show(p.raw||null,m); say(m);
-      }
-    }
-  }
-
-  function startL(){
-    if(!rec){
-      rec=new SR();
-      rec.lang='en-NG'; rec.continuous=false;
-      rec.interimResults=false; rec.maxAlternatives=1;
-      rec.onresult=(e)=>{
-        const spoken=e.results[0][0].transcript;
-        show(spoken,'Processing...'); exec(parse(spoken)); stopL();
-      };
-      rec.onerror=(e)=>{
-        show(null,e.error==='no-speech'?'Nothing heard. Tap and try again.':'Microphone issue. Try again.'); stopL();
-      };
-      rec.onend=()=>stopL();
-    }
-    try{
-      rec.start(); listening=true;
-      btn.classList.add('svlist'); btn.textContent='🔴';
-      show(null,'Listening... speak now');
-    }catch(e){ stopL(); }
-  }
-
-  function stopL(){
-    listening=false; btn.classList.remove('svlist'); btn.textContent='🎙️';
-    try{ rec?.stop(); }catch(e){}
-  }
-
-  btn.addEventListener('click',()=>{ if(listening) stopL(); else startL(); });
-  window.bloomSchoolVoice={start:startL,stop:stopL,say};
-  console.log('🎙️ Bloom School Voice ready.');
 })();
