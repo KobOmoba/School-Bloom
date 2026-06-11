@@ -51,7 +51,9 @@ If no names found: []`,
 // ── State ──────────────────────────────────────────────────────────────────
 let schoolId=null,userRole=null,currentStaff=null;
 
-// ── Staff Login Step (RBAC step 2) ────────────────────────────────────────
+// ── Login Step 2: Who are you? ────────────────────────────────────────────
+// Principal → password only (from WhatsApp onboarding message)
+// Staff     → email + password
 function showStaffLoginStep(){
   const loginDiv=$('login');
   if(loginDiv) loginDiv.style.display='none';
@@ -61,79 +63,158 @@ function showStaffLoginStep(){
     staffDiv.id='staff-login';
     document.body.appendChild(staffDiv);
   }
-  staffDiv.style.cssText='display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);';
+  const school=SD.config.schoolName||'Educational Bloom';
+  staffDiv.style.cssText='display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);padding:1rem;box-sizing:border-box;';
   staffDiv.innerHTML=`
-    <div style="background:var(--s1);border-radius:16px;padding:2rem;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.25);">
-      <div style="text-align:center;margin-bottom:1.5rem;">
-        <div style="font-size:2rem;margin-bottom:0.5rem;">👤</div>
-        <div style="font-weight:800;font-size:1.1rem;color:var(--text);">Staff Login</div>
-        <div style="font-size:0.78rem;color:var(--sub);margin-top:4px;">${SD.config.schoolName||'Educational Bloom'}</div>
+    <div style="background:var(--s1);border-radius:16px;padding:1.6rem;max-width:380px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+
+      <div style="text-align:center;margin-bottom:1.2rem;">
+        <div style="font-size:1.8rem;margin-bottom:0.3rem;">🏫</div>
+        <div style="font-weight:800;font-size:1.05rem;color:var(--text);">${school}</div>
+        <div style="font-size:0.76rem;color:var(--sub);margin-top:2px;">Who is logging in?</div>
       </div>
-      <label style="font-size:0.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">Email Address</label>
-      <input id="sl-email" type="email" placeholder="yourname@school.edu.ng"
-        style="width:100%;margin-bottom:0.75rem;padding:10px 12px;border:1px solid var(--border);
-        border-radius:8px;background:var(--bg);color:var(--text);font-size:0.88rem;
-        font-family:inherit;outline:none;box-sizing:border-box;">
-      <label style="font-size:0.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">Password</label>
-      <div style="position:relative;margin-bottom:1rem;">
-        <input id="sl-pwd" type="password" placeholder="Your password"
-          style="width:100%;padding:10px 40px 10px 12px;border:1px solid var(--border);
+
+      <!-- Role selector tabs -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1.2rem;">
+        <button id="sl-tab-principal" onclick="slSetTab('principal')"
+          style="padding:10px 6px;border-radius:10px;border:2px solid var(--brand);
+          background:var(--brand);color:#fff;font-size:0.82rem;font-weight:700;
+          cursor:pointer;font-family:inherit;">
+          🎓 Principal
+        </button>
+        <button id="sl-tab-staff" onclick="slSetTab('staff')"
+          style="padding:10px 6px;border-radius:10px;border:2px solid var(--border);
+          background:transparent;color:var(--sub);font-size:0.82rem;font-weight:700;
+          cursor:pointer;font-family:inherit;">
+          👤 Staff Member
+        </button>
+      </div>
+
+      <!-- PRINCIPAL PANEL: password only -->
+      <div id="sl-panel-principal">
+        <div style="background:rgba(79,70,229,.07);border:1px solid rgba(79,70,229,.2);
+          border-radius:8px;padding:8px 12px;font-size:0.75rem;color:var(--sub);margin-bottom:0.9rem;">
+          Use the <strong>school password</strong> sent to you via WhatsApp when your account was activated.
+        </div>
+        <label style="font-size:0.76rem;font-weight:700;color:var(--sub);display:block;margin-bottom:4px;">School Password</label>
+        <div style="position:relative;margin-bottom:1rem;">
+          <input id="sl-p-pwd" type="password" placeholder="e.g. bloom2026"
+            style="width:100%;padding:11px 40px 11px 12px;border:1px solid var(--border);
+            border-radius:8px;background:var(--bg);color:var(--text);font-size:0.9rem;
+            font-family:inherit;outline:none;box-sizing:border-box;">
+          <button onclick="toggleEye('sl-p-pwd',this)" type="button"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+            background:none;border:none;cursor:pointer;font-size:1rem;">👁️</button>
+        </div>
+        <div id="sl-p-err" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
+          border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#ef4444;margin-bottom:0.75rem;"></div>
+        <button onclick="doPrincipalLogin()"
+          style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:10px;
+          padding:13px;font-size:0.92rem;font-weight:800;cursor:pointer;font-family:inherit;">
+          ▶ Enter as Principal
+        </button>
+      </div>
+
+      <!-- STAFF PANEL: email + password -->
+      <div id="sl-panel-staff" style="display:none;">
+        <label style="font-size:0.76rem;font-weight:700;color:var(--sub);display:block;margin-bottom:4px;">Email Address</label>
+        <input id="sl-email" type="email" placeholder="yourname@school.edu.ng"
+          style="width:100%;margin-bottom:0.75rem;padding:11px 12px;border:1px solid var(--border);
           border-radius:8px;background:var(--bg);color:var(--text);font-size:0.88rem;
           font-family:inherit;outline:none;box-sizing:border-box;">
-        <button onclick="toggleEye('sl-pwd',this)" type="button"
-          style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
-          background:none;border:none;cursor:pointer;font-size:1rem;">👁️</button>
+        <label style="font-size:0.76rem;font-weight:700;color:var(--sub);display:block;margin-bottom:4px;">Password</label>
+        <div style="position:relative;margin-bottom:1rem;">
+          <input id="sl-pwd" type="password" placeholder="Your password"
+            style="width:100%;padding:11px 40px 11px 12px;border:1px solid var(--border);
+            border-radius:8px;background:var(--bg);color:var(--text);font-size:0.88rem;
+            font-family:inherit;outline:none;box-sizing:border-box;">
+          <button onclick="toggleEye('sl-pwd',this)" type="button"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+            background:none;border:none;cursor:pointer;font-size:1rem;">👁️</button>
+        </div>
+        <div id="sl-s-err" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
+          border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#ef4444;margin-bottom:0.75rem;"></div>
+        <button onclick="doStaffLogin()"
+          style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:10px;
+          padding:13px;font-size:0.92rem;font-weight:800;cursor:pointer;font-family:inherit;">
+          ▶ Enter as Staff
+        </button>
       </div>
-      <div id="sl-err" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
-        border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#ef4444;margin-bottom:0.75rem;"></div>
-      <button onclick="doStaffLogin()"
-        style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:8px;
-        padding:12px;font-size:0.9rem;font-weight:700;cursor:pointer;font-family:inherit;">
-        ▶ Enter Portal
-      </button>
+
       <button onclick="location.reload()"
         style="width:100%;background:transparent;color:var(--sub);border:1px solid var(--border);
-        border-radius:8px;padding:10px;font-size:0.82rem;cursor:pointer;
-        margin-top:0.5rem;font-family:inherit;">
+        border-radius:8px;padding:10px;font-size:0.8rem;cursor:pointer;
+        margin-top:0.75rem;font-family:inherit;">
         ← Change School ID
       </button>
-      <div style="text-align:center;margin-top:1rem;font-size:0.72rem;color:var(--sub);">
-        Can't log in? Contact your Principal or Bayo: <strong>+234 814 507 3941</strong>
+      <div style="text-align:center;margin-top:0.85rem;font-size:0.7rem;color:var(--sub);">
+        Need help? Call Bayo: <strong style="color:var(--text);">+234 814 507 3941</strong>
       </div>
     </div>`;
-  // Allow Enter key to submit
+
   setTimeout(()=>{
-    const pwdEl=$('sl-pwd');
-    if(pwdEl) pwdEl.addEventListener('keydown',e=>{ if(e.key==='Enter') doStaffLogin(); });
-    const emEl=$('sl-email');
-    if(emEl) emEl.addEventListener('keydown',e=>{ if(e.key==='Enter') $('sl-pwd')?.focus(); });
-    $('sl-email')?.focus();
+    $('sl-p-pwd')?.addEventListener('keydown',e=>{ if(e.key==='Enter') doPrincipalLogin(); });
+    $('sl-pwd')?.addEventListener('keydown',e=>{ if(e.key==='Enter') doStaffLogin(); });
+    $('sl-email')?.addEventListener('keydown',e=>{ if(e.key==='Enter') $('sl-pwd')?.focus(); });
+    $('sl-p-pwd')?.focus();
   },100);
 }
 
+// Switch between Principal / Staff tabs
+function slSetTab(tab){
+  const isPrincipal = tab==='principal';
+  $('sl-panel-principal').style.display = isPrincipal?'block':'none';
+  $('sl-panel-staff').style.display     = isPrincipal?'none':'block';
+  $('sl-tab-principal').style.background    = isPrincipal?'var(--brand)':'transparent';
+  $('sl-tab-principal').style.color         = isPrincipal?'#fff':'var(--sub)';
+  $('sl-tab-principal').style.borderColor   = isPrincipal?'var(--brand)':'var(--border)';
+  $('sl-tab-staff').style.background        = isPrincipal?'transparent':'var(--brand)';
+  $('sl-tab-staff').style.color             = isPrincipal?'var(--sub)':'#fff';
+  $('sl-tab-staff').style.borderColor       = isPrincipal?'var(--border)':'var(--brand)';
+  setTimeout(()=>{ isPrincipal?$('sl-p-pwd')?.focus():$('sl-email')?.focus(); },80);
+}
+
+// Principal logs in with school password only — no email needed
+function doPrincipalLogin(){
+  const pwd=($('sl-p-pwd')?.value||'').trim();
+  const errEl=$('sl-p-err');
+  if(!pwd){ if(errEl){errEl.textContent='Enter your school password.';errEl.style.display='block';} return; }
+  // Find Principal staff record — match by role AND password
+  const principal=(SD.staff||[]).find(s=>
+    s.role==='Principal' && (s.password||'')=== pwd
+  );
+  // Fallback: any staff record whose password matches (catches legacy single-staff setups)
+  const anyMatch = principal || (SD.staff||[]).find(s=>(s.password||'')===pwd);
+  if(!anyMatch){
+    if(errEl){errEl.textContent='Incorrect password. Check the WhatsApp message from your agent, or call Bayo on +234 814 507 3941.';errEl.style.display='block';}
+    return;
+  }
+  currentStaff=anyMatch;
+  userRole='Principal'; // Principal login always grants Principal role
+  localStorage.setItem(`p_${schoolId}_staffSession`,JSON.stringify({...anyMatch,role:'Principal',schoolId}));
+  _saveAuth(schoolId,anyMatch.email||'');
+  const div=$('staff-login'); if(div) div.style.display='none';
+  startApp();
+}
+
+// Staff logs in with email + password
 function doStaffLogin(){
   const email=($('sl-email')?.value||'').trim().toLowerCase();
   const pwd=$('sl-pwd')?.value||'';
-  const errEl=$('sl-err');
-  if(!email||!pwd){
-    if(errEl){errEl.textContent='Enter your email and password.';errEl.style.display='block';}
-    return;
-  }
-  // Match against SD.staff (email + password)
+  const errEl=$('sl-s-err');
+  if(!email||!pwd){ if(errEl){errEl.textContent='Enter your email and password.';errEl.style.display='block';} return; }
   const staff=(SD.staff||[]).find(s=>
     (s.email||'').trim().toLowerCase()===email && (s.password||'')===pwd
   );
   if(!staff){
-    if(errEl){errEl.textContent='Email or password incorrect. Ask your Principal to check your staff record.';errEl.style.display='block';}
+    if(errEl){errEl.textContent='Email or password not recognised. Ask your Principal to check your staff record.';errEl.style.display='block';}
     return;
   }
   currentStaff=staff;
-  userRole=staff.role||'Principal';
-  // Cache staff session
+  userRole=staff.role||'Class Teacher';
   localStorage.setItem(`p_${schoolId}_staffSession`,JSON.stringify({...staff,schoolId}));
   _saveAuth(schoolId,email);
-  const staffDiv=$('staff-login');
-  if(staffDiv) staffDiv.style.display='none';
+  const div=$('staff-login'); if(div) div.style.display='none';
   startApp();
 }
 let SD={config:{},students:[],staff:[],expenses:[],attendance:{},scores:{},affective:{},sports:{teams:{},custom:[]},arts:{gallery:[]},music:{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]};
