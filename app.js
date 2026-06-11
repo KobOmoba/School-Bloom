@@ -49,7 +49,93 @@ If no names found: []`,
 
 
 // ── State ──────────────────────────────────────────────────────────────────
-let schoolId=null,userRole=null;
+let schoolId=null,userRole=null,currentStaff=null;
+
+// ── Staff Login Step (RBAC step 2) ────────────────────────────────────────
+function showStaffLoginStep(){
+  const loginDiv=$('login');
+  if(loginDiv) loginDiv.style.display='none';
+  let staffDiv=$('staff-login');
+  if(!staffDiv){
+    staffDiv=document.createElement('div');
+    staffDiv.id='staff-login';
+    document.body.appendChild(staffDiv);
+  }
+  staffDiv.style.cssText='display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);';
+  staffDiv.innerHTML=`
+    <div style="background:var(--s1);border-radius:16px;padding:2rem;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+      <div style="text-align:center;margin-bottom:1.5rem;">
+        <div style="font-size:2rem;margin-bottom:0.5rem;">👤</div>
+        <div style="font-weight:800;font-size:1.1rem;color:var(--text);">Staff Login</div>
+        <div style="font-size:0.78rem;color:var(--sub);margin-top:4px;">${SD.config.schoolName||'Educational Bloom'}</div>
+      </div>
+      <label style="font-size:0.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">Email Address</label>
+      <input id="sl-email" type="email" placeholder="yourname@school.edu.ng"
+        style="width:100%;margin-bottom:0.75rem;padding:10px 12px;border:1px solid var(--border);
+        border-radius:8px;background:var(--bg);color:var(--text);font-size:0.88rem;
+        font-family:inherit;outline:none;box-sizing:border-box;">
+      <label style="font-size:0.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:4px;">Password</label>
+      <div style="position:relative;margin-bottom:1rem;">
+        <input id="sl-pwd" type="password" placeholder="Your password"
+          style="width:100%;padding:10px 40px 10px 12px;border:1px solid var(--border);
+          border-radius:8px;background:var(--bg);color:var(--text);font-size:0.88rem;
+          font-family:inherit;outline:none;box-sizing:border-box;">
+        <button onclick="toggleEye('sl-pwd',this)" type="button"
+          style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;font-size:1rem;">👁️</button>
+      </div>
+      <div id="sl-err" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
+        border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#ef4444;margin-bottom:0.75rem;"></div>
+      <button onclick="doStaffLogin()"
+        style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:8px;
+        padding:12px;font-size:0.9rem;font-weight:700;cursor:pointer;font-family:inherit;">
+        ▶ Enter Portal
+      </button>
+      <button onclick="location.reload()"
+        style="width:100%;background:transparent;color:var(--sub);border:1px solid var(--border);
+        border-radius:8px;padding:10px;font-size:0.82rem;cursor:pointer;
+        margin-top:0.5rem;font-family:inherit;">
+        ← Change School ID
+      </button>
+      <div style="text-align:center;margin-top:1rem;font-size:0.72rem;color:var(--sub);">
+        Can't log in? Contact your Principal or Bayo: <strong>+234 814 507 3941</strong>
+      </div>
+    </div>`;
+  // Allow Enter key to submit
+  setTimeout(()=>{
+    const pwdEl=$('sl-pwd');
+    if(pwdEl) pwdEl.addEventListener('keydown',e=>{ if(e.key==='Enter') doStaffLogin(); });
+    const emEl=$('sl-email');
+    if(emEl) emEl.addEventListener('keydown',e=>{ if(e.key==='Enter') $('sl-pwd')?.focus(); });
+    $('sl-email')?.focus();
+  },100);
+}
+
+function doStaffLogin(){
+  const email=($('sl-email')?.value||'').trim().toLowerCase();
+  const pwd=$('sl-pwd')?.value||'';
+  const errEl=$('sl-err');
+  if(!email||!pwd){
+    if(errEl){errEl.textContent='Enter your email and password.';errEl.style.display='block';}
+    return;
+  }
+  // Match against SD.staff (email + password)
+  const staff=(SD.staff||[]).find(s=>
+    (s.email||'').trim().toLowerCase()===email && (s.password||'')===pwd
+  );
+  if(!staff){
+    if(errEl){errEl.textContent='Email or password incorrect. Ask your Principal to check your staff record.';errEl.style.display='block';}
+    return;
+  }
+  currentStaff=staff;
+  userRole=staff.role||'Principal';
+  // Cache staff session
+  localStorage.setItem(`p_${schoolId}_staffSession`,JSON.stringify({...staff,schoolId}));
+  _saveAuth(schoolId,email);
+  const staffDiv=$('staff-login');
+  if(staffDiv) staffDiv.style.display='none';
+  startApp();
+}
 let SD={config:{},students:[],staff:[],expenses:[],attendance:{},scores:{},affective:{},sports:{teams:{},custom:[]},arts:{gallery:[]},music:{practiceLogs:[],instruments:[{name:'Keyboard',status:'available'},{name:'Guitar',status:'available'},{name:'Talking Drum',status:'available'}]},health:[],alumni:[],socialPages:[],commsLog:[],opportunities:[]};
 let activeIdx=null,activeTab='fees',currentSport='football';
 
