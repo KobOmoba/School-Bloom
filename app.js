@@ -146,10 +146,21 @@ const SQ={
     const syncOk=netOk&&!!db;
     const el=$('sync');
     if(el){
-      // Show Online if internet is available — even if Firestore is unavailable
-      el.className='sdot '+(netOk?this.q.length?'sd-sync':'sd-on':'sd-off');
-      el.textContent=netOk?this.q.length?'● Syncing':'● Online':'● Offline';
+      if(netOk&&this.q.length){ el.className='sdot sd-sync'; el.textContent='● Syncing'; }
+      else if(netOk){           el.className='sdot sd-on';   el.textContent='● Online';  }
+      else {
+        // Don't show Offline immediately — Android gives false negatives on load.
+        // Only show Offline if we've been disconnected for more than 4 seconds.
+        if(!this._offlineSince) this._offlineSince=Date.now();
+        const secs=Math.round((Date.now()-this._offlineSince)/1000);
+        if(secs<4){
+          el.className='sdot sd-sync'; el.textContent='● Connecting...';
+        } else {
+          el.className='sdot sd-off'; el.textContent='● Offline';
+        }
+      }
     }
+    if(netOk) this._offlineSince=null; // reset on next online ping
     if(syncOk&&this.q.length)this.flush();
   },
   async flush(){
@@ -500,12 +511,28 @@ function startApp(){
   $('planBadge').textContent=isPrem?'PREMIUM ✨':'BASIC';
   $('planBadge').className='plan-badge '+(isPrem?'plan-premium':'plan-basic');
   applyRoleRestrictions();
+
+  // Clear "Loading..." placeholder immediately — even with zero data it shows correct state
+  const bannerSub=$('banner-sub');
+  if(bannerSub){
+    const cnt=(SD.students||[]).length;
+    bannerSub.textContent=cnt>0?`${cnt} student${cnt!==1?'s':''} enrolled`:'No students yet — add your first student';
+  }
+
   SQ.ping();
   // Route to best first tab for this role
   const firstTabs={Principal:'revenue',Bursar:'revenue','Class Teacher':'students','Subject Teacher':'scorecard'};
   go(firstTabs[userRole]||'revenue');
   setTimeout(()=>SQ.flush(),500);
   setTimeout(()=>SQ.silentPull(),2000);
+
+  // Android navigator.onLine gives false negatives on page load.
+  // Re-check connectivity at 1s, 3s, 6s — updates the dot as soon as Android confirms internet.
+  [1000,3000,6000].forEach(ms=>setTimeout(()=>{
+    SQ.ping();
+    if(navigator.onLine && SQ.q.length) SQ.flush();
+    if(navigator.onLine && ms===6000) SQ.silentPull();
+  }, ms));
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────
