@@ -64,7 +64,7 @@ function showStaffLoginStep(){
     document.body.appendChild(staffDiv);
   }
   const school=SD.config.schoolName||'Educational Bloom';
-  staffDiv.style.cssText='display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);padding:1rem;box-sizing:border-box;';
+  staffDiv.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:1rem;box-sizing:border-box;overflow-y:auto;';
   staffDiv.innerHTML=`
     <div style="background:var(--s1);border-radius:16px;padding:1.6rem;max-width:380px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
 
