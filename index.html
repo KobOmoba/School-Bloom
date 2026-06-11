@@ -129,27 +129,76 @@ function toggleEye(inputId, btn) {
 
 
 <!-- STAFF LOGIN — Step 2: shown after School ID is verified and staff exist -->
-<div id="staff-login" style="display:none;position:fixed;inset:0;background:radial-gradient(ellipse at 30% 20%,#0f2847 0%,#050d18 60%);display:none;align-items:center;justify-content:center;padding:1.5rem;z-index:200;">
-  <div class="lbox">
-    <div class="lbox-logo">🌸 Who are you?</div>
-    <div class="lbox-sub" id="sl-school-name" style="margin-bottom:0.5rem;">Educational Bloom Portal</div>
-    <p style="font-size:0.8rem;color:var(--sub);margin-bottom:1.25rem;">Your School ID is verified. Now enter your staff login to continue.</p>
-    <label>Your Email</label>
-    <input type="email" id="sl-email" placeholder="e.g. teacher@school.edu.ng" onkeydown="if(event.key==='Enter')document.getElementById('sl-pwd').focus()">
-    <label>Your Password</label>
-    <div class="pwd-wrap">
-      <input type="password" id="sl-pwd" placeholder="Your staff password" onkeydown="if(event.key==='Enter')doStaffLogin()">
-      <button type="button" class="eye-btn" onclick="toggleEye('sl-pwd',this)" tabindex="-1">👁️</button>
+<div id="staff-login" style="display:none;position:fixed;inset:0;z-index:9999;background:radial-gradient(ellipse at 30% 20%,#0f2847 0%,#050d18 60%);align-items:center;justify-content:center;padding:1.5rem;">
+  <div class="lbox" style="width:100%;max-width:380px;">
+
+    <!-- School name -->
+    <div class="lbox-logo" style="font-size:1rem;margin-bottom:0.2rem;">🏫 <span id="sl-school-name">Educational Bloom</span></div>
+    <div class="lbox-sub" style="margin-bottom:1rem;">Who is logging in?</div>
+
+    <!-- Role tabs -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1.2rem;">
+      <button id="sl-tab-p" type="button" onclick="slSetTab('principal')"
+        style="padding:10px 6px;border-radius:10px;border:2px solid var(--brand);
+        background:var(--brand);color:#fff;font-size:0.82rem;font-weight:700;cursor:pointer;font-family:inherit;">
+        🎓 Principal
+      </button>
+      <button id="sl-tab-s" type="button" onclick="slSetTab('staff')"
+        style="padding:10px 6px;border-radius:10px;border:2px solid var(--border);
+        background:transparent;color:var(--sub);font-size:0.82rem;font-weight:700;cursor:pointer;font-family:inherit;">
+        👤 Staff
+      </button>
     </div>
-    <button class="btn-brand" onclick="doStaffLogin()" style="margin-top:0.5rem;">▶ Enter as Staff</button>
-    <div id="sl-err" class="err" style="display:none;margin-top:0.4rem;"></div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:0.75rem;">
-      <div style="flex:1;height:1px;background:var(--border);"></div>
-      <span style="font-size:0.7rem;color:var(--sub);">or</span>
-      <div style="flex:1;height:1px;background:var(--border);"></div>
+
+    <!-- PRINCIPAL panel -->
+    <div id="sl-panel-p" style="display:block;">
+      <div style="background:rgba(79,70,229,.12);border:1px solid rgba(79,70,229,.3);border-radius:8px;
+        padding:9px 12px;font-size:0.74rem;color:#a5b4fc;margin-bottom:0.9rem;line-height:1.5;">
+        Enter the <strong style="color:#fff;">school password</strong> from the WhatsApp your agent sent you.<br>
+        <span style="color:#34d399;font-weight:700;">Default: bloom2026</span>
+      </div>
+      <label style="font-size:0.76rem;font-weight:700;color:var(--sub);display:block;margin-bottom:4px;">School Password</label>
+      <div class="pwd-wrap" style="margin-bottom:0.5rem;">
+        <input type="password" id="sl-p-pwd" placeholder="e.g. bloom2026"
+          autocomplete="current-password" inputmode="text"
+          onkeydown="if(event.key==='Enter')doPrincipalLogin()">
+        <button type="button" class="eye-btn" onclick="toggleEye('sl-p-pwd',this)" tabindex="-1">👁️</button>
+      </div>
+      <div style="text-align:right;margin-bottom:0.8rem;">
+        <span onclick="slForgotPassword()" style="font-size:0.71rem;color:#818cf8;cursor:pointer;text-decoration:underline;">
+          Forgot password? Contact agent →
+        </span>
+      </div>
+      <div id="sl-p-err" class="err" style="display:none;margin-bottom:0.6rem;"></div>
+      <button type="button" class="btn-brand" onclick="doPrincipalLogin()">▶ Enter as Principal</button>
     </div>
-    <button type="button" onclick="loginAsPrincipal()" style="width:100%;background:transparent;border:1.5px solid var(--border);border-radius:10px;padding:0.6rem;font-size:0.82rem;color:var(--sub);cursor:pointer;font-weight:600;margin-top:0.5rem;">👑 Enter as Principal</button>
-    <button type="button" onclick="backToSchoolLogin()" style="width:100%;background:transparent;border:none;padding:0.4rem;font-size:0.78rem;color:var(--sub);cursor:pointer;margin-top:0.3rem;">← Change School ID</button>
+
+    <!-- STAFF panel -->
+    <div id="sl-panel-s" style="display:none;">
+      <label>Staff Email</label>
+      <input type="email" id="sl-email" placeholder="e.g. teacher@school.edu.ng"
+        autocomplete="email"
+        onkeydown="if(event.key==='Enter')document.getElementById('sl-pwd').focus()">
+      <label>Password</label>
+      <div class="pwd-wrap">
+        <input type="password" id="sl-pwd" placeholder="Your staff password"
+          autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')doStaffLogin()">
+        <button type="button" class="eye-btn" onclick="toggleEye('sl-pwd',this)" tabindex="-1">👁️</button>
+      </div>
+      <div id="sl-s-err" class="err" style="display:none;margin-top:0.3rem;"></div>
+      <button type="button" class="btn-brand" onclick="doStaffLogin()" style="margin-top:0.6rem;">▶ Enter as Staff</button>
+    </div>
+
+    <!-- Back -->
+    <button type="button" onclick="location.reload()"
+      style="width:100%;background:transparent;border:1px solid var(--border);border-radius:10px;
+      padding:10px;font-size:0.8rem;color:var(--sub);cursor:pointer;margin-top:0.75rem;font-family:inherit;">
+      ← Change School ID
+    </button>
+    <div style="text-align:center;margin-top:0.7rem;font-size:0.7rem;color:var(--sub);">
+      Need help? <strong style="color:var(--text);">+234 814 507 3941</strong>
+    </div>
   </div>
 </div>
 
