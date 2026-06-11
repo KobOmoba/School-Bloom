@@ -588,6 +588,186 @@ function toggleEye(inputId, btn) {
       </div>
     </section>
 
+
+  <!-- ══════════════ AI TOOLS SUITE ══════════════ -->
+  <section id="sec-aitools" class="sec">
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:1rem;">
+
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#4B0082,#6E1F8B);padding:14px 16px;">
+        <div style="color:#fff;font-weight:800;font-size:1rem;">🤖 AI Tools Suite</div>
+        <div style="color:#DDD6FE;font-size:0.74rem;margin-top:2px;">
+          4 AI agents powered by Anthropic · EduBloom Premium
+        </div>
+      </div>
+
+      <!-- Note about API key -->
+      <div id="ai-key-notice" style="background:#fffbeb;border-bottom:1px solid #fcd34d;padding:8px 14px;font-size:0.74rem;color:#92400e;display:none;">
+        ⚡ Insert your Anthropic API key in <code>ANTHROPIC_KEY</code> at the top of this section to activate AI features.
+      </div>
+
+      <!-- Sub-tabs -->
+      <div style="display:flex;overflow-x:auto;background:var(--s1);border-bottom:1px solid var(--border);scrollbar-width:none;">
+        <button class="ai-stab active" onclick="aitab('onboard')" id="at-onboard"
+          style="flex:1;min-width:70px;padding:9px 6px;border:none;cursor:pointer;
+          background:transparent;font-size:0.74rem;font-weight:700;color:var(--text);
+          border-bottom:2px solid #4B0082;font-family:inherit;white-space:nowrap;">
+          🏫 Onboard</button>
+        <button class="ai-stab" onclick="aitab('finance')" id="at-finance"
+          style="flex:1;min-width:70px;padding:9px 6px;border:none;cursor:pointer;
+          background:transparent;font-size:0.74rem;font-weight:700;color:var(--sub);
+          border-bottom:2px solid transparent;font-family:inherit;white-space:nowrap;">
+          📊 Finance</button>
+        <button class="ai-stab" onclick="aitab('reports')" id="at-reports"
+          style="flex:1;min-width:70px;padding:9px 6px;border:none;cursor:pointer;
+          background:transparent;font-size:0.74rem;font-weight:700;color:var(--sub);
+          border-bottom:2px solid transparent;font-family:inherit;white-space:nowrap;">
+          📝 Reports</button>
+        <button class="ai-stab" onclick="aitab('comms')" id="at-comms"
+          style="flex:1;min-width:70px;padding:9px 6px;border:none;cursor:pointer;
+          background:transparent;font-size:0.74rem;font-weight:700;color:var(--sub);
+          border-bottom:2px solid transparent;font-family:inherit;white-space:nowrap;">
+          💬 Comms</button>
+      </div>
+
+      <!-- ─── ONBOARDING CHAT ─── -->
+      <div id="ait-onboard" style="display:block;">
+        <div id="ait-chat-win"
+          style="padding:14px;display:flex;flex-direction:column;gap:10px;
+          min-height:260px;max-height:340px;overflow-y:auto;background:var(--s1);">
+        </div>
+        <div style="padding:8px 10px;background:var(--s2);border-top:1px solid var(--border);display:flex;gap:7px;">
+          <input id="ait-chat-in" placeholder="Type your reply…"
+            style="flex:1;border:1px solid var(--border);border-radius:8px;
+            padding:8px 11px;font-size:0.82rem;background:var(--bg);
+            color:var(--text);font-family:inherit;outline:none;"
+            onkeydown="if(event.key==='Enter')aitSend()">
+          <button onclick="aitSend()"
+            style="background:#4B0082;color:#fff;border:none;border-radius:8px;
+            padding:8px 14px;font-size:0.8rem;font-weight:700;cursor:pointer;">Send</button>
+        </div>
+      </div>
+
+      <!-- ─── FINANCE ADVISOR ─── -->
+      <div id="ait-finance" style="display:none;padding:14px;">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;"
+          id="ait-fin-metrics">
+          <div style="background:var(--s2);border-radius:8px;padding:8px;text-align:center;border:1px solid var(--border);">
+            <div style="font-size:9px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Collection Rate</div>
+            <div id="ait-fin-rate" style="font-size:1.2rem;font-weight:800;color:#15803D;">—</div>
+          </div>
+          <div style="background:var(--s2);border-radius:8px;padding:8px;text-align:center;border:1px solid var(--border);">
+            <div style="font-size:9px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Outstanding</div>
+            <div id="ait-fin-owed" style="font-size:1.2rem;font-weight:800;color:#DC2626;">—</div>
+          </div>
+          <div style="background:var(--s2);border-radius:8px;padding:8px;text-align:center;border:1px solid var(--border);">
+            <div style="font-size:9px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Students</div>
+            <div id="ait-fin-count" style="font-size:1.2rem;font-weight:800;color:var(--brand);">—</div>
+          </div>
+        </div>
+        <button onclick="aitRunFinance()" id="ait-fin-btn"
+          style="width:100%;background:#7A5C1E;color:#fff;border:none;border-radius:8px;
+          padding:10px;font-size:0.85rem;font-weight:700;cursor:pointer;margin-bottom:10px;">
+          🔍 Analyse This Term's Finances
+        </button>
+        <div id="ait-fin-out"></div>
+      </div>
+
+      <!-- ─── REPORT CARD GENERATOR ─── -->
+      <div id="ait-reports" style="display:none;padding:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#7A5C1E;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:4px;">Student Name</label>
+            <input id="ait-rc-name" placeholder="e.g. Adaobi Chukwu"
+              style="width:100%;border:1px solid var(--border);border-radius:7px;
+              padding:7px 10px;font-size:0.8rem;background:var(--bg);
+              color:var(--text);font-family:inherit;outline:none;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#7A5C1E;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:4px;">Class</label>
+            <input id="ait-rc-class" placeholder="e.g. JSS 2"
+              style="width:100%;border:1px solid var(--border);border-radius:7px;
+              padding:7px 10px;font-size:0.8rem;background:var(--bg);
+              color:var(--text);font-family:inherit;outline:none;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#7A5C1E;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:4px;">Attendance %</label>
+            <input id="ait-rc-att" type="number" placeholder="e.g. 88"
+              style="width:100%;border:1px solid var(--border);border-radius:7px;
+              padding:7px 10px;font-size:0.8rem;background:var(--bg);
+              color:var(--text);font-family:inherit;outline:none;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#7A5C1E;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:4px;">Term</label>
+            <input id="ait-rc-term"
+              style="width:100%;border:1px solid var(--border);border-radius:7px;
+              padding:7px 10px;font-size:0.8rem;background:var(--bg);
+              color:var(--text);font-family:inherit;outline:none;box-sizing:border-box;">
+          </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:10px;font-weight:700;color:#7A5C1E;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:4px;">Subject Scores (Subject: Score, …)</label>
+          <textarea id="ait-rc-subs" rows="2" placeholder="English: 72, Maths: 58, Science: 81…"
+            style="width:100%;border:1px solid var(--border);border-radius:7px;
+            padding:7px 10px;font-size:0.8rem;background:var(--bg);
+            color:var(--text);font-family:inherit;outline:none;box-sizing:border-box;resize:vertical;"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="aitGenReport()" id="ait-rc-btn"
+            style="flex:1;min-width:120px;background:#15803D;color:#fff;border:none;
+            border-radius:8px;padding:9px;font-size:0.82rem;font-weight:700;cursor:pointer;">
+            ✍️ Generate Comment
+          </button>
+          <button onclick="aitRcFromStudent()"
+            style="flex:1;min-width:120px;background:transparent;color:#15803D;
+            border:2px solid #15803D;border-radius:8px;padding:9px;
+            font-size:0.78rem;font-weight:700;cursor:pointer;">
+            🎓 Use Active Student
+          </button>
+        </div>
+        <div id="ait-rc-out" style="margin-top:10px;"></div>
+      </div>
+
+      <!-- ─── PARENT COMMS ─── -->
+      <div id="ait-comms" style="display:none;padding:14px;">
+        <div style="margin-bottom:10px;">
+          <label style="font-size:10px;font-weight:700;color:#1D4ED8;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:6px;">Scenario</label>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;" id="ait-comms-scenarios">
+            <button class="ait-sc-btn active" onclick="aitSetScenario('fee',this)"
+              style="background:#1D4ED8;color:#fff;border:1px solid #1D4ED8;
+              border-radius:16px;padding:4px 11px;font-size:0.72rem;cursor:pointer;font-family:inherit;font-weight:700;">
+              💰 Fee Reminder</button>
+            <button class="ait-sc-btn" onclick="aitSetScenario('absent',this)"
+              style="background:transparent;color:#1D4ED8;border:1px solid #BFDBFE;
+              border-radius:16px;padding:4px 11px;font-size:0.72rem;cursor:pointer;font-family:inherit;font-weight:700;">
+              📋 Absence Alert</button>
+            <button class="ait-sc-btn" onclick="aitSetScenario('collector',this)"
+              style="background:transparent;color:#1D4ED8;border:1px solid #BFDBFE;
+              border-radius:16px;padding:4px 11px;font-size:0.72rem;cursor:pointer;font-family:inherit;font-weight:700;">
+              🛡 Unlisted Collector</button>
+            <button class="ait-sc-btn" onclick="aitSetScenario('signout',this)"
+              style="background:transparent;color:#1D4ED8;border:1px solid #BFDBFE;
+              border-radius:16px;padding:4px 11px;font-size:0.72rem;cursor:pointer;font-family:inherit;font-weight:700;">
+              📤 Sign-Out</button>
+            <button class="ait-sc-btn" onclick="aitSetScenario('report',this)"
+              style="background:transparent;color:#1D4ED8;border:1px solid #BFDBFE;
+              border-radius:16px;padding:4px 11px;font-size:0.72rem;cursor:pointer;font-family:inherit;font-weight:700;">
+              📝 Report Ready</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;" id="ait-comms-fields"></div>
+        <button onclick="aitGenComms()" id="ait-comms-btn"
+          style="width:100%;background:#1D4ED8;color:#fff;border:none;border-radius:8px;
+          padding:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">
+          💬 Draft WhatsApp Message
+        </button>
+        <div id="ait-comms-out" style="margin-top:10px;"></div>
+      </div>
+
+    </div><!-- end .card -->
+  </section>
+  <!-- ══════════════ END AI TOOLS ══════════════ -->
+
   </main>
 
   <!-- BOTTOM NAV — all 16 sections -->
@@ -609,6 +789,7 @@ function toggleEye(inputId, btn) {
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
     <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Scorecard</button>
     <button class="nlink" data-t="opps" onclick="go('opps')"><span class="ni">🔍</span>Scout</button>
+    <button class="nlink" data-t="aitools" onclick="go('aitools')"><span class="ni">🤖</span>AI Tools</button>
   </nav>
 </div>
 
@@ -1155,5 +1336,931 @@ window.addEventListener('appinstalled', () => {
   console.log('[PWA] App installed successfully!');
 });
 </script>
+
+
+
+
+  <!-- ══════════ AI TOOLS AGENTS JAVASCRIPT ══════════ -->
+  <script>
+  function aitab(id){
+    ['onboard','finance','reports','comms'].forEach(t=>{
+      const el=document.getElementById('ait-'+t);
+      const b=document.getElementById('at-'+t);
+      if(!el||!b)return;
+      el.style.display=t===id?'block':'none';
+      b.style.color=t===id?'var(--text)':'var(--sub)';
+      b.style.borderBottomColor=t===id?'#4B0082':'transparent';
+    });
+    if(id==='finance')aitPF();
+    if(id==='reports')aitPR();
+    if(id==='comms')aitRC();
+  }
+  async function aitCall(sys,msgs){
+    const k=(typeof ANTHROPIC_KEY!=='undefined'&&ANTHROPIC_KEY)?ANTHROPIC_KEY:'';
+    const h={'Content-Type':'application/json'};if(k)h['x-api-key']=k;
+    try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:h,body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:1000,system:sys,messages:msgs})});
+    const d=await r.json();if(d.error)return'⚠️ '+d.error.message;return d.content?.map(b=>b.text||'').join('')||'No response.';}
+    catch(e){return'⚠️ '+e.message;}
+  }
+  // Onboarding chat
+  const ACH=[];
+  async function aitSend(){
+    const inp=document.getElementById('ait-chat-in');const t=(inp?.value||'').trim();if(!t)return;
+    inp.value='';ACH.push({role:'user',content:t});aitBub('user',t);
+    const tw=document.createElement('div');tw.id='ait-tw';tw.style.cssText='background:var(--s2);border:1px solid var(--border);border-radius:4px 12px 12px 12px;padding:9px 14px;font-size:0.8rem;color:var(--sub);';tw.textContent='Thinking...';
+    const w=document.getElementById('ait-chat-win');if(w)w.appendChild(tw);
+    const sys=`You are EduBloom Onboarding Assistant for AariNAT Nigeria. Pricing/term: 1-50 ₦10k,51-100 ₦20k,101-200 ₦35k,201-350 ₦55k,351+ ₦75k. Premium: staff logins,BloomCollect,3 safety features. Collect school name,student count,WhatsApp,LGA. End with "Bayo (0814 507 3941) will call in 24h." Max 5 lines. End with question.`;
+    const reply=await aitCall(sys,ACH);
+    const t2=document.getElementById('ait-tw');if(t2)t2.remove();
+    ACH.push({role:'assistant',content:reply});aitBub('bot',reply);
+  }
+  function aitBub(r,t){
+    const w=document.getElementById('ait-chat-win');if(!w)return;
+    const d=document.createElement('div');
+    d.style.cssText='padding:9px 12px;border-radius:12px;font-size:0.81rem;line-height:1.6;max-width:82%;white-space:pre-wrap;word-break:break-word;margin-bottom:2px;';
+    if(r==='user')d.style.cssText+='background:#4B0082;color:#fff;border-radius:12px 4px 12px 12px;margin-left:auto;';
+    else d.style.cssText+='background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:4px 12px 12px 12px;';
+    d.textContent=t;w.appendChild(d);w.scrollTop=w.scrollHeight;
+  }
+  function aitInitChat(){
+    const w=document.getElementById('ait-chat-win');if(!w||w.children.length)return;
+    const msg="Good day! I am the EduBloom Onboarding Assistant.\n\nI help schools get set up in 5 minutes — fees, attendance, report cards, safety alerts.\n\nWhat is the name of your school?";
+    ACH.push({role:'assistant',content:msg});aitBub('bot',msg);
+  }
+  // Finance
+  function aitFmtN(n){return '₦'+Number(n||0).toLocaleString('en-NG');}
+  function aitPF(){
+    if(typeof SD==='undefined')return;
+    const s=SD.students||[];
+    const exp=s.reduce((a,x)=>a+(x.totalFee||0),0);
+    const col=s.reduce((a,x)=>a+(x.paid||0),0);
+    const pct=exp>0?Math.round(col/exp*100):0;
+    const r=document.getElementById('ait-fin-rate'),o=document.getElementById('ait-fin-owed'),c=document.getElementById('ait-fin-count');
+    if(r){r.textContent=pct+'%';r.style.color=pct>=80?'#15803D':pct>=60?'#C9A84C':'#DC2626';}
+    if(o)o.textContent=aitFmtN(exp-col);if(c)c.textContent=s.length;
+  }
+  async function aitRunFinance(){
+    const btn=document.getElementById('ait-fin-btn'),out=document.getElementById('ait-fin-out');
+    if(btn){btn.disabled=true;btn.textContent='Analysing…';}
+    out.innerHTML='<div style="color:var(--sub);font-size:0.82rem;padding:10px">⏳ Analysing…</div>';
+    if(typeof SD==='undefined'){out.innerHTML='<div style="color:var(--danger)">Log in first.</div>';return;}
+    const s=SD.students||[],cfg=SD.config||{};
+    const exp=s.reduce((a,x)=>a+(x.totalFee||0),0),col=s.reduce((a,x)=>a+(x.paid||0),0);
+    const debtors=s.filter(x=>(x.totalFee||0)-(x.paid||0)>0).length;
+    const expenses=(SD.expenses||[]).reduce((a,e)=>a+(e.amount||0),0);
+    const p=`School: ${cfg.schoolName||'School'}, Students: ${s.length}, Tier: ${cfg.tier||'—'}, Expected: ${aitFmtN(exp)}, Collected: ${aitFmtN(col)}, Outstanding: ${aitFmtN(exp-col)}, Rate: ${exp>0?Math.round(col/exp*100):0}%, Debtors: ${debtors}, Expenses: ${aitFmtN(expenses)}, Net: ${aitFmtN(col-expenses)}, Term: ${cfg.currentTerm||'—'}. Sections: 📊 Summary ⚠️ Risks ✅ 3 Recommendations.`;
+    const reply=await aitCall('EduBloom Finance AI Advisor for Nigerian schools. Be specific, use exact numbers, practical.',[{role:'user',content:p}]);
+    out.innerHTML=`<div style="background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:0.81rem;line-height:1.7;white-space:pre-wrap;">${reply}</div>`;
+    if(btn){btn.disabled=false;btn.textContent='🔍 Analyse This Term';}
+  }
+  // Reports
+  function aitPR(){const t=document.getElementById('ait-rc-term');if(t&&!t.value&&typeof SD!=='undefined')t.value=SD.config?.currentTerm||'First Term';}
+  function aitRcFromStudent(){
+    if(typeof activeIdx==='undefined'||activeIdx===null||!SD?.students?.[activeIdx]){alert('Open a student profile first.');return;}
+    const s=SD.students[activeIdx];
+    const ne=document.getElementById('ait-rc-name'),ce=document.getElementById('ait-rc-class');
+    if(ne)ne.value=s.name||'';if(ce)ce.value=s.class||'';
+    const term=SD.config?.currentTerm||'First Term',sid=s.id||activeIdx;
+    const td=(SD.scores?.[term]||{})[sid]||{};
+    const sc=(SD.config?.subjects||['English','Maths','Science']).map(sub=>{const v=td[sub]||{};const t=(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);return t>0?sub+': '+t:'';}).filter(Boolean).join(', ');
+    const se=document.getElementById('ait-rc-subs');if(se&&sc)se.value=sc;
+    alert('Filled from '+s.name+'. Check and tap Generate.');
+  }
+  async function aitGenReport(){
+    const btn=document.getElementById('ait-rc-btn'),out=document.getElementById('ait-rc-out');
+    const name=document.getElementById('ait-rc-name')?.value?.trim();
+    if(!name){alert('Enter student name.');return;}
+    if(btn){btn.disabled=true;btn.textContent='Generating…';}
+    out.innerHTML='<div style="color:var(--sub);font-size:0.82rem;padding:8px">⏳ Generating…</div>';
+    const cls=document.getElementById('ait-rc-class')?.value||'',term=document.getElementById('ait-rc-term')?.value||'First Term',att=document.getElementById('ait-rc-att')?.value||'',subs=document.getElementById('ait-rc-subs')?.value||'';
+    const reply=await aitCall('Generate professional 3-4 sentence Nigerian school end-of-term comment. Start with first name. Warm, specific, encouraging.',[{role:'user',content:`Name: ${name} | Class: ${cls} | Term: ${term}${att?' | Attendance: '+att+'%':''} | Scores: ${subs||'not provided'}`}]);
+    out.innerHTML=`<div style="background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:12px;"><div style="font-size:10px;font-weight:700;color:#15803D;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">${name}</div><div id="ait-rc-text" style="font-size:0.82rem;line-height:1.7;">${reply}</div><div style="display:flex;gap:7px;margin-top:8px;"><button onclick="navigator.clipboard.writeText(document.getElementById('ait-rc-text').textContent)" style="flex:1;background:#15803D;color:#fff;border:none;border-radius:7px;padding:7px;font-size:0.75rem;font-weight:700;cursor:pointer">Copy</button><button onclick="document.getElementById('ait-rc-out').innerHTML=''" style="flex:1;background:transparent;color:#15803D;border:2px solid #15803D;border-radius:7px;padding:7px;font-size:0.75rem;font-weight:700;cursor:pointer">Clear</button></div></div>`;
+    if(btn){btn.disabled=false;btn.textContent='✍️ Generate Comment';}
+  }
+  // Parent Comms
+  let aitSc='fee';
+  const ACF={fee:['parent','student','amount','due'],absent:['parent','student','cls','absent_date'],collector:['parent','student','collector'],signout:['parent','student','signout_time','collector','reason'],report:['parent','student','cls']};
+  const ACL={parent:'Parent Name',student:'Student Name',cls:'Class',amount:'Amount Owed',due:'Due Date',absent_date:'Date Absent',collector:'Collector Name',signout_time:'Sign-Out Time',reason:'Reason'};
+  const ACD={parent:'',student:'',cls:'',amount:'₦20,000',due:'end of term',absent_date:'today',collector:'',signout_time:'',reason:'medical appointment'};
+  function aitSetScenario(id,el){
+    aitSc=id;
+    document.querySelectorAll('.ait-sc-btn').forEach(b=>{b.style.background='transparent';b.style.color='#1D4ED8';b.style.borderColor='#BFDBFE';});
+    if(el){el.style.background='#1D4ED8';el.style.color='#fff';}
+    aitRC();document.getElementById('ait-comms-out').innerHTML='';
+  }
+  function aitRC(){
+    const w=document.getElementById('ait-comms-fields');if(!w)return;
+    w.innerHTML=(ACF[aitSc]||[]).map(f=>`<div><label style="font-size:10px;font-weight:700;color:#1D4ED8;text-transform:uppercase;letter-spacing:1.2px;display:block;margin-bottom:3px">${ACL[f]||f}</label><input id="aitcf-${f}" value="${ACD[f]||''}" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-size:0.79rem;background:var(--bg);color:var(--text);font-family:inherit;outline:none;box-sizing:border-box"></div>`).join('');
+  }
+  async function aitGenComms(){
+    const btn=document.getElementById('ait-comms-btn'),out=document.getElementById('ait-comms-out');
+    if(btn){btn.disabled=true;btn.textContent='Drafting…';}
+    out.innerHTML='<div style="color:var(--sub);font-size:0.82rem;padding:8px">⏳ Drafting…</div>';
+    const g=id=>{const e=document.getElementById('aitcf-'+id);return e?e.value:'';};
+    const school=(typeof SD!=='undefined')?(SD.config?.schoolName||'School'):'School';
+    const prompts={fee:`Fee reminder from ${school}. Parent: ${g('parent')}, Student: ${g('student')}, Owes: ${g('amount')}, Due: ${g('due')}. Friendly but firm.`,absent:`Absence alert from ${school}. Parent: ${g('parent')}, Student: ${g('student')} (${g('cls')}) absent ${g('absent_date')}. Urgent, ask parent confirm.`,collector:`URGENT from ${school}. Person ${g('collector')} tried to collect ${g('student')} but NOT authorised. Child not released. Parent call immediately.`,signout:`Sign-out confirmation from ${school}. Student ${g('student')} left at ${g('signout_time')} with ${g('collector')}. Reason: ${g('reason')}. Confirm or call.`,report:`Report card ready from ${school}. Student ${g('student')} (${g('cls')}). Collect or view at school.edubloom.com.ng`};
+    const reply=await aitCall('Draft professional warm WhatsApp message from Nigerian school to parent. Under 80 words. Nigerian English. Sign off with school name.',[{role:'user',content:prompts[aitSc]||''}]);
+    out.innerHTML=`<div style="margin-top:2px"><div style="background:#E5DDD5;border-radius:10px;padding:10px"><div style="background:#DCF8C6;border-radius:4px 12px 12px 12px;padding:9px 13px;max-width:85%;margin-left:auto"><div id="ait-wa-text" style="font-size:0.79rem;line-height:1.7;font-family:sans-serif;color:#1A1A1A;white-space:pre-wrap">${reply}</div><div style="font-size:9px;color:#667781;text-align:right;margin-top:3px">✓✓</div></div></div><div style="display:flex;gap:7px;margin-top:7px"><button onclick="navigator.clipboard.writeText(document.getElementById('ait-wa-text').textContent)" style="flex:1;background:#1D4ED8;color:#fff;border:none;border-radius:7px;padding:7px;font-size:0.75rem;font-weight:700;cursor:pointer">Copy</button><button onclick="document.getElementById('ait-comms-out').innerHTML=''" style="flex:1;background:transparent;color:#1D4ED8;border:2px solid #1D4ED8;border-radius:7px;padding:7px;font-size:0.75rem;font-weight:700;cursor:pointer">Clear</button></div></div>`;
+    if(btn){btn.disabled=false;btn.textContent='💬 Draft Message';}
+  }
+  function renderAITools(){aitInitChat();aitPF();aitPR();aitRC();}
+  </script>
+  <style>@keyframes aitbounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}</style>
+
+  <!-- ══ EDUBLOOM HYBRID VOICE AGENT (adapted: SD/SQ/go) ══ -->
+  <style>
+    #voiceAgentBtn {
+        position: fixed;
+        bottom: 140px;
+        right: 16px;
+        z-index: 100;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: var(--brand);
+        color: white;
+        font-size: 1.5rem;
+        border: none;
+        box-shadow: 0 6px 20px rgba(79,70,229,0.4);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s;
+        animation: vaPulse 2s infinite;
+    }
+    @keyframes vaPulse {
+        0%   { box-shadow: 0 0 0 0   rgba(79,70,229,0.5); }
+        70%  { box-shadow: 0 0 0 18px rgba(79,70,229,0); }
+        100% { box-shadow: 0 0 0 0   rgba(79,70,229,0); }
+    }
+    #voiceAgentBtn.listening {
+        background: var(--danger);
+        animation: none;
+        box-shadow: 0 0 0 12px rgba(239,68,68,0.3);
+        transform: scale(1.1);
+    }
+    #voiceAgentBtn.speaking  { background: var(--money); }
+    #voiceAgentBtn.thinking  { background: #7C3AED; animation: vaThink 0.8s ease-in-out infinite alternate; }
+    @keyframes vaThink {
+        from { opacity: 0.7; transform: scale(0.95); }
+        to   { opacity: 1.0; transform: scale(1.05); }
+    }
+
+    #voiceFeedback {
+        position: fixed;
+        bottom: 208px;
+        right: 8px;
+        left: 8px;
+        max-width: 340px;
+        margin-left: auto;
+        background: var(--text);
+        color: white;
+        border-radius: 16px;
+        padding: 1rem;
+        font-size: 0.88rem;
+        z-index: 101;
+        display: none;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        border-top: 3px solid #C9A84C;
+    }
+    #voiceFeedback.show       { display: block; }
+    #voiceFeedback .vf-agent  { font-size: 0.7rem; color: #C9A84C; font-weight: 700;
+                                 text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.3rem; }
+    #voiceFeedback .vf-transcript { font-style: italic; opacity: 0.6; margin-bottom: 0.4rem; font-size: 0.8rem; }
+    #voiceFeedback .vf-response   { font-weight: 600; line-height: 1.45; }
+    #voiceFeedback .vf-action     { font-size: 0.72rem; opacity: 0.75; margin-top: 0.35rem; color: #C9A84C; }
+
+    /* OCR preview panel */
+    #ocrPreviewPanel {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.7);
+        z-index: 200;
+        display: none;
+        flex-direction: column;
+        padding: 1rem;
+        overflow-y: auto;
+    }
+    #ocrPreviewPanel.show { display: flex; }
+    #ocrPreviewPanel .ocr-header {
+        display: flex; justify-content: space-between; align-items: center;
+        color: white; margin-bottom: 1rem;
+    }
+    #ocrPreviewPanel .ocr-title { font-weight: 700; font-size: 1.1rem; color: #C9A84C; }
+    #ocrPreviewPanel .ocr-close {
+        background: none; border: 1px solid rgba(255,255,255,0.3); color: white;
+        border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 0.85rem;
+    }
+    .ocr-page-card {
+        background: white; border-radius: 12px; overflow: hidden;
+        margin-bottom: 1rem; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .ocr-page-header {
+        background: #4B0082; color: white; padding: 8px 14px;
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 0.8rem; font-weight: 700;
+    }
+    .ocr-split {
+        display: grid; grid-template-columns: 1fr 1fr;
+    }
+    .ocr-photo-side {
+        border-right: 1px solid #E0D5F0; padding: 6px;
+    }
+    .ocr-photo-side img {
+        width: 100%; border-radius: 6px; max-height: 220px;
+        object-fit: cover; cursor: zoom-in;
+    }
+    .ocr-photo-label {
+        font-size: 0.65rem; color: #888; text-align: center;
+        text-transform: uppercase; letter-spacing: 1px; margin-top: 3px;
+    }
+    .ocr-names-side { padding: 6px; max-height: 260px; overflow-y: auto; }
+    .ocr-names-label {
+        font-size: 0.65rem; color: #888; text-transform: uppercase;
+        letter-spacing: 1px; margin-bottom: 6px; padding: 0 4px;
+    }
+    .ocr-name-row {
+        display: flex; align-items: center; gap: 4px;
+        padding: 4px 6px; border-radius: 6px; margin-bottom: 3px;
+        background: #F9F6FF; border: 1px solid #E0D5F0; font-size: 0.78rem;
+    }
+    .ocr-name-num { color: #888; min-width: 18px; font-size: 0.7rem; }
+    .ocr-name-text { flex: 1; color: #1A1A1A; font-family: Georgia, serif; }
+    .ocr-name-edit { background: none; border: none; color: #6E1F8B; cursor: pointer; font-size: 0.75rem; padding: 0 3px; }
+    .ocr-name-del  { background: none; border: none; color: #DC2626; cursor: pointer; font-size: 0.85rem; }
+    .ocr-loading {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; padding: 20px; gap: 8px;
+    }
+    .ocr-spinner {
+        width: 22px; height: 22px;
+        border: 3px solid rgba(75,0,130,0.15);
+        border-top-color: #6E1F8B; border-radius: 50%;
+        animation: vaThink2 0.7s linear infinite;
+    }
+    @keyframes vaThink2 { to { transform: rotate(360deg); } }
+    .ocr-confirm-bar {
+        position: sticky; bottom: 0; padding: 12px;
+        background: white; border-top: 1px solid #E0D5F0;
+    }
+    .ocr-confirm-btn {
+        width: 100%; background: #4B0082; color: white; border: none;
+        border-radius: 10px; padding: 13px; font-size: 0.9rem;
+        font-weight: 700; cursor: pointer; font-family: Georgia, serif;
+    }
+    .ocr-total-badge {
+        background: #4B0082; color: #C9A84C; border-radius: 20px;
+        padding: 2px 10px; font-size: 0.72rem; font-weight: 700;
+    }
+</style>
+  <!-- Floating mic button -->
+<button id="voiceAgentBtn" title="Voice Assistant – Tap and speak">🎙️</button>
+
+<!-- Feedback panel -->
+<div id="voiceFeedback">
+    <div class="vf-agent" id="vfAgent">EduBloom Voice Agent</div>
+    <div class="vf-transcript" id="vfTranscript"></div>
+    <div class="vf-response"   id="vfResponse"></div>
+    <div class="vf-action"     id="vfAction"></div>
+</div>
+
+<!-- OCR Preview Panel -->
+<div id="ocrPreviewPanel">
+    <div class="ocr-header">
+        <span class="ocr-title">📸 Register OCR — Side by Side Review</span>
+        <button class="ocr-close" onclick="document.getElementById('ocrPreviewPanel').classList.remove('show')">✕ Close</button>
+    </div>
+    <div id="ocrPageList"></div>
+    <div class="ocr-confirm-bar">
+        <button class="ocr-confirm-btn" id="ocrConfirmBtn" onclick="confirmOCRNames()">
+            ✅ Add All Names to Class
+        </button>
+    </div>
+</div>
+  <script>
+(function () {
+
+
+    // ==================== CONFIG ====================
+    const CLAUDE_MODEL_FAST = 'claude-haiku-4-5-20251001';   // OCR + intent
+    const CLAUDE_MODEL_SMART = 'claude-sonnet-4-6';           // Complex commands
+    const VA_API_KEY = (typeof ANTHROPIC_KEY !== 'undefined' && ANTHROPIC_KEY) ? ANTHROPIC_KEY : '';
+
+    // ==================== STATE ====================
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const synth = window.speechSynthesis;
+    let recognition = null;
+    let isListening = false;
+    let ocrPages = []; // [{ file, previewUrl, base64, mediaType, status, names }]
+
+    const btn        = document.getElementById('voiceAgentBtn');
+    const feedbackEl = document.getElementById('voiceFeedback');
+    const agentEl    = document.getElementById('vfAgent');
+    const transcriptEl = document.getElementById('vfTranscript');
+    const responseEl = document.getElementById('vfResponse');
+    const actionEl   = document.getElementById('vfAction');
+
+    // ==================== SPEAK ====================
+    function speak(text) {
+        if (!synth) return;
+        synth.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'en-NG'; u.rate = 0.95; u.pitch = 1.0;
+        btn.classList.add('speaking');
+        u.onend = u.onerror = () => btn.classList.remove('speaking');
+        synth.speak(u);
+    }
+
+    // ==================== FEEDBACK ====================
+    function showFeedback(transcript, response, action, agentName) {
+        agentEl.textContent    = agentName || '🎙️ EduBloom Voice Agent';
+        transcriptEl.textContent = transcript ? `"${transcript}"` : '';
+        responseEl.textContent = response  || '';
+        actionEl.textContent   = action    || '';
+        feedbackEl.classList.add('show');
+        clearTimeout(feedbackEl._t);
+        feedbackEl._t = setTimeout(() => feedbackEl.classList.remove('show'), 7000);
+    }
+
+    // ==================== UTILITY ====================
+    function safeFmt(n) {
+        return typeof fmt === 'function' ? fmt(n) : Number(n).toLocaleString();
+    }
+
+    // ==================== FAST REGEX PARSER ====================
+    // Runs first — no API call, instant, works offline
+    function regexIntent(text) {
+        const t = text.toLowerCase().trim();
+
+        // Record payment
+        const payMatch = t.match(/(?:record\s+)?(?:payment|pay)\s+(?:of\s+)?(?:₦)?(\d[\d,]*)\s+(?:for\s+)?(.+)/i);
+        if (payMatch) return {
+            intent: 'recordPayment',
+            amount: parseInt(payMatch[1].replace(/,/g, '')),
+            studentName: payMatch[2].trim()
+        };
+
+        // Collection query
+        if (t.match(/how\s+much\s+(have\s+we\s+)?collected|collection\s+(percentage|rate|progress)|how\s+much\s+(do\s+we\s+have|have\s+we\s+got)/i))
+            return { intent: 'queryCollection' };
+
+        // Who owes
+        if (t.match(/who\s+(owes|hasn.?t\s+paid|is\s+owing|never\s+pay)/i))
+            return { intent: 'queryOwing' };
+
+        // Total students
+        if (t.match(/how\s+many\s+students|total\s+students|number\s+of\s+students/i))
+            return { intent: 'queryTotalStudents' };
+
+        // Send reminders
+        if (t.match(/send\s+reminders?|remind\s+(all\s+)?(owing\s+)?parents|blast\s+(reminder|message)/i))
+            return { intent: 'sendReminders' };
+
+        // OCR / snap
+        if (t.match(/snap|take\s+(a\s+)?photo|capture|scan\s+(the\s+)?register|ocr|upload\s+register/i))
+            return { intent: 'snapRegister' };
+
+        // Navigate
+        const navMatch = t.match(/(?:go\s+to|open|show\s+(?:me\s+)?)(revenue|students|staff|sports|arts|music|health|alumni|expenses|comms|analytics|security|support|settings|opportunities)/i);
+        if (navMatch) return { intent: 'navigate', section: navMatch[1] };
+
+        // Help
+        if (t.match(/help|what\s+can\s+you\s+do|commands/i))
+            return { intent: 'help' };
+
+        return null; // → escalate to Claude
+    }
+
+    // ==================== CLAUDE INTENT PARSER ====================
+    // Called only when regex returns null
+    async function claudeIntent(spokenText) {
+        btn.classList.add('thinking');
+        try {
+            const res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: Object.assign({'Content-Type':'application/json'}, VA_API_KEY ? {'x-api-key': VA_API_KEY} : {}),
+                body: JSON.stringify({
+                    model: CLAUDE_MODEL_SMART,
+                    max_tokens: 400,
+                    system: `You are the EduBloom Voice Agent intent classifier for a Nigerian school management app.
+Classify the user's spoken command and return ONLY a JSON object.
+
+INTENTS AVAILABLE:
+- recordPayment: recording a student fee payment
+- queryCollection: checking fee collection totals or percentages
+- queryOwing: asking who has not paid
+- queryTotalStudents: asking how many students
+- sendReminders: sending WhatsApp reminders to owing parents
+- snapRegister: taking a photo of a class register
+- navigate: going to a section (revenue, students, staff, sports, arts, music, health, alumni, expenses, comms, analytics, security, support, settings, opportunities)
+- generateReportCard: generating a student report card comment
+- financeAdvice: asking for financial analysis or advice
+- help: asking what commands are available
+- unknown: cannot classify
+
+NIGERIAN LANGUAGE RULES:
+"how much we don collect" = queryCollection
+"who never pay" = queryOwing  
+"send reminder to parents wey dey owe" = sendReminders
+"snap the register" or "take photo" = snapRegister
+"oya go to students" = navigate to students
+"generate comment for Tunde" = generateReportCard
+
+Return ONLY valid JSON, no explanation:
+{"intent":"recordPayment","amount":5000,"studentName":"Aminat"}
+or
+{"intent":"navigate","section":"students"}
+or
+{"intent":"unknown"}`,
+                    messages: [{ role: 'user', content: spokenText }]
+                })
+            });
+            const data = await res.json();
+            const raw = data.content?.[0]?.text || '{"intent":"unknown"}';
+            const clean = raw.replace(/```json|```/g, '').trim();
+            return JSON.parse(clean);
+        } catch (e) {
+            console.warn('Claude intent error:', e);
+            return { intent: 'unknown' };
+        } finally {
+            btn.classList.remove('thinking');
+        }
+    }
+
+    // ==================== CLAUDE GENERAL RESPONSE ====================
+    // For report card comments, finance advice, complex questions
+    async function claudeRespond(spokenText, intent, context) {
+        btn.classList.add('thinking');
+        try {
+            const systemPrompt = intent === 'generateReportCard'
+                ? `You are EduBloom's AI Report Card Generator. Generate a professional 3-sentence end-of-term teacher comment for a Nigerian school student. Start with the student's first name. Be warm, specific, encouraging. Spoken response — keep it under 60 words.`
+                : `You are EduBloom's Finance Advisor for a Nigerian private school. Give a sharp, specific, actionable financial insight. Spoken response — under 50 words. Use ₦ for amounts.`;
+
+            const userMsg = context
+                ? `Command: "${spokenText}"\n\nSchool data: ${JSON.stringify(context)}`
+                : spokenText;
+
+            const res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: Object.assign({'Content-Type':'application/json'}, VA_API_KEY ? {'x-api-key': VA_API_KEY} : {}),
+                body: JSON.stringify({
+                    model: CLAUDE_MODEL_SMART,
+                    max_tokens: 300,
+                    messages: [{ role: 'user', content: userMsg }],
+                    system: systemPrompt
+                })
+            });
+            const data = await res.json();
+            return data.content?.[0]?.text || 'I could not generate a response.';
+        } catch (e) {
+            return 'Connection issue. Please try again.';
+        } finally {
+            btn.classList.remove('thinking');
+        }
+    }
+
+    // ==================== EXECUTE INTENT ====================
+    function executeIntent(parsed, spokenText) {
+        const data = (typeof SD !== 'undefined') ? { students: SD.students||[], config: SD.config||{} } : { students: [], config: {} };
+        const students = data.students || [];
+
+        switch (parsed.intent) {
+
+            case 'recordPayment': {
+                const name = (parsed.studentName || '').toLowerCase();
+                const matches = students.filter(s =>
+                    s.name && s.name.toLowerCase().includes(name)
+                );
+                if (matches.length === 1) {
+                    const s = matches[0];
+                    s.paid = (s.paid || 0) + parsed.amount;
+                    if (typeof SQ !== 'undefined') SQ.push('students', students);
+                    const bal = s.totalFee - s.paid;
+                    const msg = `Recorded ₦${safeFmt(parsed.amount)} for ${s.name}. ${bal <= 0 ? 'Fully paid!' : 'Balance: ₦' + safeFmt(bal)}`;
+                    showFeedback(spokenText, '✅ ' + msg, 'Payment saved ✓', '💰 Payment Agent');
+                    speak(msg);
+                    if (typeof renderRevenue === 'function') renderRevenue();
+                } else if (matches.length === 0) {
+                    const msg = `I could not find ${parsed.studentName}. Check the spelling.`;
+                    showFeedback(spokenText, msg, '', '💰 Payment Agent');
+                    speak(msg);
+                } else {
+                    const names = matches.map(s => s.name).join(', ');
+                    const msg = `Found multiple: ${names}. Which one do you mean?`;
+                    showFeedback(spokenText, msg, '', '💰 Payment Agent');
+                    speak(msg);
+                }
+                break;
+            }
+
+            case 'queryCollection': {
+                const exp = students.reduce((s, st) => s + (st.totalFee || 0), 0);
+                const col = students.reduce((s, st) => s + (st.paid || 0), 0);
+                const pct = exp > 0 ? Math.round((col / exp) * 100) : 0;
+                const out = exp - col;
+                const msg = `Collection is at ${pct}%. ₦${safeFmt(col)} collected of ₦${safeFmt(exp)}.`;
+                showFeedback(spokenText, msg, `Outstanding: ₦${safeFmt(out)}`, '📊 Finance Agent');
+                speak(msg);
+                break;
+            }
+
+            case 'queryOwing': {
+                const owing = students.filter(s => (s.paid || 0) < (s.totalFee || 0));
+                if (!owing.length) {
+                    const msg = 'All students have paid. Excellent!';
+                    showFeedback(spokenText, msg, '', '📊 Finance Agent');
+                    speak(msg);
+                } else if (owing.length <= 4) {
+                    const names = owing.map(s =>
+                        `${s.name} owes ₦${safeFmt(s.totalFee - (s.paid || 0))}`
+                    ).join(', ');
+                    showFeedback(spokenText, `${owing.length} owing: ${names}`, '', '📊 Finance Agent');
+                    speak(`${owing.length} students are owing. ${names}`);
+                } else {
+                    const total = owing.reduce((s, st) => s + (st.totalFee - (st.paid || 0)), 0);
+                    const msg = `${owing.length} students owe a total of ₦${safeFmt(total)}.`;
+                    showFeedback(spokenText, msg, 'Say "send reminders" to notify them all.', '📊 Finance Agent');
+                    speak(msg);
+                }
+                break;
+            }
+
+            case 'queryTotalStudents': {
+                const msg = `You have ${students.length} enrolled students.`;
+                showFeedback(spokenText, msg, '', '👥 Students Agent');
+                speak(msg);
+                break;
+            }
+
+            case 'sendReminders': {
+                const owing = students.filter(s => (s.paid || 0) < (s.totalFee || 0));
+                if (!owing.length) {
+                    const msg = 'No one is owing. No reminders needed.';
+                    showFeedback(spokenText, msg, '', '💬 Comms Agent');
+                    speak(msg);
+                } else {
+                    owing.forEach(s => {
+                        const out = s.totalFee - (s.paid || 0);
+                        window.open(
+                            `https://wa.me/${s.phone}?text=Dear%20Parent,%0A%0A*${encodeURIComponent(s.name)}*%20owes%20%E2%82%A6${safeFmt(out)}.%0A%0AKindly%20make%20payment%20as%20soon%20as%20possible.%0A%E2%80%93%20School%20Management`,
+                            '_blank'
+                        );
+                    });
+                    const msg = `Sent reminders to ${owing.length} parents.`;
+                    showFeedback(spokenText, msg, 'WhatsApp tabs opened ✓', '💬 Comms Agent');
+                    speak(msg);
+                }
+                break;
+            }
+
+            case 'snapRegister': {
+                triggerOCR();
+                speak('Opening camera. Point at the handwritten register.');
+                break;
+            }
+
+            case 'navigate': {
+                if (parsed.section && typeof go === 'function') {
+                    const secMap={'opportunities':'opps'};
+                    go(secMap[parsed.section]||parsed.section);
+                    const msg = `Opening ${parsed.section}.`;
+                    showFeedback(spokenText, msg, '', '🧭 Navigation');
+                    speak(msg);
+                }
+                break;
+            }
+
+            case 'generateReportCard': {
+                const ctx = { students: students.slice(0, 5) };
+                showFeedback(spokenText, 'Generating report card comment...', '', '📝 Report Card Agent');
+                claudeRespond(spokenText, 'generateReportCard', ctx).then(resp => {
+                    showFeedback(spokenText, resp, 'Generated ✓', '📝 Report Card Agent');
+                    speak(resp);
+                });
+                break;
+            }
+
+            case 'financeAdvice': {
+                const exp = students.reduce((s, st) => s + (st.totalFee || 0), 0);
+                const col = students.reduce((s, st) => s + (st.paid || 0), 0);
+                const ctx = { totalExpected: exp, totalCollected: col, studentCount: students.length };
+                showFeedback(spokenText, 'Analysing your finances...', '', '📊 Finance Agent');
+                claudeRespond(spokenText, 'financeAdvice', ctx).then(resp => {
+                    showFeedback(spokenText, resp, '', '📊 Finance Agent');
+                    speak(resp);
+                });
+                break;
+            }
+
+            case 'help': {
+                const msg = 'You can say: Record payment of 5000 for Aminat. How much have we collected. Who owes. Send reminders. Snap the register. Go to students. Generate comment for Tunde.';
+                showFeedback(spokenText, '🎙️ Available commands', msg, 'Help');
+                speak('Here are some things you can say. Record payment. Check collections. Who owes. Send reminders. Snap the register. Or navigate to any section.');
+                break;
+            }
+
+            default: {
+                const msg = `I did not understand that. Say "help" for a list of commands.`;
+                showFeedback(spokenText, msg, '', '🎙️ Voice Agent');
+                speak(msg);
+            }
+        }
+    }
+
+    // ==================== MAIN COMMAND HANDLER ====================
+    async function handleCommand(spokenText) {
+        showFeedback(spokenText, 'Thinking...', '', '🎙️ Voice Agent');
+
+        // Step 1: Try fast regex
+        let parsed = regexIntent(spokenText);
+
+        // Step 2: Fallback to Claude if regex missed
+        if (!parsed) {
+            showFeedback(spokenText, 'Asking Aari...', '', '🤖 Aari Intelligence');
+            parsed = await claudeIntent(spokenText);
+        }
+
+        // Step 3: Execute
+        executeIntent(parsed, spokenText);
+    }
+
+    // ==================== OCR WITH CLAUDE VISION ====================
+    function triggerOCR() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;           // ← select multiple pages at once
+        input.capture = 'environment';   // rear camera on mobile
+        input.onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+
+            // Reset OCR state
+            ocrPages = files.map(f => ({
+                file: f,
+                previewUrl: URL.createObjectURL(f),
+                mediaType: f.type === 'image/png' ? 'image/png' : 'image/jpeg',
+                base64: null,
+                status: 'loading',
+                names: []
+            }));
+
+            // Show panel with loading states
+            renderOCRPanel();
+            document.getElementById('ocrPreviewPanel').classList.add('show');
+            speak(`Got ${files.length} photo${files.length > 1 ? 's' : ''}. Reading the handwriting now.`);
+
+            // Convert all to base64
+            await Promise.all(ocrPages.map(async (page, i) => {
+                page.base64 = await fileToBase64(page.file);
+            }));
+
+            // Run Claude Vision on all pages in parallel
+            await Promise.all(ocrPages.map(async (page, i) => {
+                try {
+                    page.names = await claudeOCR(page.base64, page.mediaType, i + 1);
+                    page.status = 'done';
+                } catch {
+                    page.status = 'error';
+                    page.names = [];
+                }
+                renderOCRPanel(); // update UI as each page completes
+            }));
+
+            const total = ocrPages.reduce((s, p) => s + p.names.length, 0);
+            speak(`I found ${total} names across ${files.length} page${files.length > 1 ? 's' : ''}. Please review and confirm.`);
+            updateOCRConfirmBtn();
+        };
+        input.click();
+    }
+
+    async function claudeOCR(base64, mediaType, pageNum) {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: Object.assign({'Content-Type':'application/json'}, VA_API_KEY ? {'x-api-key': VA_API_KEY} : {}),
+            body: JSON.stringify({
+                model: CLAUDE_MODEL_FAST,
+                max_tokens: 2000,
+                system: `You are an OCR specialist for Nigerian handwritten school registers.
+Extract ONLY student names. Rules:
+- Image may be rotated any direction — read correctly regardless
+- Nigerian surname FIRST (DADA Aishat = surname DADA, firstname Aishat)
+- Ignore serial numbers, dates, fee amounts, balances, column headers
+- Nigerian names: Yoruba (Gbelekale, Olayiwola), Hausa (Zainab, Rasaq), Igbo (Chisom), English (Dominion, Gold, Success)
+- Read EVERY name — do not skip unclear ones
+- Return names top to bottom as they appear
+
+Return ONLY a valid JSON array:
+[{"surname":"DADA","firstname":"Aishat","fullName":"Dada Aishat"},...]
+If no names: []`,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+                        { type: 'text', text: `Extract all student names from this school register photo (page ${pageNum}).` }
+                    ]
+                }]
+            })
+        });
+        const data = await res.json();
+        const raw = data.content?.[0]?.text || '[]';
+        try {
+            return JSON.parse(raw.replace(/```json|```/g, '').trim());
+        } catch {
+            return [];
+        }
+    }
+
+    async function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result.split(',')[1]);
+            r.onerror = reject;
+            r.readAsDataURL(file);
+        });
+    }
+
+    // ==================== OCR PANEL RENDERER ====================
+    function renderOCRPanel() {
+        const list = document.getElementById('ocrPageList');
+        list.innerHTML = '';
+
+        ocrPages.forEach((page, pi) => {
+            const card = document.createElement('div');
+            card.className = 'ocr-page-card';
+            card.id = `ocrPage_${pi}`;
+
+            const total = page.names.length;
+            card.innerHTML = `
+                <div class="ocr-page-header">
+                    <span>Page ${pi + 1} — ${page.file.name}</span>
+                    <span class="ocr-total-badge">${page.status === 'loading' ? '...' : total + ' names'}</span>
+                </div>
+                <div class="ocr-split">
+                    <div class="ocr-photo-side">
+                        <img src="${page.previewUrl}" alt="Page ${pi+1}"
+                             onclick="this.style.maxHeight = this.style.maxHeight ? '' : 'none'" />
+                        <div class="ocr-photo-label">Original · tap to expand</div>
+                    </div>
+                    <div class="ocr-names-side">
+                        <div class="ocr-names-label">Typed Names</div>
+                        ${page.status === 'loading'
+                            ? `<div class="ocr-loading">
+                                 <div class="ocr-spinner"></div>
+                                 <span style="font-size:0.75rem;color:#888">Aari is reading...</span>
+                               </div>`
+                            : page.status === 'error'
+                            ? `<div style="padding:12px;font-size:0.8rem;color:#DC2626">Could not read this photo. Try a clearer shot.</div>`
+                            : page.names.map((n, ni) => `
+                                <div class="ocr-name-row" id="ocrName_${pi}_${ni}">
+                                    <span class="ocr-name-num">${ni+1}.</span>
+                                    <span class="ocr-name-text" id="ocrNameTxt_${pi}_${ni}">${n.fullName}</span>
+                                    <button class="ocr-name-edit" onclick="editOCRName(${pi},${ni})">✏️</button>
+                                    <button class="ocr-name-del"  onclick="removeOCRName(${pi},${ni})">✕</button>
+                                </div>`).join('')
+                        }
+                    </div>
+                </div>`;
+            list.appendChild(card);
+        });
+        updateOCRConfirmBtn();
+    }
+
+    function updateOCRConfirmBtn() {
+        const total = ocrPages.reduce((s, p) => s + p.names.length, 0);
+        const btn2 = document.getElementById('ocrConfirmBtn');
+        if (btn2) btn2.textContent = `✅ Add All ${total} Students to Class`;
+    }
+
+    // Expose edit/delete to global scope so inline onclick works
+    window.editOCRName = function(pi, ni) {
+        const el = document.getElementById(`ocrNameTxt_${pi}_${ni}`);
+        if (!el) return;
+        const current = el.textContent;
+        el.innerHTML = `<input value="${current}" style="width:100%;border:1px solid #6E1F8B;border-radius:4px;padding:2px 4px;font-family:Georgia,serif;font-size:0.78rem"
+            onblur="saveOCRName(${pi},${ni},this.value)"
+            onkeydown="if(event.key==='Enter')this.blur()"
+            autofocus />`;
+    };
+
+    window.saveOCRName = function(pi, ni, val) {
+        if (!ocrPages[pi]) return;
+        const parts = val.trim().split(' ');
+        ocrPages[pi].names[ni] = {
+            surname: parts[0] || '',
+            firstname: parts.slice(1).join(' ') || '',
+            fullName: val.trim()
+        };
+        renderOCRPanel();
+    };
+
+    window.removeOCRName = function(pi, ni) {
+        if (!ocrPages[pi]) return;
+        ocrPages[pi].names.splice(ni, 1);
+        renderOCRPanel();
+    };
+
+    window.confirmOCRNames = function() {
+        const allNames = ocrPages.flatMap(p => p.names.map(n => ({
+            name: n.fullName,
+            surname: n.surname,
+            firstname: n.firstname,
+        })));
+
+        if (!allNames.length) {
+            speak('No names to add.');
+            return;
+        }
+
+        // Add to SD (school app) with SQ sync
+        if (typeof SD !== 'undefined') {
+            const fee = SD.config && SD.config.fee ? SD.config.fee : 50000;
+            const newStudents = allNames.map((n, i) => ({
+                id: 'ocr_' + Date.now() + '_' + i,
+                name: n.fullName || n.name,
+                phone: '', class: '',
+                totalFee: fee, paid: 0, scores: {}, swot: {}
+            }));
+            SD.students = [...(SD.students||[]), ...newStudents];
+            if (typeof SQ !== 'undefined') SQ.push('students', SD.students);
+            if (typeof checkTierStatus === 'function') checkTierStatus();
+            if (typeof renderStudentList === 'function') renderStudentList();
+            if (typeof renderBanner === 'function') renderBanner();
+            if (typeof renderRevenue === 'function') renderRevenue();
+        }
+
+        const msg = `Added ${allNames.length} students successfully.`;
+        document.getElementById('ocrPreviewPanel').classList.remove('show');
+        showFeedback(null, '✅ ' + msg, 'Students saved ✓', '📸 OCR Agent');
+        speak(msg);
+
+        ocrPages = [];
+    };
+
+    // ==================== SPEECH RECOGNITION ====================
+    function startListening() {
+        if (!SR) {
+            alert('Voice recognition requires Chrome on Android. Please open EduBloom in Chrome.');
+            return;
+        }
+        if (!recognition) {
+            recognition = new SR();
+            recognition.lang = 'en-NG';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onresult = (e) => {
+                const spoken = e.results[0][0].transcript;
+                stopListening();
+                handleCommand(spoken);
+            };
+            recognition.onerror = (e) => {
+                console.warn('Speech error:', e.error);
+                if (e.error === 'no-speech')
+                    showFeedback(null, 'I did not hear anything. Tap the mic and try again.', '', '🎙️');
+                else if (e.error === 'network')
+                    showFeedback(null, 'Network issue. Try offline commands like "who owes".', '', '🎙️');
+                stopListening();
+            };
+            recognition.onend = stopListening;
+        }
+        try {
+            recognition.start();
+            isListening = true;
+            btn.classList.add('listening');
+            btn.textContent = '🔴';
+            showFeedback(null, 'Listening... speak now', '', '🎙️');
+        } catch (e) {
+            console.warn(e);
+            stopListening();
+        }
+    }
+
+    function stopListening() {
+        isListening = false;
+        btn.classList.remove('listening');
+        btn.textContent = '🎙️';
+        try { recognition?.stop(); } catch (e) {}
+    }
+
+    btn.addEventListener('click', () => isListening ? stopListening() : startListening());
+
+    // ==================== GLOBAL EXPOSE ====================
+    window.voiceAgent = {
+        start: startListening,
+        stop: stopListening,
+        speak: speak,
+        triggerOCR: triggerOCR,
+        isListening: () => isListening
+    };
+
+    console.log('🎙️ EduBloom Hybrid Voice Agent ready. Regex + Aari Claude. OCR: Claude Vision.');
+
+
+})();
+  </script>
+
 </body>
 </html>
