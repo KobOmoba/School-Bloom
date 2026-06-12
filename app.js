@@ -13,51 +13,74 @@ try{
 // Strict JSON schema prevents hallucinations — no phantom names
 // Key stored encoded; managed via AariNAT Command Center Settings
 const GEMINI_KEY  = atob('QVEuQWI4Uk42SWE4WjVNNmNVMkh2WkV1NGMyRF9TdnVEZWlDOE16ZmgyYkY2X1lsM0UxVGc=');
-const GEMINI_MODEL = 'gemini-2.0-flash';
+// Try these models in order — newer ones first, fall back if unavailable
+const GEMINI_MODELS = ['gemini-2.0-flash','gemini-2.0-flash-exp','gemini-1.5-flash','gemini-1.5-flash-latest'];
 
-async function geminiOCR(base64, mime){
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
-  const body = {
-    contents:[{
-      parts:[
-        { inline_data:{ mime_type:mime, data:base64 } },
-        { text:`Extract every student name from this Nigerian school register photo.
-Nigerian format: SURNAME FIRSTNAME (e.g. DADA Moses, GBELEKALE Aminat).
-- Image may be rotated — read correctly regardless of orientation
-- Ignore: serial numbers, amounts, "BALANCE", "CLASS", column headers, dates
-- Include ALL names visible, even if handwriting is unclear — approximate
-- Do not skip any name
-Return only the JSON.` }
-      ]
-    }],
-    generationConfig:{
-      response_mime_type:'application/json',
-      response_schema:{
+const GEMINI_PROMPT = `Extract every student name from this Nigerian school register photo.
+Nigerian format: SURNAME FIRSTNAME (e.g. DADA Moses, GBELEKALE Aminat, KASALI Rasaq).
+Rules:
+- Image may be rotated any direction — read correctly regardless of orientation
+- Ignore serial numbers, fee amounts, BALANCE, CLASS headers, dates, totals
+- Include ALL names visible even if handwriting is unclear — make your best attempt
+- Common Nigerian surnames: Oliyide, Gbelekale, Ogunlade, Kasali, Alawode, Shonpe, Lawal, Ogunsola, Dada, Idowu, Awolowo, Adebayo, Akinola, Oyesanwo
+Return ONLY the JSON object.`;
+
+const GEMINI_SCHEMA = {
+  type:'OBJECT',
+  properties:{
+    students:{
+      type:'ARRAY',
+      items:{
         type:'OBJECT',
         properties:{
-          students:{
-            type:'ARRAY',
-            items:{
-              type:'OBJECT',
-              properties:{
-                surname:  { type:'STRING' },
-                firstname:{ type:'STRING' },
-                fullName: { type:'STRING' }
-              },
-              required:['surname','firstname','fullName']
-            }
-          }
+          surname:  {type:'STRING'},
+          firstname:{type:'STRING'},
+          fullName: {type:'STRING'}
         },
-        required:['students']
+        required:['surname','firstname','fullName']
       }
     }
-  };
-  const r = await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-  const d = await r.json();
-  if(d.error) throw new Error(d.error.message||'Gemini error');
-  const raw = d.candidates?.[0]?.content?.parts?.[0]?.text||'{"students":[]}';
-  const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
-  return parsed.students||[];
+  },
+  required:['students']
+};
+
+async function geminiOCR(base64, mime){
+  let lastError = null;
+  for(const model of GEMINI_MODELS){
+    try{
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+      const r = await fetch(url,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          contents:[{parts:[
+            {inline_data:{mime_type:mime,data:base64}},
+            {text:GEMINI_PROMPT}
+          ]}],
+          generationConfig:{
+            response_mime_type:'application/json',
+            response_schema:GEMINI_SCHEMA
+          }
+        })
+      });
+      const d = await r.json();
+      if(d.error){
+        lastError = d.error.message||'Gemini error';
+        // 404 = model not found — try next
+        if(d.error.code===404||d.error.status==='NOT_FOUND') continue;
+        throw new Error(lastError);
+      }
+      const raw = d.candidates?.[0]?.content?.parts?.[0]?.text||'{"students":[]}';
+      const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+      const students = parsed.students||[];
+      console.log(`✅ Gemini OCR (${model}): ${students.length} names`);
+      return students;
+    }catch(e){
+      lastError = e.message;
+      console.warn(`Gemini ${model} failed:`, e.message);
+    }
+  }
+  throw new Error('All Gemini models failed: ' + lastError);
 }
 
 
@@ -214,6 +237,19 @@ const SQ={
       }
     }
     if(netOk) this._offlineSince=null; // reset on next online ping
+    // Extra: if navigator says offline, try a real network probe after 2s
+    if(!netOk && !this._probing){
+      this._probing=true;
+      setTimeout(async()=>{
+        try{
+          await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`,
+            {method:'HEAD',signal:AbortSignal.timeout(4000)});
+          // If we get here, network is actually available
+          this._offlineSince=null; this.ping();
+        }catch(e){ /* truly offline */ }
+        this._probing=false;
+      },2000);
+    }
     if(syncOk&&this.q.length)this.flush();
   },
   async flush(){
@@ -723,8 +759,13 @@ function contactAdminForUpgrade(){
 function renderBanner(){
   let out=0,cnt=0;
   (SD.students||[]).forEach(s=>{const o=(s.totalFee||0)-(s.paid||0);if(o>0){out+=o;cnt++;}});
-  $('banner-amount').textContent=fmt(out);
-  $('banner-sub').textContent=`${cnt} parent${cnt!==1?'s':''} overdue · ${SD.students.length} total students`;
+  const amtEl=$('banner-amount'); if(amtEl) amtEl.textContent=fmt(out);
+  const subEl=$('banner-sub');
+  if(subEl){
+    const total=(SD.students||[]).length;
+    if(total===0) subEl.textContent='No students yet — add your first student';
+    else subEl.textContent=`${cnt} parent${cnt!==1?'s':''} overdue · ${total} total student${total!==1?'s':''}`;
+  }
 }
 
 // ── 1. REVENUE ─────────────────────────────────────────────────────────────
@@ -999,6 +1040,26 @@ async function _readOnePage(file, pageNum, total, fbEl){
           return;
         }
       }catch(e){ console.warn(`Page ${pageNum} OCR.space failed:`,e.message); }
+
+      // ── Last resort: Tesseract offline ───────────────────────────────────────
+      try{
+        if(fbEl) fbEl.textContent=`📸 Page ${pageNum}/${total}: offline OCR (~30s)...`;
+        const loadTesseract=()=>new Promise((res,rej)=>{
+          if(window.Tesseract){res();return;}
+          const s=document.createElement('script');
+          s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+          s.onload=res;s.onerror=rej;document.head.appendChild(s);
+        });
+        await loadTesseract();
+        const{data:{text}}=await Tesseract.recognize(imgData,'eng',{
+          logger:m=>{if(m.status==='recognizing text'&&fbEl)
+            fbEl.textContent=`📸 Page ${pageNum}/${total}: offline OCR ${Math.round((m.progress||0)*100)}%...`;}
+        });
+        if(text.trim()){
+          const raw=extractStudentNames(text);
+          if(raw.length){ resolve(raw.map(n=>({surname:'',firstname:'',fullName:n}))); return; }
+        }
+      }catch(e){ console.warn(`Page ${pageNum} Tesseract failed:`,e.message); }
 
       resolve([]);
     };
