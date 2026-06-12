@@ -842,6 +842,65 @@ function toggleEye(inputId, btn) {
   </nav>
 </div>
 
+
+  <!-- ══ OCR REVIEW MODAL ══════════════════════════════════════════════ -->
+  <div class="modal" id="ocr-review-modal">
+    <div class="mbox" style="max-width:500px;width:96%;max-height:92vh;
+      display:flex;flex-direction:column;padding:1rem;">
+      <button class="mclose" onclick="closeM('ocr-review-modal')">✕</button>
+
+      <div class="ct" style="margin-bottom:0.3rem;">📋 Review Before Importing</div>
+      <div id="ocr-review-info" style="font-size:0.74rem;color:var(--sub);margin-bottom:0.65rem;line-height:1.4;"></div>
+
+      <!-- Bulk controls -->
+      <div style="display:flex;gap:6px;margin-bottom:0.5rem;flex-shrink:0;flex-wrap:wrap;">
+        <button onclick="ocrSelectAll(true)"
+          style="background:var(--s2);border:1px solid var(--border);border-radius:7px;
+          padding:5px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;color:var(--text);">
+          ✓ All
+        </button>
+        <button onclick="ocrSelectAll(false)"
+          style="background:var(--s2);border:1px solid var(--border);border-radius:7px;
+          padding:5px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;color:var(--sub);">
+          ✗ None
+        </button>
+        <input id="ocr-class-all" placeholder="Set class for all (e.g. Basic 4)"
+          onchange="ocrSetClassAll()"
+          style="flex:1;min-width:120px;border:1px solid var(--border);border-radius:7px;
+          padding:5px 8px;font-size:0.75rem;background:var(--bg);color:var(--text);
+          font-family:inherit;outline:none;">
+      </div>
+
+      <!-- Header row -->
+      <div style="display:flex;gap:6px;padding:0 4px 4px;flex-shrink:0;
+        font-size:0.68rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.8px;">
+        <div style="width:18px;flex-shrink:0;"></div>
+        <div style="flex:1;">Student Name</div>
+        <div style="width:72px;flex-shrink:0;">Class</div>
+        <div style="width:28px;flex-shrink:0;"></div>
+      </div>
+
+      <!-- Scrollable name list -->
+      <div id="ocr-review-list"
+        style="overflow-y:auto;flex:1;border:1px solid var(--border);
+        border-radius:8px;min-height:200px;max-height:52vh;">
+      </div>
+
+      <!-- Confirm button -->
+      <button id="ocr-confirm-btn" onclick="ocrConfirmImport()"
+        style="margin-top:0.75rem;width:100%;background:var(--brand);color:#fff;
+        border:none;border-radius:10px;padding:13px;font-size:0.92rem;
+        font-weight:800;cursor:pointer;font-family:inherit;flex-shrink:0;">
+        ✅ Add 0 Students
+      </button>
+
+      <div style="text-align:center;margin-top:0.5rem;font-size:0.7rem;color:var(--sub);">
+        Untick any name that looks wrong · Tap name to edit · Powered by Gemini Flash
+      </div>
+    </div>
+  </div>
+  <!-- ══ END OCR REVIEW MODAL ══════════════════════════════════════════ -->
+
 <!-- ══════════════ MODALS ══════════════ -->
 
 <div class="modal" id="student-modal">
