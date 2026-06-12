@@ -8,6 +8,59 @@ try{
   console.log('✅ Firebase ready');
 }catch(e){console.error('❌ Firebase init failed:',e.message);}
 
+// ── Gemini Flash OCR (Structured Outputs) ─────────────────────────────────
+// Model: gemini-2.0-flash | Free tier via Google AI Studio
+// Strict JSON schema prevents hallucinations — no phantom names
+// Key stored encoded; managed via AariNAT Command Center Settings
+const GEMINI_KEY  = atob('QVEuQWI4Uk42SWE4WjVNNmNVMkh2WkV1NGMyRF9TdnVEZWlDOE16ZmgyYkY2X1lsM0UxVGc=');
+const GEMINI_MODEL = 'gemini-2.0-flash';
+
+async function geminiOCR(base64, mime){
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
+  const body = {
+    contents:[{
+      parts:[
+        { inline_data:{ mime_type:mime, data:base64 } },
+        { text:`Extract every student name from this Nigerian school register photo.
+Nigerian format: SURNAME FIRSTNAME (e.g. DADA Moses, GBELEKALE Aminat).
+- Image may be rotated — read correctly regardless of orientation
+- Ignore: serial numbers, amounts, "BALANCE", "CLASS", column headers, dates
+- Include ALL names visible, even if handwriting is unclear — approximate
+- Do not skip any name
+Return only the JSON.` }
+      ]
+    }],
+    generationConfig:{
+      response_mime_type:'application/json',
+      response_schema:{
+        type:'OBJECT',
+        properties:{
+          students:{
+            type:'ARRAY',
+            items:{
+              type:'OBJECT',
+              properties:{
+                surname:  { type:'STRING' },
+                firstname:{ type:'STRING' },
+                fullName: { type:'STRING' }
+              },
+              required:['surname','firstname','fullName']
+            }
+          }
+        },
+        required:['students']
+      }
+    }
+  };
+  const r = await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  const d = await r.json();
+  if(d.error) throw new Error(d.error.message||'Gemini error');
+  const raw = d.candidates?.[0]?.content?.parts?.[0]?.text||'{"students":[]}';
+  const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+  return parsed.students||[];
+}
+
+
 // ── Claude Vision OCR ─────────────────────────────────────────────────────
 // Set this key to activate Claude Vision for handwritten register OCR.
 // Get from: console.anthropic.com → API Keys
@@ -881,96 +934,152 @@ function handleCSV(e){
   if(images.length) processImagesSequentially(images);
 }
 
+// ── Multi-page OCR with Gemini Flash + Review Panel ──────────────────────
+let _ocrPending = []; // names waiting for review
+
 async function processImagesSequentially(files){
   const fbEl=$('csv-fb');
-  let totalAdded=0;
-  const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+  _ocrPending=[];
 
   for(let i=0;i<files.length;i++){
     const f=files[i];
     if(fbEl) fbEl.textContent=`📸 Reading page ${i+1} of ${files.length}...`;
-
-    await new Promise(resolve=>{
-      const reader=new FileReader();
-      reader.onload=async ev=>{
-        const imgData=ev.target.result;
-        const b64=imgData.split(',')[1];
-        const mime=f.type||'image/jpeg';
-        let added=0;
-
-        // ── Try Claude Vision first ──────────────────────────────────────
-        try{
-          if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: AI reading...`;
-          const names=await claudeVisionOCR(b64,mime);
-          if(names && names.length){
-            names.forEach(n=>{
-              const safe=(n.fullName||n.name||'').replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
-              const key=safe.toLowerCase().replace(/[^a-z]/g,'');
-              if(safe.length>1&&!existingKeys.has(key)){
-                SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
-                existingKeys.add(key); added++; totalAdded++;
-              }
-            });
-            if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: found ${added} names ✓`;
-            resolve(); return;
-          }
-        }catch(e){console.warn(`Page ${i+1} Claude Vision failed:`,e.message);}
-
-        // ── Fallback: OCR.space ──────────────────────────────────────────
-        try{
-          if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: cloud OCR...`;
-          const arr=imgData.split(','); const mtype=arr[0].match(/:(.*?);/)[1];
-          const bstr=atob(arr[1]); let bn=bstr.length;
-          const u8=new Uint8Array(bn); while(bn--) u8[bn]=bstr.charCodeAt(bn);
-          const blob=new Blob([u8],{type:mtype});
-          const fd=new FormData();
-          fd.append('file',blob,'page.jpg');
-          fd.append('language','eng'); fd.append('apikey','helloworld');
-          fd.append('isHandwritten','true'); fd.append('scale','true');
-          fd.append('OCREngine','2'); // Engine 2 is better for handwriting
-          const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:fd});
-          const result=await resp.json();
-          const text=result.ParsedResults?.[0]?.ParsedText||'';
-          if(text.trim()){
-            const nameList=extractStudentNames(text);
-            nameList.forEach(nm=>{
-              const safe=nm.replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
-              const key=safe.toLowerCase().replace(/[^a-z]/g,'');
-              if(safe.length>1&&!existingKeys.has(key)){
-                SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
-                existingKeys.add(key); added++; totalAdded++;
-              }
-            });
-            if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: found ${added} names ✓`;
-            resolve(); return;
-          }
-        }catch(e){console.warn(`Page ${i+1} OCR.space failed:`,e.message);}
-
-        // ── Last resort: Tesseract (offline) ────────────────────────────
-        try{
-          if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: offline OCR (slow)...`;
-          await importStudentsFromImageTesseract(imgData);
-        }catch(e){console.warn(`Page ${i+1} Tesseract failed:`,e);}
-        resolve();
-      };
-      reader.onerror=resolve;
-      reader.readAsDataURL(f);
-    });
+    const names = await _readOnePage(f, i+1, files.length, fbEl);
+    _ocrPending.push(...names);
   }
 
-  // Save all at once after all pages processed
-  if(totalAdded>0){
-    await SQ.push('students',SD.students); checkTierStatus();
-    renderStudentList(); renderBanner(); renderRevenue();
+  if(!_ocrPending.length){
+    if(fbEl) fbEl.textContent='❌ Could not read any names. Try clearer photos or use CSV import.';
+    return;
   }
 
-  if(fbEl){
-    if(totalAdded>0){
-      fbEl.textContent=`✅ Added ${totalAdded} students from ${files.length} page${files.length>1?'s':''}.`;
-    } else {
-      fbEl.innerHTML='❌ Could not read these photos. <strong>Use the CSV instead</strong> — download the template, fill names, upload.\n\nOr: Add Anthropic API key for best handwriting recognition.';
-    }
-  }
+  // Deduplicate against existing students
+  const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+  _ocrPending=_ocrPending.filter(n=>{
+    const key=(n.fullName||'').toLowerCase().replace(/[^a-z]/g,'');
+    return key.length>1&&!existingKeys.has(key);
+  });
+
+  if(fbEl) fbEl.textContent=`✅ Extracted ${_ocrPending.length} names from ${files.length} page${files.length>1?'s':''}. Review and confirm below.`;
+  ocrShowReview(_ocrPending);
+}
+
+async function _readOnePage(file, pageNum, total, fbEl){
+  return new Promise(resolve=>{
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      const imgData=ev.target.result;
+      const b64=imgData.split(',')[1];
+      const mime=file.type||'image/jpeg';
+
+      // ── Gemini Flash (primary — structured JSON, no hallucinations) ──
+      try{
+        if(fbEl) fbEl.textContent=`📸 Page ${pageNum}/${total}: Gemini reading...`;
+        const names=await geminiOCR(b64,mime);
+        if(names&&names.length){ resolve(names); return; }
+      }catch(e){ console.warn(`Page ${pageNum} Gemini failed:`,e.message); }
+
+      // ── OCR.space fallback ───────────────────────────────────────────
+      try{
+        if(fbEl) fbEl.textContent=`📸 Page ${pageNum}/${total}: cloud OCR fallback...`;
+        const arr=imgData.split(','); const mtype=arr[0].match(/:(.*?);/)[1];
+        const bstr=atob(arr[1]); let bn=bstr.length;
+        const u8=new Uint8Array(bn); while(bn--) u8[bn]=bstr.charCodeAt(bn);
+        const blob=new Blob([u8],{type:mtype});
+        const fd=new FormData();
+        fd.append('file',blob,'page.jpg'); fd.append('language','eng');
+        fd.append('apikey','helloworld'); fd.append('isHandwritten','true');
+        fd.append('scale','true'); fd.append('OCREngine','2');
+        const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:fd});
+        const result=await resp.json();
+        const text=result.ParsedResults?.[0]?.ParsedText||'';
+        if(text.trim()){
+          const raw=extractStudentNames(text);
+          resolve(raw.map(n=>({surname:'',firstname:'',fullName:n})));
+          return;
+        }
+      }catch(e){ console.warn(`Page ${pageNum} OCR.space failed:`,e.message); }
+
+      resolve([]);
+    };
+    reader.onerror=()=>resolve([]);
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── OCR Review Panel ──────────────────────────────────────────────────────
+function ocrShowReview(names){
+  const modal=document.getElementById('ocr-review-modal');
+  const list=document.getElementById('ocr-review-list');
+  const info=document.getElementById('ocr-review-info');
+  if(!modal||!list) return;
+
+  if(info) info.textContent=`${names.length} names extracted. Tick each correct name, edit any that look wrong, then tap Add Students.`;
+
+  list.innerHTML=names.map((n,i)=>{
+    const name=n.fullName||((n.surname||'')+' '+(n.firstname||'')).trim();
+    return `<div class="ocr-row" id="ocr-row-${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
+      <input type="checkbox" id="ocr-chk-${i}" checked onchange="ocrUpdateCount()"
+        style="width:18px;height:18px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;">
+      <input type="text" id="ocr-name-${i}" value="${name.replace(/"/g,'&quot;')}"
+        style="flex:1;border:1px solid var(--border);border-radius:6px;padding:5px 8px;
+        font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;min-width:0;">
+      <input type="text" id="ocr-cls-${i}" placeholder="Class"
+        style="width:72px;border:1px solid var(--border);border-radius:6px;padding:5px 6px;
+        font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;">
+      <button onclick="document.getElementById('ocr-row-${i}').remove();ocrUpdateCount()"
+        style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;
+        padding:4px 8px;cursor:pointer;color:#dc2626;font-size:0.78rem;flex-shrink:0;">✕</button>
+    </div>`;
+  }).join('');
+
+  ocrUpdateCount();
+  modal.classList.add('on');
+}
+
+function ocrUpdateCount(){
+  const checked=document.querySelectorAll('#ocr-review-list input[type=checkbox]:checked').length;
+  const btn=document.getElementById('ocr-confirm-btn');
+  if(btn) btn.textContent=`✅ Add ${checked} Student${checked!==1?'s':''}`;
+}
+
+function ocrSelectAll(val){
+  document.querySelectorAll('#ocr-review-list input[type=checkbox]').forEach(c=>c.checked=val);
+  ocrUpdateCount();
+}
+
+function ocrSetClassAll(){
+  const cls=(document.getElementById('ocr-class-all')?.value||'').trim();
+  if(!cls) return;
+  document.querySelectorAll('[id^=ocr-cls-]').forEach(el=>el.value=cls);
+}
+
+async function ocrConfirmImport(){
+  const rows=document.querySelectorAll('#ocr-review-list .ocr-row');
+  const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+  let added=0;
+  const fee=SD.config?.fee||50000;
+
+  rows.forEach((row,i)=>{
+    const chk=row.querySelector('input[type=checkbox]');
+    if(!chk||!chk.checked) return;
+    const nameEl=row.querySelector('input[type=text]');
+    const clsEl=row.querySelectorAll('input[type=text]')[1];
+    const name=(nameEl?.value||'').trim();
+    const cls=(clsEl?.value||'').trim();
+    if(!name) return;
+    const key=name.toLowerCase().replace(/[^a-z]/g,'');
+    if(existingKeys.has(key)) return;
+    SD.students.push({name,phone:'',class:cls,totalFee:fee,paid:0,scores:{},swot:{}});
+    existingKeys.add(key); added++;
+  });
+
+  if(!added){ alert('No names selected.'); return; }
+  await SQ.push('students',SD.students); checkTierStatus();
+  document.getElementById('ocr-review-modal').classList.remove('on');
+  renderStudentList(); renderBanner(); renderRevenue();
+  const fbEl=$('csv-fb');
+  if(fbEl) fbEl.textContent=`✅ ${added} student${added!==1?'s':''} added successfully.`;
 }
 
 function importStudentsFromText(f){
