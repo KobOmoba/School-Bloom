@@ -868,13 +868,109 @@ async function deleteStudent(idx){
 
 // ── Universal student import: CSV, TXT, JPG, PNG, JPEG, WEBP ─────────────
 function handleCSV(e){
-  const f=e.target.files[0];if(!f)return;
-  const name=(f.name||'').toLowerCase();
-  const type=(f.type||'').toLowerCase();
-  const isImage=type.startsWith('image/')||/\.(jpg|jpeg|png|webp|bmp)$/.test(name);
-  if(isImage){importStudentsFromImage(f);}
-  else{importStudentsFromText(f);}
+  const files=Array.from(e.target.files||[]); if(!files.length)return;
   e.target.value='';
+  const images=files.filter(f=>{
+    const n=(f.name||'').toLowerCase(),t=(f.type||'').toLowerCase();
+    return t.startsWith('image/')||/\.(jpg|jpeg|png|webp|bmp)$/.test(n);
+  });
+  const texts=files.filter(f=>!images.includes(f));
+  // Process text/CSV files immediately (sync)
+  texts.forEach(f=>importStudentsFromText(f));
+  // Process images sequentially with progress feedback
+  if(images.length) processImagesSequentially(images);
+}
+
+async function processImagesSequentially(files){
+  const fbEl=$('csv-fb');
+  let totalAdded=0;
+  const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    if(fbEl) fbEl.textContent=`📸 Reading page ${i+1} of ${files.length}...`;
+
+    await new Promise(resolve=>{
+      const reader=new FileReader();
+      reader.onload=async ev=>{
+        const imgData=ev.target.result;
+        const b64=imgData.split(',')[1];
+        const mime=f.type||'image/jpeg';
+        let added=0;
+
+        // ── Try Claude Vision first ──────────────────────────────────────
+        try{
+          if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: AI reading...`;
+          const names=await claudeVisionOCR(b64,mime);
+          if(names && names.length){
+            names.forEach(n=>{
+              const safe=(n.fullName||n.name||'').replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
+              const key=safe.toLowerCase().replace(/[^a-z]/g,'');
+              if(safe.length>1&&!existingKeys.has(key)){
+                SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+                existingKeys.add(key); added++; totalAdded++;
+              }
+            });
+            if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: found ${added} names ✓`;
+            resolve(); return;
+          }
+        }catch(e){console.warn(`Page ${i+1} Claude Vision failed:`,e.message);}
+
+        // ── Fallback: OCR.space ──────────────────────────────────────────
+        try{
+          if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: cloud OCR...`;
+          const arr=imgData.split(','); const mtype=arr[0].match(/:(.*?);/)[1];
+          const bstr=atob(arr[1]); let bn=bstr.length;
+          const u8=new Uint8Array(bn); while(bn--) u8[bn]=bstr.charCodeAt(bn);
+          const blob=new Blob([u8],{type:mtype});
+          const fd=new FormData();
+          fd.append('file',blob,'page.jpg');
+          fd.append('language','eng'); fd.append('apikey','helloworld');
+          fd.append('isHandwritten','true'); fd.append('scale','true');
+          fd.append('OCREngine','2'); // Engine 2 is better for handwriting
+          const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:fd});
+          const result=await resp.json();
+          const text=result.ParsedResults?.[0]?.ParsedText||'';
+          if(text.trim()){
+            const nameList=extractStudentNames(text);
+            nameList.forEach(nm=>{
+              const safe=nm.replace(/[^a-zA-Z\s'\-.]/g,'').replace(/\s+/g,' ').trim();
+              const key=safe.toLowerCase().replace(/[^a-z]/g,'');
+              if(safe.length>1&&!existingKeys.has(key)){
+                SD.students.push({name:safe,phone:'',class:'',totalFee:SD.config.fee||50000,paid:0,scores:{},swot:{}});
+                existingKeys.add(key); added++; totalAdded++;
+              }
+            });
+            if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: found ${added} names ✓`;
+            resolve(); return;
+          }
+        }catch(e){console.warn(`Page ${i+1} OCR.space failed:`,e.message);}
+
+        // ── Last resort: Tesseract (offline) ────────────────────────────
+        try{
+          if(fbEl) fbEl.textContent=`📸 Page ${i+1}/${files.length}: offline OCR (slow)...`;
+          await importStudentsFromImageTesseract(imgData);
+        }catch(e){console.warn(`Page ${i+1} Tesseract failed:`,e);}
+        resolve();
+      };
+      reader.onerror=resolve;
+      reader.readAsDataURL(f);
+    });
+  }
+
+  // Save all at once after all pages processed
+  if(totalAdded>0){
+    await SQ.push('students',SD.students); checkTierStatus();
+    renderStudentList(); renderBanner(); renderRevenue();
+  }
+
+  if(fbEl){
+    if(totalAdded>0){
+      fbEl.textContent=`✅ Added ${totalAdded} students from ${files.length} page${files.length>1?'s':''}.`;
+    } else {
+      fbEl.innerHTML='❌ Could not read these photos. <strong>Use the CSV instead</strong> — download the template, fill names, upload.\n\nOr: Add Anthropic API key for best handwriting recognition.';
+    }
+  }
 }
 
 function importStudentsFromText(f){
