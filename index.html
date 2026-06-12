@@ -294,7 +294,7 @@ function toggleEye(inputId, btn) {
         <button class="btn-brand btn-sm" style="background:#059669;" onclick="openScriptScan()">📝 Scan Scripts</button>
         <button class="btn-ghost btn-sm" style="color:var(--text);" onclick="$('csv-up').click()">📁 Import (CSV / Photo)</button>
         <button class="btn-ghost btn-sm" style="color:var(--danger);" onclick="fixGarbledNames()">🔧 Fix Names</button>
-        <input type="file" id="csv-up" accept=".csv,.txt,.jpg,.jpeg,.png,.webp" style="display:none;" onchange="handleCSV(event)">
+        <input type="file" id="csv-up" accept=".csv,.txt,.jpg,.jpeg,.png,.webp,image/*" multiple style="display:none;" onchange="handleCSV(event)">
       </div>
       <div id="csv-fb" style="font-size:0.75rem;color:var(--money);margin-bottom:0.4rem;"></div>
       <div id="students-list"></div>
