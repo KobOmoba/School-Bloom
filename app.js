@@ -2,9 +2,17 @@
 const FB={apiKey:"AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o",authDomain:"educationbloom-699ed.firebaseapp.com",projectId:"educationbloom-699ed",storageBucket:"educationbloom-699ed.firebasestorage.app",messagingSenderId:"33750392965",appId:"1:33750392965:web:2b3da887ede996ea8389ec"};
 let db=null;
 try{
-  // If already initialized (e.g. hot reload), reuse existing app
   const fbApp=firebase.apps.length?firebase.app():firebase.initializeApp(FB);
   db=firebase.firestore(fbApp);
+  // Long-poll settings — reduces failed connections on mobile
+  db.settings({experimentalForceLongPolling:true,merge:true});
+  // Offline persistence — app works without internet after first login
+  db.enablePersistence({synchronizeTabs:true})
+    .then(()=>console.log('✅ Offline persistence enabled'))
+    .catch(err=>{
+      if(err.code!=='failed-precondition'&&err.code!=='unimplemented')
+        console.warn('Persistence error:',err.code);
+    });
   console.log('✅ Firebase ready');
 }catch(e){console.error('❌ Firebase init failed:',e.message);}
 
@@ -218,39 +226,37 @@ const SQ={
     this.flush();
   },
   ping(){
-    const netOk=navigator.onLine;
-    const syncOk=netOk&&!!db;
     const el=$('sync');
-    if(el){
-      if(netOk&&this.q.length){ el.className='sdot sd-sync'; el.textContent='● Syncing'; }
-      else if(netOk){           el.className='sdot sd-on';   el.textContent='● Online';  }
-      else {
-        // Don't show Offline immediately — Android gives false negatives on load.
-        // Only show Offline if we've been disconnected for more than 4 seconds.
-        if(!this._offlineSince) this._offlineSince=Date.now();
-        const secs=Math.round((Date.now()-this._offlineSince)/1000);
-        if(secs<4){
-          el.className='sdot sd-sync'; el.textContent='● Connecting...';
-        } else {
-          el.className='sdot sd-off'; el.textContent='● Offline';
-        }
+    // Trust navigator.onLine = true immediately.
+    // For false: probe Firestore directly — Android gives false negatives.
+    if(navigator.onLine){
+      this._offlineSince=null; this._probing=false;
+      if(el){
+        el.className='sdot '+(this.q.length?'sd-sync':'sd-on');
+        el.textContent=this.q.length?'● Syncing':'● Online';
+      }
+      if(db&&this.q.length) this.flush();
+    } else {
+      // Not yet confirmed offline — probe Firestore
+      if(!this._probing){
+        this._probing=true;
+        if(el){ el.className='sdot sd-sync'; el.textContent='● Connecting...'; }
+        fetch('https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)',
+          {method:'HEAD',signal:AbortSignal.timeout(5000)})
+          .then(()=>{
+            // Firestore reachable — browser lied
+            this._offlineSince=null; this._probing=false; this.ping();
+          })
+          .catch(()=>{
+            this._probing=false;
+            if(!this._offlineSince) this._offlineSince=Date.now();
+            const secs=(Date.now()-this._offlineSince)/1000;
+            if(el&&secs>5){
+              el.className='sdot sd-off'; el.textContent='● Offline';
+            }
+          });
       }
     }
-    if(netOk) this._offlineSince=null; // reset on next online ping
-    // Extra: if navigator says offline, try a real network probe after 2s
-    if(!netOk && !this._probing){
-      this._probing=true;
-      setTimeout(async()=>{
-        try{
-          await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`,
-            {method:'HEAD',signal:AbortSignal.timeout(4000)});
-          // If we get here, network is actually available
-          this._offlineSince=null; this.ping();
-        }catch(e){ /* truly offline */ }
-        this._probing=false;
-      },2000);
-    }
-    if(syncOk&&this.q.length)this.flush();
   },
   async flush(){
     if(!db||!navigator.onLine||!this.q.length||this._syncing)return;
@@ -288,6 +294,12 @@ const SQ={
       if(typeof renderBanner==='function')renderBanner();
       if(typeof renderRevenue==='function'&&$('sec-revenue')?.classList.contains('on'))renderRevenue();
       console.log('✅ Silent pull complete from Firestore');
+      // Refresh revenue banner immediately after pull
+      if(typeof renderBanner==='function') renderBanner();
+      if(typeof renderRevenue==='function'){
+        const revSec=document.getElementById('sec-revenue');
+        if(revSec&&revSec.classList.contains('on')) renderRevenue();
+      }
     }catch(e){console.warn('Silent pull failed (offline?):', e.message);}
   }
 };
