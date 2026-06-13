@@ -241,7 +241,7 @@ const SQ={
       if(!this._probing){
         this._probing=true;
         if(el){ el.className='sdot sd-sync'; el.textContent='● Connecting...'; }
-        fetch('https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)',
+        fetch('https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)/documents/admin_settings/main',
           {method:'HEAD',signal:AbortSignal.timeout(5000)})
           .then(()=>{
             // Firestore reachable — browser lied
@@ -259,7 +259,7 @@ const SQ={
     }
   },
   async flush(){
-    if(!db||!navigator.onLine||!this.q.length||this._syncing)return;
+    if(!db||!this.q.length||this._syncing)return; // Don't gate on navigator.onLine
     this._syncing=true;
     const items=[...this.q];
     for(const item of items){
@@ -277,7 +277,7 @@ const SQ={
   // Silent pull from Firestore — merges fresh data into localStorage + SD
   // Called automatically when network comes back. No UI prompts.
   async silentPull(){
-    if(!db||!navigator.onLine||!schoolId)return;
+    if(!db||!schoolId)return; // Don't gate on navigator.onLine — browser lies on Android
     try{
       const doc=await db.collection('schools').doc(schoolId).get();
       if(!doc.exists)return;
@@ -504,11 +504,7 @@ async function doLogin(){
     }catch(e){console.warn('localStorage parse error:',e);}
   }
 
-  // ── STEP 2: No local cache — need network for first-time login ──
-  if(!navigator.onLine){
-    err.innerHTML='📶 <strong>No internet & no saved data.</strong><br>Connect to network for your first login. After that you can use the app offline.';
-    err.style.display='block';btn.textContent='▶ Enter Portal';btn.disabled=false;return;
-  }
+  // ── STEP 2: No local cache — attempt network login (let fetch fail naturally) ──
 
   btn.textContent='Connecting...';
   try{
@@ -627,12 +623,12 @@ function startApp(){
   setTimeout(()=>SQ.flush(),500);
   setTimeout(()=>SQ.silentPull(),2000);
 
-  // Android navigator.onLine gives false negatives on page load.
-  // Re-check connectivity at 1s, 3s, 6s — updates the dot as soon as Android confirms internet.
+  // Re-check connectivity at 1s, 3s, 6s — always try regardless of navigator.onLine
+  // The actual network state is determined by whether the fetch succeeds, not the browser
   [1000,3000,6000].forEach(ms=>setTimeout(()=>{
     SQ.ping();
-    if(navigator.onLine && SQ.q.length) SQ.flush();
-    if(navigator.onLine && ms===6000) SQ.silentPull();
+    if(SQ.q.length) SQ.flush();
+    if(ms===6000) SQ.silentPull();
   }, ms));
 }
 
