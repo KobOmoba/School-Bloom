@@ -128,6 +128,54 @@ function toggleEye(inputId, btn) {
   </div>
 </div>
 
+
+<!-- STAFF LOGIN (role selector) -->
+<div id="staff-login" style="display:none;position:fixed;inset:0;z-index:500;background:var(--bg);flex-direction:column;align-items:center;justify-content:center;padding:1.5rem;">
+  <div class="lbox" style="max-width:380px;width:100%;">
+    <div class="lbox-logo" style="font-size:1.1rem;margin-bottom:0.2rem;">🌸 Educational Bloom</div>
+    <div id="sl-school-name" style="font-size:1rem;font-weight:700;color:var(--brand);text-align:center;margin-bottom:1rem;">School Portal</div>
+
+    <!-- Tab switcher -->
+    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+      <button id="sl-tab-p" onclick="slSetTab('principal')"
+        style="flex:1;padding:0.55rem;border-radius:9px;border:1.5px solid var(--brand);font-weight:700;font-size:0.88rem;cursor:pointer;background:var(--brand);color:#fff;transition:all .2s;">
+        🏫 Principal
+      </button>
+      <button id="sl-tab-s" onclick="slSetTab('staff')"
+        style="flex:1;padding:0.55rem;border-radius:9px;border:1.5px solid var(--border);font-weight:700;font-size:0.88rem;cursor:pointer;background:transparent;color:var(--sub);transition:all .2s;">
+        👩‍🏫 Staff
+      </button>
+    </div>
+
+    <!-- Principal panel -->
+    <div id="sl-panel-p">
+      <label style="font-size:0.82rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;display:block;">School Password</label>
+      <input type="password" id="sl-p-pwd" placeholder="Enter password (e.g. bloom2026)"
+        style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.95rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
+        onkeydown="if(event.key==='Enter')doPrincipalLogin()">
+      <div id="sl-p-err" class="err" style="display:none;"></div>
+      <button class="btn-brand" onclick="doPrincipalLogin()" style="width:100%;margin-top:0.4rem;padding:0.7rem;font-size:0.95rem;">🔓 Enter as Principal</button>
+      <button type="button" onclick="slForgotPassword()" style="width:100%;background:transparent;border:none;color:var(--sub);font-size:0.78rem;margin-top:0.5rem;cursor:pointer;text-decoration:underline;">Forgot password? Contact agent via WhatsApp</button>
+    </div>
+
+    <!-- Staff panel -->
+    <div id="sl-panel-s" style="display:none;">
+      <label style="font-size:0.82rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;display:block;">Staff Email</label>
+      <input type="email" id="sl-email" placeholder="your.email@school.com"
+        style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.9rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
+        onkeydown="if(event.key==='Enter')document.getElementById('sl-pwd').focus()">
+      <label style="font-size:0.82rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;display:block;">Password</label>
+      <input type="password" id="sl-pwd" placeholder="Your staff password"
+        style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.9rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
+        onkeydown="if(event.key==='Enter')doStaffLogin()">
+      <div id="sl-s-err" class="err" style="display:none;"></div>
+      <button class="btn-brand" onclick="doStaffLogin()" style="width:100%;margin-top:0.4rem;padding:0.7rem;font-size:0.95rem;">🔓 Enter as Staff</button>
+    </div>
+
+    <button type="button" onclick="logout()" style="width:100%;background:transparent;border:1px solid var(--border);border-radius:9px;padding:0.5rem;font-size:0.8rem;color:var(--sub);margin-top:1rem;cursor:pointer;">← Back / Change School</button>
+  </div>
+</div>
+
 <!-- APP -->
 <div id="app" style="display:none;">
 
