@@ -503,6 +503,24 @@ function toggleEye(inputId, btn) {
         <textarea id="set-subjects" rows="2" placeholder="Subjects list (auto-updated above)" style="font-size:0.72rem;color:var(--sub);"></textarea>
         <button class="btn-brand" onclick="saveSettings()">💾 Save Settings</button>
       </div>
+
+      <!-- AI OCR Key Card -->
+      <div class="card" style="border-left:4px solid #818cf8;">
+        <div class="ct">🤖 AI-Powered Register Scanning</div>
+        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.55;">
+          Add a free <strong>Gemini API key</strong> to enable high-accuracy OCR for handwritten Nigerian school registers. Without it, OCR.space is used — which struggles with rotated handwriting.
+        </p>
+        <label>Gemini API Key <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(free at aistudio.google.com → Create API Key)</span></label>
+        <div class="pwd-wrap">
+          <input type="password" id="set-gemini-key" placeholder="AIzaSy..." autocomplete="off"
+            style="font-family:monospace;font-size:0.78rem;">
+          <button type="button" class="eye-btn" onclick="toggleEye('set-gemini-key',this)" tabindex="-1">👁️</button>
+        </div>
+        <div id="gemini-key-status" style="font-size:0.75rem;margin:0.4rem 0 0.75rem;color:var(--sub);"></div>
+        <button class="btn-brand btn-sm" onclick="saveGeminiKeySetting()">💾 Save AI Key</button>
+        <button class="btn-ghost btn-sm" onclick="clearGeminiKey()" style="margin-left:0.4rem;">🗑️ Clear Key</button>
+      </div>
+
       <div class="card" style="border-left:4px solid var(--warn);">
         <div class="ct">Current Plan: <span id="settings-plan">Basic</span></div>
         <p style="font-size:0.82rem;color:var(--sub);">Staff limit: <span id="settings-staff-limit">3</span> · Finance AI: <span id="settings-ai">Basic</span></p>
