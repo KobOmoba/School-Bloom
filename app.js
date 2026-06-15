@@ -290,12 +290,26 @@ async function _readOnePage(file, pageNum, total, fbEl) {
             resolve(gn.map(n => ({ surname: '', firstname: '', fullName: n })));
             return;
           }
-          // Last resort — show all text lines for manual review
-          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >= 3 && /[a-zA-Z]{2,}/.test(l)).slice(0, 60);
-          if (lines.length) {
-            ocrOverlayStep('done', `📋 ${lines.length} lines found — please review`, 100);
-            resolve(lines.map(l => ({ surname: '', firstname: '', fullName: l })));
-            return;
+          // Last resort — pair adjacent single-word lines (two-column register support)
+          const rawLn = text.split(/\r?\n/)
+            .map(l => l.replace(/^[-\d.)\s*•✓✗]+/, '').replace(/[\d,]+\s*$/, '').trim().toUpperCase())
+            .filter(l => l.length >= 2 && /[A-Z]{2,}/.test(l));
+          const sngl = rawLn.filter(l => l.split(/\s+/).length === 1).length;
+          const paired = [];
+          if (rawLn.length >= 4 && sngl / rawLn.length > 0.55) {
+            for (let ri = 0; ri < rawLn.length; ri += 2) {
+              const sur = rawLn[ri] || ''; const fst = rawLn[ri+1] || '';
+              if (sur.length >= 2) paired.push({ surname: sur, firstname: fst.length >= 2 ? fst : '', fullName: sur + (fst.length >= 2 ? ' ' + fst : '') });
+            }
+          } else {
+            rawLn.slice(0, 80).forEach(l => {
+              const w = l.split(/\s+/);
+              paired.push({ surname: w[0]||'', firstname: w.slice(1).join(' ')||'', fullName: l });
+            });
+          }
+          if (paired.length) {
+            ocrOverlayStep('done', `📋 ${paired.length} names — please review`, 100);
+            resolve(paired); return;
           }
         }
 
@@ -373,46 +387,103 @@ function looksLikeValidName(str) {
 // ── Nigerian Name Extractor — handles ALL-CAPS handwritten registers ──────
 // Understands: numbered rows, two-column (surname + firstname), balance notes
 function extractNigerianNames(raw) {
-  const lines = (raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  // ── Step 1: clean all lines ───────────────────────────────────────────
+  const allLines = (raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  const cleanLine = (line) => {
+    const low = line.toLowerCase();
+    if (UI_BLACKLIST.some(b => low.includes(b))) return null;
+    if (/^(class|serial|no\b|names?|balance|term|from|date|\bsn\b|s\/n)/i.test(line)) return null;
+    // Strip leading serial numbers: "1.", "- 2", "* 3", etc.
+    let c = line.replace(/^[-–•*x✓✗✔]?\s*\d+[.):\s]+/, '').trim();
+    // Strip trailing balance/fee noise
+    c = c.replace(/\bBALANCE[\s\d,]*$/i, '')
+         .replace(/[\d,]+\s*$/, '')
+         .replace(/\b(BALANCE|PAID|OWING|FEE|TERM|CLASS|FROM|BASIC|NURSERY|JSS|SS\d?)\b/gi, '')
+         .replace(/[^a-zA-Z\s'\-]/g, ' ')
+         .replace(/\s+/g, ' ')
+         .trim();
+    if (!c || c.length < 2) return null;
+    return c.toUpperCase();
+  };
+
+  // ── Step 2: classify each cleaned line ───────────────────────────────
+  // isNameWord: a word that looks like a Nigerian name token (3+ alpha chars)
+  const isNameWord = w => w && /^[A-Z][A-Z'\-]{2,}$/.test(w);
+
+  const cleaned = allLines.map(cleanLine).filter(Boolean);
+
+  // ── Step 3: detect two-column register format ─────────────────────────
+  // Signature: many consecutive single-word lines (OCR reads surname col then
+  // firstname col as interleaved or back-to-back single tokens).
+  // Strategy: scan for runs where >60% of lines are single words → pair them.
+  const wordCounts = cleaned.map(l => l.split(/\s+/).filter(isNameWord).length);
+  const singleWordLines = wordCounts.filter(n => n === 1).length;
+  const isTwoColumnRegister = cleaned.length >= 4 && (singleWordLines / cleaned.length) > 0.55;
+
   const seen = new Set();
   const results = [];
 
-  // Nigerian name fragments — common prefixes/roots to help validate
-  const NIG_PATTERN = /^[A-Z][A-Z'\-]{2,}$/;  // All-caps word 3+ chars
-
-  lines.forEach(line => {
-    // Skip header/label lines
-    const low = line.toLowerCase();
-    if (UI_BLACKLIST.some(b => low.includes(b))) return;
-    if (/^(class|serial|no\b|names?|balance|term|from|date|\bsn\b)/i.test(line)) return;
-
-    // Strip leading row numbers: "1.", "1)", "- 1", "1 ", etc.
-    let cleaned = line.replace(/^[-–•*]?\s*\d+[.):\s]+/, '').trim();
-    // Strip trailing balance figures: "... 3,000" or "BALANCE 5,000"
-    cleaned = cleaned.replace(/\bBALANCE[\s\d,]+$/i, '').replace(/[\d,]+\s*$/, '').trim();
-    // Strip common noise tokens
-    cleaned = cleaned.replace(/\b(BALANCE|PAID|OWING|FEE|TERM|CLASS)\b/gi, '').trim();
-
-    if (!cleaned || cleaned.length < 3) return;
-
-    // Split into words — each word is a potential name part
-    const words = cleaned.split(/\s+/).filter(w => /[a-zA-Z]{2,}/.test(w));
-    if (!words.length) return;
-
-    // If 2 words — treat as SURNAME FIRSTNAME (most common register format)
-    // If 1 word — treat as full name (single-name entry)
-    // If 3+ words — take first two as surname+firstname
-    const nameWords = words.slice(0, 2).map(w => w.replace(/[^a-zA-Z'\-]/g, ''));
-    const fullName = nameWords.filter(w => w.length >= 2).join(' ');
-
-    if (fullName.length < 3) return;
+  const addName = (sur, fst) => {
+    sur = (sur || '').trim();
+    fst = (fst || '').trim();
+    if (!sur || sur.length < 2) return;
+    const fullName = fst && fst.length >= 2 ? sur + ' ' + fst : sur;
     if (!looksLikeValidName(fullName)) return;
-
     const key = fullName.toLowerCase().replace(/[^a-z]/g, '');
     if (seen.has(key)) return;
     seen.add(key);
     results.push(fullName);
-  });
+  };
+
+  if (isTwoColumnRegister) {
+    // ── Two-column mode: pair consecutive single-word lines ──────────────
+    // Pattern: line[i]=SURNAME, line[i+1]=FIRSTNAME (both single words)
+    // OR the OCR may output all surnames first then all firstnames (less common)
+    // We use the simpler approach: walk line by line, pair adjacent singles
+    let i = 0;
+    while (i < cleaned.length) {
+      const line = cleaned[i];
+      const words = line.split(/\s+/).filter(isNameWord);
+
+      if (words.length === 0) { i++; continue; }
+
+      if (words.length >= 2) {
+        // Already a full "SURNAME FIRSTNAME" on one line — use as-is
+        addName(words[0], words[1]);
+        i++;
+      } else {
+        // Single word — look ahead for the next single-word line to pair with
+        const next = cleaned[i + 1];
+        if (next) {
+          const nextWords = next.split(/\s+/).filter(isNameWord);
+          if (nextWords.length === 1) {
+            // Perfect pair: surname + firstname
+            addName(words[0], nextWords[0]);
+            i += 2;  // consume both lines
+            continue;
+          } else if (nextWords.length >= 2) {
+            // Next line has a full name — this single might be a stray header
+            addName(words[0], '');
+            i++;
+          } else {
+            addName(words[0], '');
+            i++;
+          }
+        } else {
+          addName(words[0], '');
+          i++;
+        }
+      }
+    }
+  } else {
+    // ── Normal mode: each line is one student ─────────────────────────────
+    cleaned.forEach(line => {
+      const words = line.split(/\s+/).filter(isNameWord);
+      if (!words.length) return;
+      addName(words[0], words[1] || '');
+    });
+  }
 
   return results;
 }
@@ -1348,7 +1419,15 @@ function ocrShowReview(names) {
 
   if (info) info.textContent = `${names.length} name${names.length!==1?'s':''} found. ✏️ Edit any wrong names, 🗑️ delete bad ones, then tap Add Students.`;
 
-  list.innerHTML = names.map((n, i) => {
+  // Pre-filter: remove entries that have no usable name content
+  const validNames = names.filter(n => {
+    const full = (n.fullName || n.surname || '').trim();
+    return full.length >= 2 && /[a-zA-Z]{2,}/.test(full);
+  });
+  // Update info text with actual count after filtering
+  if (info) info.textContent = `${validNames.length} name${validNames.length!==1?'s':''} found. ✏️ Edit wrong names, ✕ delete bad ones, then tap Add Students.`;
+
+  list.innerHTML = validNames.map((n, i) => {
     // FIX: define sur/fst properly from the name object
     const sur = (n.surname  || '').trim().toUpperCase();
     const fst = (n.firstname|| '').trim().toUpperCase();
