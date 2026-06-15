@@ -135,7 +135,7 @@ async function _readOnePage(file, pageNum, total, fbEl) {
 
       // ── 2. OCR.space (primary engine when no Gemini key) ────────────────────────────────────────────
       try {
-        if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: cloud OCR fallback...`;
+        if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: uploading to cloud OCR...`;
         const arr = imgData.split(','); const mtype = arr[0].match(/:(.*?);/)[1];
         const bstr = atob(arr[1]); let bn = bstr.length;
         const u8 = new Uint8Array(bn); while (bn--) u8[bn] = bstr.charCodeAt(bn);
@@ -150,10 +150,32 @@ async function _readOnePage(file, pageNum, total, fbEl) {
         fd.append('detectOrientation', 'true');
         fd.append('isTable', 'true');        // register images are tables
         fd.append('filetype', 'jpg');
-        const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd });
-        const result = await resp.json();
+        // Try OCR.space with timeout — if it fails we know why
+        const controller = new AbortController();
+        const ocrTimeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
+        let resp, result;
+        try {
+          resp = await fetch('https://api.ocr.space/parse/image', {
+            method: 'POST', body: fd, signal: controller.signal
+          });
+          clearTimeout(ocrTimeout);
+          result = await resp.json();
+        } catch (fetchErr) {
+          clearTimeout(ocrTimeout);
+          const reason = fetchErr.name === 'AbortError' ? 'timeout (20s)' : fetchErr.message;
+          console.warn('OCR.space fetch failed:', reason);
+          // Update status so user knows it is online but OCR API failed
+          if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: cloud OCR unavailable (${reason}), trying offline...`;
+          throw fetchErr; // Let outer catch handle fallback
+        }
         // Combine all parsed pages
+        // Check for OCR.space API errors
+        if (result.IsErroredOnProcessing || result.OCRExitCode === 99) {
+          console.warn('OCR.space API error:', result.ErrorMessage);
+          throw new Error(result.ErrorMessage?.[0] || 'OCR.space processing error');
+        }
         const text = (result.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
+        console.log('OCR.space raw text:', text.substring(0, 200));
         if (text.trim()) {
           const names = extractNigerianNames(text);
           if (names.length) {
@@ -161,6 +183,12 @@ async function _readOnePage(file, pageNum, total, fbEl) {
               const parts = n.trim().split(/\s+/);
               return { surname: parts[0] || '', firstname: parts.slice(1).join(' ') || '', fullName: n };
             }));
+            return;
+          }
+          // Even if extractNigerianNames found nothing, try generic extractor
+          const fallbackNames = extractStudentNames(text);
+          if (fallbackNames.length) {
+            resolve(fallbackNames.map(n => ({ surname: '', firstname: '', fullName: n })));
             return;
           }
         }
@@ -3432,15 +3460,24 @@ async function refreshPlanFromFirestore(btn) {
       commsLog:     loadLocal('commsLog', []),
       opportunities:loadLocal('opportunities', defaultOpps())
     });
-    // Restore staff session if cached
+    // Restore staff session if cached — otherwise show role selector
     const cachedSession = localStorage.getItem(`p_${auth.schoolId}_staffSession`);
     if (cachedSession) {
       try {
         const sess = JSON.parse(cachedSession);
         currentStaff = sess; userRole = sess.role || 'Principal';
+        startApp();
+        setTimeout(() => SQ.silentPull(), 2000);
+        return;
       } catch(e) {}
     }
-    startApp();
+    // No cached session — show staff login screen
+    if (SD.staff && SD.staff.length > 0) {
+      showStaffLoginStep();
+    } else {
+      userRole = 'Principal'; currentStaff = null;
+      startApp();
+    }
     setTimeout(() => SQ.silentPull(), 2000);
   } catch(e) { console.warn('Auto-login failed:', e); }
 })();
