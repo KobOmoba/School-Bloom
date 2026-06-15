@@ -133,62 +133,91 @@ async function _readOnePage(file, pageNum, total, fbEl) {
         } catch (e) { console.warn(`Page ${pageNum} Gemini failed:`, e.message); }
       }
 
-      // ── 2. OCR.space (primary engine when no Gemini key) ────────────────────────────────────────────
+      // ── 2. OCR.space — CORRECT API call (Engine 2, base64, valid params only) ──
+      // NOTE: isHandwritten and isTable are NOT valid for the free API key — they cause HTTP 400
       try {
-        if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: uploading to cloud OCR...`;
-        const arr = imgData.split(','); const mtype = arr[0].match(/:(.*?);/)[1];
-        const bstr = atob(arr[1]); let bn = bstr.length;
-        const u8 = new Uint8Array(bn); while (bn--) u8[bn] = bstr.charCodeAt(bn);
-        const blob = new Blob([u8], { type: mtype });
-        const fd = new FormData();
-        fd.append('file', blob, 'page.jpg');
-        fd.append('language', 'eng');
-        fd.append('apikey', 'helloworld');
-        fd.append('isHandwritten', 'true');
-        fd.append('scale', 'true');
-        fd.append('OCREngine', '2');         // Engine 2 = best for handwriting
-        fd.append('detectOrientation', 'true');
-        fd.append('isTable', 'true');        // register images are tables
-        fd.append('filetype', 'jpg');
-        // Try OCR.space with timeout — if it fails we know why
+        if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: cloud OCR reading...`;
+
+        // Use URL-encoded body with base64image — more reliable than FormData on mobile
+        const ocrParams = new URLSearchParams();
+        ocrParams.append('base64image', imgData);   // full data URI e.g. data:image/jpeg;base64,...
+        ocrParams.append('language', 'eng');
+        ocrParams.append('apikey', 'helloworld');
+        ocrParams.append('OCREngine', '2');          // Engine 2 handles handwriting best
+        ocrParams.append('scale', 'true');           // upscale small images
+        ocrParams.append('detectOrientation', 'true'); // handle rotated phone photos
+        // Set filetype from actual mime — required by OCR.space API
+        const mimeToFt = { 'image/jpeg':'JPG','image/jpg':'JPG','image/png':'PNG',
+                           'image/webp':'JPG','image/heic':'JPG','image/heif':'JPG',
+                           'application/pdf':'PDF' };
+        const ft = mimeToFt[mime] || 'JPG';
+        ocrParams.append('filetype', ft);
+
         const controller = new AbortController();
-        const ocrTimeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
-        let resp, result;
+        const ocrTimeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
+
+        let result;
         try {
-          resp = await fetch('https://api.ocr.space/parse/image', {
-            method: 'POST', body: fd, signal: controller.signal
+          const resp = await fetch('https://api.ocr.space/parse/image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: ocrParams.toString(),
+            signal: controller.signal
           });
           clearTimeout(ocrTimeout);
+
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status} from OCR.space`);
+          }
           result = await resp.json();
         } catch (fetchErr) {
           clearTimeout(ocrTimeout);
-          const reason = fetchErr.name === 'AbortError' ? 'timeout (20s)' : fetchErr.message;
-          console.warn('OCR.space fetch failed:', reason);
-          // Update status so user knows it is online but OCR API failed
-          if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: cloud OCR unavailable (${reason}), trying offline...`;
-          throw fetchErr; // Let outer catch handle fallback
+          const why = fetchErr.name === 'AbortError' ? 'timed out after 25s' : fetchErr.message;
+          console.warn('OCR.space network error:', why);
+          if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: OCR network error — trying offline...`;
+          throw fetchErr;
         }
-        // Combine all parsed pages
-        // Check for OCR.space API errors
-        if (result.IsErroredOnProcessing || result.OCRExitCode === 99) {
-          console.warn('OCR.space API error:', result.ErrorMessage);
-          throw new Error(result.ErrorMessage?.[0] || 'OCR.space processing error');
+
+        // Check for root-level API errors (wrong params, quota, etc.)
+        if (result.error) {
+          console.warn('OCR.space API error:', result.error);
+          throw new Error('OCR.space: ' + result.error);
         }
+        if (result.IsErroredOnProcessing) {
+          const msg = (result.ErrorMessage || []).join('; ');
+          console.warn('OCR.space processing error:', msg);
+          throw new Error('OCR.space processing: ' + msg);
+        }
+
         const text = (result.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
-        console.log('OCR.space raw text:', text.substring(0, 200));
-        if (text.trim()) {
-          const names = extractNigerianNames(text);
-          if (names.length) {
-            resolve(names.map(n => {
+        console.log('✅ OCR.space raw text:', text.substring(0, 300));
+
+        if (text.trim().length > 2) {
+          // Try Nigerian-specific parser first (handles register format)
+          const nigerianNames = extractNigerianNames(text);
+          if (nigerianNames.length) {
+            console.log('✅ extractNigerianNames found:', nigerianNames.length, 'names');
+            resolve(nigerianNames.map(n => {
               const parts = n.trim().split(/\s+/);
               return { surname: parts[0] || '', firstname: parts.slice(1).join(' ') || '', fullName: n };
             }));
             return;
           }
-          // Even if extractNigerianNames found nothing, try generic extractor
-          const fallbackNames = extractStudentNames(text);
-          if (fallbackNames.length) {
-            resolve(fallbackNames.map(n => ({ surname: '', firstname: '', fullName: n })));
+          // Generic fallback parser
+          const genericNames = extractStudentNames(text);
+          if (genericNames.length) {
+            console.log('✅ extractStudentNames found:', genericNames.length, 'names');
+            resolve(genericNames.map(n => ({ surname: '', firstname: '', fullName: n })));
+            return;
+          }
+          // Last resort: show ALL non-empty lines for the user to review manually
+          const allLines = text.split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l.length >= 3 && /[a-zA-Z]{2,}/.test(l))
+            .slice(0, 60);
+          if (allLines.length) {
+            console.log('⚠️ Name parsers found nothing — showing raw lines for manual review:', allLines.length);
+            resolve(allLines.map(l => ({ surname: '', firstname: '', fullName: l })));
             return;
           }
         }
@@ -214,9 +243,15 @@ async function _readOnePage(file, pageNum, total, fbEl) {
         }
       } catch (e) { console.warn(`Page ${pageNum} Tesseract failed:`, e.message); }
 
+      // All 3 engines failed — resolve with empty but update UI
+      console.error(`Page ${pageNum}: ALL OCR engines failed`);
+      if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: could not read — try better lighting or a closer photo`;
       resolve([]);
     };
-    reader.onerror = () => resolve([]);
+    reader.onerror = () => {
+      if (fbEl) fbEl.textContent = `❌ Could not read file — make sure it is an image or PDF`;
+      resolve([]);
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -1173,13 +1208,15 @@ async function saveEditStudent(idx) {
 function handleCSV(e) {
   const files = Array.from(e.target.files || []); if (!files.length) return;
   e.target.value = '';
-  const images = files.filter(f => {
+  // Accept images AND PDFs for OCR; everything else treated as text/CSV
+  const ocrFiles = files.filter(f => {
     const n = (f.name || '').toLowerCase(), t = (f.type || '').toLowerCase();
-    return t.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp)$/.test(n);
+    return t.startsWith('image/') || t === 'application/pdf'
+        || /\.(jpg|jpeg|png|webp|bmp|heic|heif|pdf)$/.test(n);
   });
-  const texts = files.filter(f => !images.includes(f));
+  const texts = files.filter(f => !ocrFiles.includes(f));
   texts.forEach(f => importStudentsFromText(f));
-  if (images.length) processImagesSequentially(images);
+  if (ocrFiles.length) processImagesSequentially(ocrFiles);
 }
 
 let _ocrPending = [];
