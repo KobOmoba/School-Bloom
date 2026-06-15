@@ -1246,6 +1246,29 @@ async function fixGarbledNames() {
   alert(`✅ Removed ${removed} entr${removed !== 1 ? 'ies' : 'y'} (junk + duplicates).\n\nIf any real student was removed, add them back manually with ➕ Add Student.`);
 }
 
+
+// ── Clear all students ────────────────────────────────────────────────────
+async function clearAllStudents() {
+  const cls = $('stu-class')?.value || '';
+  const filterMsg = cls ? ` in ${cls}` : '';
+  const countMsg = cls
+    ? SD.students.filter(s => s.class === cls).length
+    : SD.students.length;
+  if (!countMsg) return toast('No students to clear.');
+  if (!confirm(`⚠️ Delete ALL ${countMsg} student${countMsg!==1?'s':''}${filterMsg}?\n\nThis cannot be undone.`)) return;
+  if (cls) {
+    SD.students = SD.students.filter(s => s.class !== cls);
+    toast(`🗑️ All ${cls} students removed`);
+  } else {
+    // Double confirm for full wipe
+    if (!confirm('Are you absolutely sure? This will delete EVERY student in the school.')) return;
+    SD.students = [];
+    toast('🗑️ All students cleared');
+  }
+  await SQ.push('students', SD.students);
+  renderStudentList(); renderBanner(); renderRevenue(); checkTierStatus();
+}
+
 function renderStudentList() {
   const q = ($('stu-search')?.value || '').toLowerCase();
   let cls = $('stu-class')?.value || '';
@@ -1273,7 +1296,22 @@ function renderStudentList() {
     const pbc = owe <= 0 ? 'pb-paid' : s.paid > 0 ? 'pb-part' : 'pb-owe';
     const pbt = owe <= 0 ? 'Paid' : s.paid > 0 ? 'Partial' : 'Unpaid';
     const feeBadge = canSeeFees() ? `<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}` : '';
-    return `<div class="stu-row" onclick="openProfile(${idx})"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;min-width:0;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div></div>`;
+    return `<div class="stu-row" style="display:flex;align-items:center;gap:0.4rem;">
+      <div style="flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;cursor:pointer;" onclick="openProfile(${idx})">
+        <div class="stu-av">${s.name.charAt(0).toUpperCase()}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="stu-name">${esc(s.name)}</div>
+          <div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">${feeBadge}</div>
+      </div>
+      <div style="display:flex;gap:0.25rem;flex-shrink:0;margin-left:0.2rem;">
+        <button onclick="event.stopPropagation();editStudent(${idx})" 
+          style="background:#7c3aed;color:#fff;border:none;border-radius:7px;padding:0.3rem 0.5rem;font-size:0.75rem;cursor:pointer;line-height:1;" title="Edit">✏️</button>
+        <button onclick="event.stopPropagation();deleteStudent(${idx})"
+          style="background:#ef4444;color:#fff;border:none;border-radius:7px;padding:0.3rem 0.5rem;font-size:0.75rem;cursor:pointer;line-height:1;" title="Delete">✕</button>
+      </div>
+    </div>`;
   }).join('');
 }
 
