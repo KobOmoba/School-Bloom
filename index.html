@@ -946,6 +946,50 @@ window.addEventListener('appinstalled', () => {
 });
 </script>
 
+
+<!-- OCR REVIEW MODAL -->
+<div id="ocr-review-modal" class="modal" style="z-index:8000;align-items:flex-start;overflow-y:auto;">
+  <div class="mbox" style="padding:1.2rem 1rem 2rem;">
+
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+      <div style="font-size:1rem;font-weight:800;color:var(--text);">📋 Review Names</div>
+      <button onclick="closeM('ocr-review-modal')" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--sub);">✕</button>
+    </div>
+    <div id="ocr-review-info" style="font-size:0.78rem;color:var(--sub);margin-bottom:0.9rem;line-height:1.5;"></div>
+
+    <!-- Bulk class assign + select all row -->
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;">
+      <select id="ocr-class-all" onchange="ocrSetClassAll()"
+        style="flex:1;padding:0.45rem 0.6rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;">
+        <option value="">Set class for ALL ▾</option>
+      </select>
+      <button onclick="ocrSelectAll(true)"  style="padding:0.45rem 0.7rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.78rem;background:var(--bg);color:var(--text);cursor:pointer;font-weight:700;">☑ All</button>
+      <button onclick="ocrSelectAll(false)" style="padding:0.45rem 0.7rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.78rem;background:var(--bg);color:var(--text);cursor:pointer;font-weight:700;">☐ None</button>
+    </div>
+
+    <!-- Column headers -->
+    <div style="display:flex;gap:4px;padding:4px 4px 6px;border-bottom:2px solid var(--brand);font-size:0.7rem;font-weight:800;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;">
+      <span style="width:22px;flex-shrink:0;"></span>
+      <span style="width:110px;flex-shrink:0;">Surname</span>
+      <span style="width:100px;flex-shrink:0;">First Name</span>
+      <span style="width:68px;flex-shrink:0;">Class</span>
+      <span style="flex:1;"></span>
+    </div>
+
+    <!-- Name list (populated by JS) -->
+    <div id="ocr-review-list" style="max-height:55vh;overflow-y:auto;"></div>
+
+    <!-- Footer -->
+    <div style="position:sticky;bottom:0;background:var(--bg);padding-top:0.8rem;margin-top:0.5rem;border-top:1px solid var(--border);">
+      <button id="ocr-confirm-btn" onclick="ocrConfirmImport()"
+        class="btn-brand" style="width:100%;padding:0.8rem;font-size:0.95rem;">
+        ✅ Add Students
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- OCR UPLOAD OVERLAY -->
 <div id="ocr-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(10,10,20,0.92);backdrop-filter:blur(6px);flex-direction:column;align-items:center;justify-content:center;padding:2rem;">
   <div style="background:#1e1b4b;border:1.5px solid #4f46e5;border-radius:20px;padding:1.8rem 1.5rem;width:100%;max-width:360px;box-shadow:0 0 60px #4f46e540;">
