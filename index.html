@@ -945,5 +945,57 @@ window.addEventListener('appinstalled', () => {
   console.log('[PWA] App installed successfully!');
 });
 </script>
+
+<!-- OCR UPLOAD OVERLAY -->
+<div id="ocr-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(10,10,20,0.92);backdrop-filter:blur(6px);flex-direction:column;align-items:center;justify-content:center;padding:2rem;">
+  <div style="background:#1e1b4b;border:1.5px solid #4f46e5;border-radius:20px;padding:1.8rem 1.5rem;width:100%;max-width:360px;box-shadow:0 0 60px #4f46e540;">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.2rem;">
+      <div id="ocr-icon" style="font-size:2rem;line-height:1;">📸</div>
+      <div>
+        <div style="font-size:0.95rem;font-weight:800;color:#e0e7ff;">Reading Register</div>
+        <div id="ocr-filename" style="font-size:0.72rem;color:#818cf8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">No file selected</div>
+      </div>
+    </div>
+
+    <!-- Thumbnail preview -->
+    <div id="ocr-thumb-wrap" style="display:none;width:100%;height:120px;border-radius:12px;overflow:hidden;margin-bottom:1rem;background:#0f0f1a;border:1px solid #312e81;">
+      <img id="ocr-thumb" src="" alt="preview" style="width:100%;height:100%;object-fit:cover;">
+    </div>
+
+    <!-- Step indicators -->
+    <div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.2rem;">
+      <div id="ocr-step-load" style="display:flex;align-items:center;gap:0.6rem;font-size:0.8rem;color:#6366f1;">
+        <span id="ocr-step-load-icon" style="font-size:1rem;">⏳</span>
+        <span id="ocr-step-load-text">Loading image...</span>
+      </div>
+      <div id="ocr-step-upload" style="display:flex;align-items:center;gap:0.6rem;font-size:0.8rem;color:#94a3b8;">
+        <span id="ocr-step-upload-icon" style="font-size:1rem;">☁️</span>
+        <span id="ocr-step-upload-text">Uploading to cloud OCR</span>
+      </div>
+      <div id="ocr-step-read" style="display:flex;align-items:center;gap:0.6rem;font-size:0.8rem;color:#94a3b8;">
+        <span id="ocr-step-read-icon" style="font-size:1rem;">🔍</span>
+        <span id="ocr-step-read-text">Reading names from image</span>
+      </div>
+      <div id="ocr-step-done" style="display:flex;align-items:center;gap:0.6rem;font-size:0.8rem;color:#94a3b8;">
+        <span id="ocr-step-done-icon" style="font-size:1rem;">✅</span>
+        <span id="ocr-step-done-text">Done</span>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    <div style="background:#312e81;border-radius:99px;height:8px;overflow:hidden;margin-bottom:0.8rem;">
+      <div id="ocr-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#6366f1,#818cf8);border-radius:99px;transition:width 0.4s ease;"></div>
+    </div>
+
+    <!-- Status text -->
+    <div id="ocr-status" style="font-size:0.78rem;color:#c7d2fe;text-align:center;min-height:1.4em;">Preparing...</div>
+
+    <!-- Page counter (multi-page) -->
+    <div id="ocr-pages" style="font-size:0.7rem;color:#6366f1;text-align:center;margin-top:0.4rem;display:none;"></div>
+  </div>
+</div>
+
 </body>
 </html>
