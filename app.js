@@ -141,16 +141,28 @@ async function _readOnePage(file, pageNum, total, fbEl) {
         const u8 = new Uint8Array(bn); while (bn--) u8[bn] = bstr.charCodeAt(bn);
         const blob = new Blob([u8], { type: mtype });
         const fd = new FormData();
-        fd.append('file', blob, 'page.jpg'); fd.append('language', 'eng');
-        fd.append('apikey', 'helloworld'); fd.append('isHandwritten', 'true');
-        fd.append('scale', 'true'); fd.append('OCREngine', '2');
+        fd.append('file', blob, 'page.jpg');
+        fd.append('language', 'eng');
+        fd.append('apikey', 'helloworld');
+        fd.append('isHandwritten', 'true');
+        fd.append('scale', 'true');
+        fd.append('OCREngine', '2');         // Engine 2 = best for handwriting
+        fd.append('detectOrientation', 'true');
+        fd.append('isTable', 'true');        // register images are tables
+        fd.append('filetype', 'jpg');
         const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd });
         const result = await resp.json();
-        const text = result.ParsedResults?.[0]?.ParsedText || '';
+        // Combine all parsed pages
+        const text = (result.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
         if (text.trim()) {
-          const raw = extractStudentNames(text);
-          resolve(raw.map(n => ({ surname: '', firstname: '', fullName: n })));
-          return;
+          const names = extractNigerianNames(text);
+          if (names.length) {
+            resolve(names.map(n => {
+              const parts = n.trim().split(/\s+/);
+              return { surname: parts[0] || '', firstname: parts.slice(1).join(' ') || '', fullName: n };
+            }));
+            return;
+          }
         }
       } catch (e) { console.warn(`Page ${pageNum} OCR.space failed:`, e.message); }
 
@@ -199,16 +211,21 @@ const VALID_PREFIXES = /^(mc\.?|cp\.?|ceb\.?|lsses?\.?|lses?\.?|sps\.?|spvenevan
 
 function looksLikeValidName(str) {
   const t = (str || '').trim();
-  if (!t || t.length < 4) return false;
+  if (!t || t.length < 2) return false;
   if (!/[a-zA-Z]/.test(t)) return false;
-  if (/\d/.test(t)) return false;
+  // Allow digits only if looks like a balance annotation — strip those first
+  const noDigits = t.replace(/\d+/g, '').trim();
+  if (noDigits.length < 2) return false;
   const low = t.toLowerCase();
   if (UI_BLACKLIST.some(b => low.includes(b))) return false;
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length > 6) return false;
   const alpha = t.replace(/[^a-zA-Z]/g, '');
-  if (alpha.length < 4) return false;
-  const consonantRun = (t.match(/[^aeiouAEIOU\s.,'\-]{5,}/g) || []);
+  if (alpha.length < 3) return false;
+  // Nigerian names are ALL-CAPS from handwritten registers — normalise before checking
+  const isAllCaps = alpha === alpha.toUpperCase();
+  // Allow up to 8 consonants in a row for Yoruba/Hausa/Igbo names (e.g. AKINWANDE, GBELEGKALE)
+  const consonantRun = (t.match(/[^aeiouAEIOU\s.,'\'\-]{9,}/g) || []);
   if (consonantRun.length > 0) return false;
   const hasRealWord = words.some(w => {
     const a = w.replace(/[^a-zA-Z]/g, '');
@@ -216,8 +233,58 @@ function looksLikeValidName(str) {
   });
   if (!hasRealWord) return false;
   if (VALID_PREFIXES.test(t)) return true;
+  // Accept all-caps words of 3+ letters (Nigerian register format)
+  if (isAllCaps && alpha.length >= 3) return true;
   const hasProperNoun = words.some(w => w.length >= 3 && /^[A-Z]/.test(w) && /[a-z]/.test(w));
   return hasProperNoun;
+}
+
+
+// ── Nigerian Name Extractor — handles ALL-CAPS handwritten registers ──────
+// Understands: numbered rows, two-column (surname + firstname), balance notes
+function extractNigerianNames(raw) {
+  const lines = (raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const seen = new Set();
+  const results = [];
+
+  // Nigerian name fragments — common prefixes/roots to help validate
+  const NIG_PATTERN = /^[A-Z][A-Z'\-]{2,}$/;  // All-caps word 3+ chars
+
+  lines.forEach(line => {
+    // Skip header/label lines
+    const low = line.toLowerCase();
+    if (UI_BLACKLIST.some(b => low.includes(b))) return;
+    if (/^(class|serial|no\b|names?|balance|term|from|date|\bsn\b)/i.test(line)) return;
+
+    // Strip leading row numbers: "1.", "1)", "- 1", "1 ", etc.
+    let cleaned = line.replace(/^[-–•*]?\s*\d+[.):\s]+/, '').trim();
+    // Strip trailing balance figures: "... 3,000" or "BALANCE 5,000"
+    cleaned = cleaned.replace(/\bBALANCE[\s\d,]+$/i, '').replace(/[\d,]+\s*$/, '').trim();
+    // Strip common noise tokens
+    cleaned = cleaned.replace(/\b(BALANCE|PAID|OWING|FEE|TERM|CLASS)\b/gi, '').trim();
+
+    if (!cleaned || cleaned.length < 3) return;
+
+    // Split into words — each word is a potential name part
+    const words = cleaned.split(/\s+/).filter(w => /[a-zA-Z]{2,}/.test(w));
+    if (!words.length) return;
+
+    // If 2 words — treat as SURNAME FIRSTNAME (most common register format)
+    // If 1 word — treat as full name (single-name entry)
+    // If 3+ words — take first two as surname+firstname
+    const nameWords = words.slice(0, 2).map(w => w.replace(/[^a-zA-Z'\-]/g, ''));
+    const fullName = nameWords.filter(w => w.length >= 2).join(' ');
+
+    if (fullName.length < 3) return;
+    if (!looksLikeValidName(fullName)) return;
+
+    const key = fullName.toLowerCase().replace(/[^a-z]/g, '');
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(fullName);
+  });
+
+  return results;
 }
 
 function extractStudentNames(raw) {
@@ -1116,10 +1183,11 @@ function ocrShowReview(names) {
   if (info) info.textContent = `${names.length} names extracted. Tick each correct name, edit any that look wrong, then tap Add Students.`;
   list.innerHTML = names.map((n, i) => {
     const name = n.fullName || ((n.surname || '') + ' ' + (n.firstname || '')).trim();
-    return `<div class="ocr-row" id="ocr-row-${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
+    return `<div class="ocr-row" id="ocr-row-${i}" style="display:flex;align-items:center;gap:4px;padding:6px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
       <input type="checkbox" id="ocr-chk-${i}" checked onchange="ocrUpdateCount()" style="width:18px;height:18px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;">
-      <input type="text" id="ocr-name-${i}" value="${name.replace(/"/g,'&quot;')}" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;min-width:0;">
-      <input type="text" id="ocr-cls-${i}" placeholder="Class" style="width:72px;border:1px solid var(--border);border-radius:6px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;">
+      <input type="text" id="ocr-sur-${i}" value="${sur.replace(/"/g,'&quot;') || name.split(' ')[0]}" placeholder="Surname" style="width:110px;border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;font-weight:700;text-transform:uppercase;">
+      <input type="text" id="ocr-fst-${i}" value="${fst.replace(/"/g,'&quot;') || name.split(' ').slice(1).join(' ')}" placeholder="First name" style="width:100px;border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;text-transform:uppercase;">
+      <input type="text" id="ocr-cls-${i}" placeholder="Class" style="width:68px;border:1px solid var(--border);border-radius:6px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;">
       <button onclick="document.getElementById('ocr-row-${i}').remove();ocrUpdateCount()" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:4px 8px;cursor:pointer;color:#dc2626;font-size:0.78rem;flex-shrink:0;">✕</button>
     </div>`;
   }).join('');
@@ -1147,10 +1215,18 @@ async function ocrConfirmImport() {
   rows.forEach(row => {
     const chk = row.querySelector('input[type=checkbox]');
     if (!chk || !chk.checked) return;
-    const nameEl = row.querySelector('input[type=text]');
-    const clsEl = row.querySelectorAll('input[type=text]')[1];
-    const name = (nameEl?.value || '').trim();
-    const cls = (clsEl?.value || '').trim();
+    const inputs = row.querySelectorAll('input[type=text]');
+    let name, cls;
+    if (inputs.length >= 3) {
+      // New format: surname | firstname | class
+      const sur = (inputs[0]?.value || '').trim().toUpperCase();
+      const fst = (inputs[1]?.value || '').trim().toUpperCase();
+      cls  = (inputs[2]?.value || '').trim();
+      name = fst ? sur + ' ' + fst : sur;
+    } else {
+      name = (inputs[0]?.value || '').trim();
+      cls  = (inputs[1]?.value || '').trim();
+    }
     if (!name) return;
     const key = name.toLowerCase().replace(/[^a-z]/g, '');
     if (existingKeys.has(key)) return;
