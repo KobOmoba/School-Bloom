@@ -1322,24 +1322,55 @@ async function processImagesSequentially(files) {
   const totalFound = _ocrPending.length;
   if (fbEl) fbEl.textContent = `✅ Found ${totalFound} name${totalFound!==1?'s':''} — review below.`;
   ocrOverlayStep('done', `✅ ${totalFound} name${totalFound!==1?'s':''} ready to review`, 100);
-  ocrOverlayHide(1200);
-  setTimeout(() => ocrShowReview(_ocrPending), 1300);
+  // Hide overlay after brief success pause, then open review immediately
+  setTimeout(() => {
+    ocrOverlayHide(0);
+    ocrShowReview(_ocrPending);
+  }, 900);
 }
 
 function ocrShowReview(names) {
-  const modal = $('ocr-review-modal'); const list = $('ocr-review-list'); const info = $('ocr-review-info');
-  if (!modal || !list) return;
-  if (info) info.textContent = `${names.length} names extracted. Tick each correct name, edit any that look wrong, then tap Add Students.`;
+  const modal = $('ocr-review-modal');
+  const list  = $('ocr-review-list');
+  const info  = $('ocr-review-info');
+  if (!modal || !list) { console.error('OCR review modal not found in HTML'); return; }
+
+  // Populate the "Set class for ALL" dropdown from existing class arms
+  const classDropdown = $('ocr-class-all');
+  if (classDropdown) {
+    const arms = [...new Set((SD.students||[]).map(s=>s.class||'').filter(Boolean))].sort();
+    // Also include common Nigerian class names as defaults
+    const defaults = ['JSS1A','JSS1B','JSS2A','JSS2B','JSS3A','JSS3B','SS1A','SS1B','SS2A','SS2B','SS3A','SS3B'];
+    const allArms  = [...new Set([...arms, ...defaults])];
+    classDropdown.innerHTML = '<option value="">Set class for ALL ▾</option>' +
+      allArms.map(a => `<option value="${a}">${a}</option>`).join('');
+  }
+
+  if (info) info.textContent = `${names.length} name${names.length!==1?'s':''} found. ✏️ Edit any wrong names, 🗑️ delete bad ones, then tap Add Students.`;
+
   list.innerHTML = names.map((n, i) => {
-    const name = n.fullName || ((n.surname || '') + ' ' + (n.firstname || '')).trim();
-    return `<div class="ocr-row" id="ocr-row-${i}" style="display:flex;align-items:center;gap:4px;padding:6px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
-      <input type="checkbox" id="ocr-chk-${i}" checked onchange="ocrUpdateCount()" style="width:18px;height:18px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;">
-      <input type="text" id="ocr-sur-${i}" value="${sur.replace(/"/g,'&quot;') || name.split(' ')[0]}" placeholder="Surname" style="width:110px;border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;font-weight:700;text-transform:uppercase;">
-      <input type="text" id="ocr-fst-${i}" value="${fst.replace(/"/g,'&quot;') || name.split(' ').slice(1).join(' ')}" placeholder="First name" style="width:100px;border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;text-transform:uppercase;">
-      <input type="text" id="ocr-cls-${i}" placeholder="Class" style="width:68px;border:1px solid var(--border);border-radius:6px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;">
-      <button onclick="document.getElementById('ocr-row-${i}').remove();ocrUpdateCount()" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:4px 8px;cursor:pointer;color:#dc2626;font-size:0.78rem;flex-shrink:0;">✕</button>
+    // FIX: define sur/fst properly from the name object
+    const sur = (n.surname  || '').trim().toUpperCase();
+    const fst = (n.firstname|| '').trim().toUpperCase();
+    const fullName = n.fullName || ((sur + ' ' + fst).trim());
+    // If surname/firstname not split, put everything in surname field
+    const surVal = sur || fullName.split(/\s+/)[0] || '';
+    const fstVal = fst || fullName.split(/\s+/).slice(1).join(' ') || '';
+
+    return `<div class="ocr-row" id="ocr-row-${i}" style="display:flex;align-items:center;gap:4px;padding:7px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+      <input type="checkbox" id="ocr-chk-${i}" checked onchange="ocrUpdateCount()"
+        style="width:20px;height:20px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;">
+      <input type="text" id="ocr-sur-${i}" value="${surVal.replace(/"/g,'&quot;')}" placeholder="Surname"
+        style="width:110px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;font-weight:700;text-transform:uppercase;">
+      <input type="text" id="ocr-fst-${i}" value="${fstVal.replace(/"/g,'&quot;')}" placeholder="First name"
+        style="width:100px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;text-transform:uppercase;">
+      <input type="text" id="ocr-cls-${i}" placeholder="Class"
+        style="width:68px;border:1.5px solid var(--border);border-radius:7px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;">
+      <button onclick="document.getElementById('ocr-row-${i}').remove();ocrUpdateCount()"
+        style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:7px;padding:5px 10px;cursor:pointer;color:#dc2626;font-size:0.82rem;font-weight:700;flex-shrink:0;">✕</button>
     </div>`;
   }).join('');
+
   ocrUpdateCount();
   openM('ocr-review-modal');
 }
@@ -1355,7 +1386,9 @@ function ocrSelectAll(val) {
 }
 function ocrSetClassAll() {
   const cls = ($('ocr-class-all')?.value || '').trim(); if (!cls) return;
-  document.querySelectorAll('[id^=ocr-cls-]').forEach(el => el.value = cls);
+  document.querySelectorAll('[id^=ocr-cls-]').forEach(el => { el.value = cls; });
+  // Reset dropdown so it acts as a one-shot action
+  const dd = $('ocr-class-all'); if (dd) dd.value = '';
 }
 async function ocrConfirmImport() {
   const rows = document.querySelectorAll('#ocr-review-list .ocr-row');
