@@ -44,7 +44,7 @@ function getTier(count) {
 
 // ── Gemini Flash OCR (Structured Outputs) — PRIMARY OCR ──────────────────
 // Key stored encoded; managed via AariNAT Command Center Settings
-const GEMINI_KEY  = window.GEMINI_API_KEY || '';  // Paste your key: window.GEMINI_API_KEY = 'AIzaSy...' in index.html
+const GEMINI_KEY  = window.GEMINI_API_KEY || '';  // Optional. If blank, OCR.space is used instead (works great).
 const GEMINI_MODELS = ['gemini-2.0-flash','gemini-2.0-flash-exp','gemini-1.5-flash','gemini-1.5-flash-latest'];
 
 const GEMINI_PROMPT = `Extract every student name from this Nigerian school register photo.
@@ -124,14 +124,16 @@ async function _readOnePage(file, pageNum, total, fbEl) {
       const b64 = imgData.split(',')[1];
       const mime = file.type || 'image/jpeg';
 
-      // ── 1. Gemini Flash (primary — structured JSON, no hallucinations) ──
-      try {
-        if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: Gemini reading...`;
-        const names = await geminiOCR(b64, mime);
-        if (names && names.length) { resolve(names); return; }
-      } catch (e) { console.warn(`Page ${pageNum} Gemini failed:`, e.message); }
+      // ── 1. Gemini Flash (only if key is set) ───────────────────────────
+      if (GEMINI_KEY) {
+        try {
+          if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: Gemini reading...`;
+          const names = await geminiOCR(b64, mime);
+          if (names && names.length) { resolve(names); return; }
+        } catch (e) { console.warn(`Page ${pageNum} Gemini failed:`, e.message); }
+      }
 
-      // ── 2. OCR.space fallback ────────────────────────────────────────
+      // ── 2. OCR.space (primary engine when no Gemini key) ────────────────────────────────────────────
       try {
         if (fbEl) fbEl.textContent = `📸 Page ${pageNum}/${total}: cloud OCR fallback...`;
         const arr = imgData.split(','); const mtype = arr[0].match(/:(.*?);/)[1];
