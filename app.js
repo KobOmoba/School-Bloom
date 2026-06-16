@@ -795,6 +795,7 @@ function loadSchoolIntoSD(sid, school) {
   SD.socialPages = school.socialPages || [];
   SD.commsLog = school.commsLog || [];
   SD.opportunities = school.opportunities || defaultOpps();
+  SD.remarks = school.remarks || {};
   Object.keys(SD).forEach(k => localStorage.setItem(`p_${sid}_${k}`, JSON.stringify(SD[k])));
   // Start AI Agent runtime after data is loaded
   if (typeof startAgentRuntime === 'function') setTimeout(() => startAgentRuntime(), 500);
@@ -2224,52 +2225,155 @@ function printReportCard(idx, term) {
   const psyRows = psyTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['psy_'+t]||0)}</td></tr>`).join('');
   const daysPresent = Object.values(SD.attendance||{}).filter(day=>day[s.name]==='Present').length;
 
-  const w = window.open('','_blank','width=800,height=1100');
+  // ── Stored remarks (set by Report Card Agent or manually) ──
+  const remarks = SD.remarks || {};
+  const studentRemarks = (remarks[sid]||{})[term] || {};
+  const teacherRemark     = studentRemarks.teacher    || '';
+  const principalRemark   = studentRemarks.principal  || '';
+  const teacherName       = (SD.staff||[]).find(st=>st.role==='Teacher'&&st.class===s.class)?.name || cfg.teacherName || '';
+  const principalName     = cfg.principalName || cfg.schoolHead || 'Principal';
+  const nextTermDate      = cfg.nextTermDate  || '________________';
+  const daysOpened        = cfg.daysOpened    || '–';
+
+  const w = window.open('','_blank','width=820,height=1150');
   if (!w) return alert('Please allow popups to print.');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card</title>
-  <style>body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#111;font-size:11.5px;}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:12px;}
-  .hdr h1{font-size:17px;margin:3px 0;}.hdr h2{font-size:12px;margin:2px 0;color:#555;}
-  .ig{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:10px;}
-  .sm{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:8px 0;}
-  .sb{border:1px solid #ccc;border-radius:4px;padding:5px;text-align:center;}
-  .sv{font-size:15px;font-weight:800;color:#2563eb;}
-  table{width:100%;border-collapse:collapse;margin-bottom:10px;}
-  th,td{border:1px solid #bbb;padding:3px 5px;}th{background:#f0f0f0;font-size:10.5px;}
-  .st{font-weight:700;font-size:11px;background:#e8e8e8;padding:3px 5px;margin:8px 0 3px;}
-  .rg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;}
-  .rb{border:1px solid #ccc;border-radius:4px;padding:6px;min-height:45px;}
-  .gk{display:flex;gap:5px;flex-wrap:wrap;font-size:9.5px;margin:5px 0;}
-  .gki{padding:2px 5px;border-radius:3px;}
-  @media print{button{display:none;}}</style>
-  </head><body>
-  <div class="hdr"><h1>${esc(cfg.schoolName||'School')}</h1><h2>Report Card — ${term} &nbsp;|&nbsp; ${esc(cfg.session||'')}</h2></div>
-  <div class="ig"><div><b>Student:</b> ${esc(s.name)}</div><div><b>Class:</b> ${esc(s.class||'')}</div>
-    <div><b>Admission No:</b> ${esc(s.admissionNo||'–')}</div><div><b>Term:</b> ${term}</div>
-    <div><b>Days Opened:</b> ${cfg.daysOpened||'–'}</div><div><b>Days Present:</b> ${daysPresent}</div></div>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card — ${esc(s.name)}</title>
+  <style>
+    *{box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#111;font-size:11.5px;background:#fff;}
+    .hdr{text-align:center;border-bottom:3px double #333;padding-bottom:10px;margin-bottom:12px;}
+    .hdr h1{font-size:18px;margin:4px 0;letter-spacing:.5px;}
+    .hdr h2{font-size:12px;margin:2px 0;color:#555;}
+    .hdr .motto{font-style:italic;font-size:10.5px;color:#777;margin-top:2px;}
+    .ig{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-bottom:10px;font-size:11px;}
+    .ig div{padding:2px 0;border-bottom:1px dotted #ddd;}
+    .sm{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:8px 0;}
+    .sb{border:2px solid #e5e7eb;border-radius:6px;padding:5px;text-align:center;}
+    .sv{font-size:16px;font-weight:900;color:#1d4ed8;}
+    table{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px;}
+    th,td{border:1px solid #bbb;padding:3px 5px;}
+    th{background:#f3f4f6;font-size:10.5px;font-weight:700;}
+    .st{font-weight:800;font-size:11.5px;background:#1e3a5f;color:#fff;padding:4px 7px;margin:8px 0 3px;border-radius:3px;}
+    .rg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+    .rb{border:1.5px solid #bbb;border-radius:6px;padding:8px;min-height:60px;}
+    .rb-label{font-weight:800;font-size:11px;margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:3px;}
+    .rb-content{font-size:11px;color:#222;line-height:1.7;min-height:36px;}
+    .rb-sig{margin-top:8px;font-size:10px;color:#555;border-top:1px solid #ddd;padding-top:4px;}
+    .gk{display:flex;gap:5px;flex-wrap:wrap;font-size:9.5px;margin:5px 0;}
+    .gki{padding:2px 6px;border-radius:3px;border:1px solid #ddd;}
+    .sig-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;font-size:10.5px;}
+    .sig-box{border-top:1.5px solid #333;padding-top:4px;text-align:center;}
+    .watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);
+      font-size:80px;color:rgba(0,0,0,0.04);font-weight:900;pointer-events:none;z-index:0;white-space:nowrap;}
+    @media print{button{display:none;}.watermark{position:fixed;}}
+  </style></head><body>
+  <div class="watermark">${esc(cfg.schoolName||'EduBloom')}</div>
+
+  <!-- HEADER -->
+  <div class="hdr">
+    ${cfg.logoUrl?`<img src="${cfg.logoUrl}" style="height:55px;margin-bottom:5px;">` : `<div style="font-size:28px;margin-bottom:3px;">🏫</div>`}
+    <h1>${esc(cfg.schoolName||'School')}</h1>
+    <h2>${esc(cfg.address||'')}</h2>
+    <div class="motto">${esc(cfg.motto||'')}</div>
+    <h2 style="margin-top:5px;font-size:13px;font-weight:800;color:#1e3a5f;">STUDENT REPORT CARD</h2>
+    <h2>${esc(term)} &nbsp;·&nbsp; ${esc(cfg.session||new Date().getFullYear()+' Academic Session')}</h2>
+  </div>
+
+  <!-- STUDENT INFO -->
+  <div class="ig">
+    <div><b>Student Name:</b> ${esc(s.name)}</div>
+    <div><b>Class:</b> ${esc(s.class||'')}</div>
+    <div><b>Admission No:</b> ${esc(s.admissionNo||'–')}</div>
+    <div><b>Gender:</b> ${esc(s.gender||'–')}</div>
+    <div><b>Days School Opened:</b> ${daysOpened}</div>
+    <div><b>Days Present:</b> ${daysPresent}</div>
+  </div>
+
+  <!-- SUMMARY STATS -->
   <div class="sm">
-    <div class="sb"><div class="sv">${avg||'–'}</div>Average</div>
-    <div class="sb"><div class="sv">${avg>0?getGrade(avg).g:'–'}</div>Grade</div>
-    <div class="sb"><div class="sv">${myPos}</div>Position</div>
-    <div class="sb"><div class="sv">${classStudents.length}</div>In Class</div></div>
-  <div class="st">ACADEMIC PERFORMANCE</div>
-  <table><thead><tr><th>Subject</th><th>1st CA</th><th>2nd CA</th><th>3rd CA</th><th>CA /30</th><th>Exam /70</th><th>Total /100</th><th>Grade</th><th>Pos.</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="gk"><b>Grades:</b>
-    <span class="gki" style="background:#d1fae5;">A 70-100 Excellent</span>
-    <span class="gki" style="background:#dbeafe;">B 60-69 Very Good</span>
-    <span class="gki" style="background:#fef9c3;">C 50-59 Good</span>
-    <span class="gki" style="background:#ffedd5;">D 40-49 Fair</span>
-    <span class="gki" style="background:#fee2e2;">F 0-39 Fail</span></div>
+    <div class="sb"><div class="sv">${avg||'–'}</div><div>Average</div></div>
+    <div class="sb"><div class="sv" style="color:${avg>=70?'#16a34a':avg>=50?'#d97706':'#dc2626'}">${avg>0?getGrade(avg).g:'–'}</div><div>Grade</div></div>
+    <div class="sb"><div class="sv">${myPos}</div><div>Position</div></div>
+    <div class="sb"><div class="sv">${classStudents.length}</div><div>In Class</div></div>
+  </div>
+
+  <!-- ACADEMIC TABLE -->
+  <div class="st">📚 ACADEMIC PERFORMANCE</div>
+  <table>
+    <thead><tr>
+      <th style="text-align:left;">Subject</th>
+      <th>1st CA<br>/10</th><th>2nd CA<br>/10</th><th>3rd CA<br>/10</th>
+      <th>CA Total<br>/30</th><th>Exam<br>/70</th>
+      <th>Total<br>/100</th><th>Grade</th><th>Pos.</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="gk"><b>Key:</b>
+    <span class="gki" style="background:#d1fae5;">A 70–100 Excellent</span>
+    <span class="gki" style="background:#dbeafe;">B 60–69 Very Good</span>
+    <span class="gki" style="background:#fef9c3;">C 50–59 Good</span>
+    <span class="gki" style="background:#ffedd5;">D 40–49 Fair</span>
+    <span class="gki" style="background:#fee2e2;">F 0–39 Fail</span>
+  </div>
+
+  <!-- AFFECTIVE + PSYCHOMOTOR -->
   <div class="rg">
-    <div><div class="st">AFFECTIVE DOMAIN</div><table><thead><tr><th>Trait</th><th>Rating</th></tr></thead><tbody>${affRows}</tbody></table></div>
-    <div><div class="st">PSYCHOMOTOR SKILLS</div><table><thead><tr><th>Skill</th><th>Rating</th></tr></thead><tbody>${psyRows}</tbody></table></div></div>
-  <div class="rg" style="margin-top:6px;">
-    <div class="rb"><b>Class Teacher's Remark:</b><br><br>____________________</div>
-    <div class="rb"><b>Principal's Comment:</b><br><br>____________________</div></div>
-  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10.5px;">
-    <div>Teacher's Signature: ______________</div><div>Principal's Signature: ______________</div>
-    <div>Next Term Begins: ______________</div><div>Parent's Signature: ______________</div></div>
-  <div style="text-align:center;margin-top:10px;"><button onclick="window.print()" style="padding:7px 18px;cursor:pointer;">🖨️ Print / Save PDF</button></div>
+    <div>
+      <div class="st">🌟 AFFECTIVE DOMAIN</div>
+      <table><thead><tr><th style="text-align:left;">Trait</th><th>Rating (★★★★★)</th></tr></thead>
+      <tbody>${affRows}</tbody></table>
+    </div>
+    <div>
+      <div class="st">⚡ PSYCHOMOTOR SKILLS</div>
+      <table><thead><tr><th style="text-align:left;">Skill</th><th>Rating (★★★★★)</th></tr></thead>
+      <tbody>${psyRows}</tbody></table>
+    </div>
+  </div>
+
+  <!-- ═══ DUAL COMMENTS SECTION ═══ -->
+  <div class="st">💬 COMMENTS</div>
+  <div class="rg" style="margin-top:4px;">
+
+    <!-- CLASS TEACHER COMMENT -->
+    <div class="rb" style="border-color:#1d4ed8;">
+      <div class="rb-label" style="color:#1d4ed8;">📝 Class Teacher's Comment</div>
+      <div class="rb-content">
+        ${teacherRemark || '<span style="color:#aaa;font-style:italic;">No remark entered yet.</span>'}
+      </div>
+      <div class="rb-sig">
+        Name: <b>${esc(teacherName)||'____________________'}</b><br>
+        Signature: ____________________
+      </div>
+    </div>
+
+    <!-- PRINCIPAL / HEADMASTER COMMENT -->
+    <div class="rb" style="border-color:#065f46;">
+      <div class="rb-label" style="color:#065f46;">👑 Head Teacher / Principal's Comment</div>
+      <div class="rb-content">
+        ${principalRemark || '<span style="color:#aaa;font-style:italic;">No remark entered yet.</span>'}
+      </div>
+      <div class="rb-sig">
+        Name: <b>${esc(principalName)||'____________________'}</b><br>
+        Signature: ____________________
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SIGNATURES + NEXT TERM -->
+  <div class="sig-row" style="margin-top:12px;">
+    <div class="sig-box">Class Teacher<br>Signature</div>
+    <div class="sig-box">Principal<br>Signature</div>
+    <div class="sig-box">Parent / Guardian<br>Signature & Date</div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:10.5px;background:#f9fafb;padding:6px 8px;border-radius:5px;border:1px solid #e5e7eb;">
+    <div>📅 <b>Next Term Begins:</b> ${esc(nextTermDate)}</div>
+    <div>🏫 <b>${esc(cfg.schoolName||'')}</b> — Powered by EduBloom 🌸</div>
+  </div>
+
+  <div style="text-align:center;margin-top:12px;">
+    <button onclick="window.print()" style="padding:8px 22px;font-size:13px;cursor:pointer;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-weight:700;">🖨️ Print / Save as PDF</button>
+  </div>
   </body></html>`);
   w.document.close();
 }
@@ -3897,6 +4001,34 @@ async function refreshPlanFromFirestore(btn) {
 // Agents run silently in the background; results surface in the AI tab
 // ════════════════════════════════════════════════════════════════════════════
 
+
+// ── Report Card Agent UI runner ──────────────────────────────────────────
+async function runRCAgent() {
+  const term = document.getElementById("rc-agent-term")?.value || "First Term";
+  const students = SD.students || [];
+  if (!students.length) { toast("No students loaded yet."); return; }
+
+  const wrap   = document.getElementById("rc-agent-progress-wrap");
+  const bar    = document.getElementById("rc-agent-progress-bar");
+  const label  = document.getElementById("rc-agent-progress-label");
+  const result = document.getElementById("rc-agent-result");
+
+  if (wrap)   wrap.style.display  = "block";
+  if (result) result.style.display = "none";
+
+  const { done, total } = await BloomAgents.runReportCardAgent(term, function(done, total, name) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    if (bar)   bar.style.width   = pct + "%";
+    if (label) label.textContent = "Writing remark for " + name + "... (" + done + "/" + total + ")";
+  });
+
+  if (wrap)   wrap.style.display  = "none";
+  if (result) {
+    result.style.display = "block";
+    result.textContent   = "✅ " + done + " remarks generated for " + term + ". Print any report card to see them.";
+  }
+  toast("✅ " + done + " AI remarks ready for " + term + "!");
+}
 const BloomAgents = {
 
   // ── Shared Gemini caller ─────────────────────────────────────────────────
@@ -4170,6 +4302,114 @@ Use a respectful, professional tone suitable for a Nigerian school principal.`, 
     if (isNewSchool) {
       openOnboardingWizard(students, noFees, noClass);
     }
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // AGENT 4 — REPORT CARD AGENT
+  // End-of-term: auto-drafts teacher remarks + principal comments for all
+  // students using Gemini AI. Stores in SD.remarks for printReportCard to use.
+  // ════════════════════════════════════════════════════════════════════════
+  async runReportCardAgent(term, onProgress) {
+    const students = SD.students || [];
+    const subs = SD.config && SD.config.subjects ? SD.config.subjects : ["English Language","Mathematics","Basic Science"];
+    const schoolName = (SD.config && SD.config.schoolName) ? SD.config.schoolName : "Our School";
+    const key = (window.GEMINI_API_KEY || localStorage.getItem("gemini_api_key") || "").trim();
+
+    if (!key) {
+      toast("Add Gemini API key in Settings to generate AI remarks.");
+      return { done: 0, total: students.length };
+    }
+
+    SD.remarks = SD.remarks || {};
+    let done = 0;
+    const total = students.length;
+
+    for (let i = 0; i < students.length; i++) {
+      const s = students[i];
+      const sid = s.id || i;
+      const termData = ((SD.scores || {})[term] || {})[sid] || {};
+
+      const scoreLines = subs.map(function(sub) {
+        const v = termData[sub] || {};
+        const tot = (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
+        return tot > 0 ? (sub + ": " + tot + "/100") : null;
+      }).filter(Boolean).join(", ") || "scores not yet available";
+
+      const totals = subs.map(function(sub){
+        const v = termData[sub] || {};
+        return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
+      }).filter(function(v){ return v > 0; });
+      const avg = totals.length ? Math.round(totals.reduce(function(a,b){return a+b;},0)/totals.length) : 0;
+      const grade = avg>=70?"A (Excellent)":avg>=60?"B (Very Good)":avg>=50?"C (Good)":avg>=40?"D (Fair)":"F (Needs Improvement)";
+      const attData = SD.attendance || {};
+      const daysPresent = Object.values(attData).filter(function(day){ return day[s.name]==="Present"; }).length;
+
+      try {
+        if (onProgress) onProgress(done, total, s.name);
+
+        const teacherPrompt = "You are a Nigerian primary/secondary school class teacher writing a report card remark.
+" +
+          "Student: " + s.name + ", Class: " + (s.class||"unknown") + ", School: " + schoolName + "
+" +
+          "Term: " + term + ", Average: " + avg + "%, Grade: " + grade + "
+" +
+          "Subjects: " + scoreLines + "
+" +
+          "Days Present: " + daysPresent + "
+
+" +
+          "Write ONE sentence (max 25 words) as the class teacher remark for this student's report card.
+" +
+          "- Address the parent. Be specific about performance. Warm but honest tone.
+" +
+          "- Nigerian school report card style. No emojis. Output the remark only.";
+
+        const principalPrompt = "You are the Head Teacher/Principal of " + schoolName + ", a Nigerian school.
+" +
+          "Writing the principal comment on the report card for: " + s.name + " (Class: " + (s.class||"—") + ").
+" +
+          "Term: " + term + ". Average: " + avg + "%. Grade: " + grade + ".
+
+" +
+          "Write ONE sentence (max 20 words) as the Principal comment.
+" +
+          "- Formal administrative tone. Acknowledge performance. Encourage continued effort.
+" +
+          "- Start with student first name or This student. No emojis. Output the comment only.";
+
+        const teacherRemark   = await BloomAgents._gemini(teacherPrompt, 80);
+        const principalComment = await BloomAgents._gemini(principalPrompt, 60);
+
+        SD.remarks[sid] = SD.remarks[sid] || {};
+        SD.remarks[sid][term] = {
+          teacher:   (teacherRemark   || "").trim().replace(/^\W+|\W+$/g, ""),
+          principal: (principalComment|| "").trim().replace(/^\W+|\W+$/g, ""),
+          generatedAt: new Date().toISOString()
+        };
+
+        done++;
+        await new Promise(function(r){ setTimeout(r, 350); });
+      } catch(e) {
+        console.warn("Remark failed for " + s.name + ":", e.message);
+        done++;
+      }
+    }
+
+    if (done > 0) {
+      await SQ.push("remarks", SD.remarks);
+      BloomAgents._log("📄 Report Card Agent", "Generated remarks for " + done + "/" + total + " students", "Term: " + term + " — AI teacher + principal comments ready");
+    }
+    return { done: done, total: total };
+  },
+
+  saveRemark: function(sid, term, type, text) {
+    SD.remarks = SD.remarks || {};
+    SD.remarks[sid] = SD.remarks[sid] || {};
+    SD.remarks[sid][term] = SD.remarks[sid][term] || {};
+    SD.remarks[sid][term][type] = text;
+    SD.remarks[sid][term].editedAt = new Date().toISOString();
+    SQ.push("remarks", SD.remarks);
+    BloomAgents._log("📄 Report Card Agent", "Remark updated", type + " remark for student " + sid);
   },
 
   // ════════════════════════════════════════════════════════════════════════
