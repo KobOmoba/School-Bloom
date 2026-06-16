@@ -439,6 +439,146 @@ function toggleEye(inputId, btn) {
     </section>
 
     <!-- 14. SUPPORT -->
+    <!-- ═══ AI AGENT WORKFORCE ═══ -->
+    <section id="sec-ai" class="sec">
+      <style>
+        .ai-agent-card{background:var(--card);border-radius:14px;padding:1rem;margin-bottom:0.9rem;border-left:3px solid #7c3aed;}
+        .ai-agent-header{display:flex;align-items:center;gap:0.6rem;margin-bottom:0.75rem;}
+        .ai-agent-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;}
+        .ai-agent-name{font-weight:800;font-size:0.9rem;}
+        .ai-agent-role{font-size:0.72rem;color:var(--sub);}
+        .ai-agent-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0.4rem;margin-bottom:0.6rem;}
+        .ai-agent-stat{background:rgba(255,255,255,0.04);border-radius:8px;padding:0.4rem;text-align:center;}
+        .ai-stat-val{display:block;font-size:1.1rem;font-weight:900;font-family:monospace;}
+        .ai-stat-lbl{display:block;font-size:0.62rem;color:var(--sub);margin-top:1px;}
+        .ai-insight{font-size:0.78rem;color:#c4b5fd;line-height:1.6;font-style:italic;min-height:36px;margin-bottom:0.6rem;padding:0.5rem;background:rgba(124,58,237,0.08);border-radius:8px;}
+        .ai-alert-row{display:flex;align-items:center;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:0.78rem;gap:0.5rem;}
+        .ai-mini-btn{background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:3px 8px;font-size:0.7rem;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+        .agent-log-row{display:flex;align-items:flex-start;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:0.76rem;}
+        .agent-log-icon{font-size:1rem;flex-shrink:0;width:22px;}
+        .agent-log-body{flex:1;}
+        .agent-log-action{font-weight:700;color:var(--text);}
+        .agent-log-detail{color:var(--sub);font-size:0.7rem;margin-top:1px;}
+        .agent-log-time{color:var(--sub);font-size:0.68rem;white-space:nowrap;flex-shrink:0;}
+        .ai-run-btn{width:100%;padding:0.5rem;background:linear-gradient(135deg,#7c3aed,#059669);color:#fff;border:none;border-radius:8px;font-size:0.8rem;font-weight:700;cursor:pointer;margin-top:0.4rem;}
+      </style>
+
+      <!-- HEADER -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.9rem;">
+        <div>
+          <div style="font-weight:900;font-size:1rem;">🤖 AI Agent Workforce</div>
+          <div style="font-size:0.75rem;color:var(--sub);">Agents run automatically — they never sleep</div>
+        </div>
+        <button onclick="BloomAgents.runAll()" class="ai-run-btn" style="width:auto;padding:0.4rem 0.9rem;">▶ Run All</button>
+      </div>
+
+      <!-- AGENT 1: FINANCE -->
+      <div class="ai-agent-card" style="border-left-color:#22c55e;">
+        <div class="ai-agent-header">
+          <div class="ai-agent-avatar" style="background:rgba(34,197,94,0.15);">💰</div>
+          <div>
+            <div class="ai-agent-name">Finance Agent</div>
+            <div class="ai-agent-role">Fee collection · Defaulter tracking · Revenue forecasting</div>
+          </div>
+        </div>
+        <div class="ai-agent-stats" id="ai-finance-panel">
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Collection</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Defaulters</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Owed</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Collected</span></div>
+        </div>
+        <div class="ai-insight" id="ai-finance-insight">Waiting for data...</div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button onclick="BloomAgents.runFinanceAgent()" class="ai-mini-btn" style="background:#059669;">🔄 Refresh</button>
+          <button onclick="BloomAgents.prepareReminderBatch()" class="ai-mini-btn" style="background:#25d366;">📲 Send All Reminders</button>
+          <button onclick="go('revenue')" class="ai-mini-btn" style="background:rgba(255,255,255,0.08);color:var(--text);">📊 Fee Board →</button>
+        </div>
+      </div>
+
+      <!-- AGENT 2: TEACHER -->
+      <div class="ai-agent-card" style="border-left-color:#60a5fa;">
+        <div class="ai-agent-header">
+          <div class="ai-agent-avatar" style="background:rgba(96,165,250,0.15);">📚</div>
+          <div>
+            <div class="ai-agent-name">Teacher Agent</div>
+            <div class="ai-agent-role">Attendance monitoring · Score tracking · Absent alerts</div>
+          </div>
+        </div>
+        <div class="ai-agent-stats" id="ai-teacher-panel">
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Absent Streaks</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">No Scores</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Students</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Classes</span></div>
+        </div>
+        <div id="ai-absent-streaks" style="margin-bottom:0.6rem;"></div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button onclick="BloomAgents.runTeacherAgent()" class="ai-mini-btn" style="background:#2563eb;">🔄 Refresh</button>
+          <button onclick="openClassAttendance()" class="ai-mini-btn" style="background:rgba(255,255,255,0.08);color:var(--text);">📋 Mark Attendance →</button>
+          <button onclick="openSubjectScores()" class="ai-mini-btn" style="background:rgba(255,255,255,0.08);color:var(--text);">📝 Enter Scores →</button>
+        </div>
+      </div>
+
+      <!-- AGENT 3: PRINCIPAL -->
+      <div class="ai-agent-card" style="border-left-color:#f59e0b;">
+        <div class="ai-agent-header">
+          <div class="ai-agent-avatar" style="background:rgba(245,158,11,0.15);">👑</div>
+          <div>
+            <div class="ai-agent-name">Principal Agent</div>
+            <div class="ai-agent-role">School health · Capacity monitoring · Weekly briefing</div>
+          </div>
+        </div>
+        <div class="ai-agent-stats" id="ai-principal-panel">
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Health Score</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Capacity</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Revenue</span></div>
+          <div class="ai-agent-stat"><span class="ai-stat-val" style="color:var(--sub);">—</span><span class="ai-stat-lbl">Defaulters</span></div>
+        </div>
+        <div class="ai-insight" id="ai-principal-brief">Generating your daily briefing...</div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button onclick="BloomAgents.runPrincipalAgent()" class="ai-mini-btn" style="background:#d97706;">🔄 Refresh</button>
+          <button onclick="go('analytics')" class="ai-mini-btn" style="background:rgba(255,255,255,0.08);color:var(--text);">📈 Analytics →</button>
+        </div>
+      </div>
+
+      <!-- AGENT LOG -->
+      <div class="ai-agent-card" style="border-left-color:#4b5563;">
+        <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">🗂 Agent Activity Log</div>
+        <div id="ai-agent-log" style="max-height:180px;overflow-y:auto;">
+          <p style="color:var(--sub);font-size:0.78rem;text-align:center;">Agents will log activity here.</p>
+        </div>
+        <button onclick="localStorage.removeItem('agent_logs');renderAgentLog();" class="ai-mini-btn" style="margin-top:0.5rem;background:rgba(255,255,255,0.06);color:var(--sub);">🗑 Clear Log</button>
+      </div>
+    </section>
+
+    <!-- ONBOARDING WIZARD MODAL -->
+    <div id="onboard-wizard-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;padding:1rem;">
+      <div style="background:#0d1b2a;border:1.5px solid #7c3aed;border-radius:16px;padding:1.4rem;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+        <div style="font-size:1.5rem;text-align:center;margin-bottom:0.5rem;">🎉</div>
+        <div style="font-weight:900;font-size:1rem;text-align:center;margin-bottom:0.3rem;">Welcome to EduBloom!</div>
+        <p style="font-size:0.8rem;color:var(--sub);text-align:center;margin-bottom:1rem;line-height:1.6;">
+          Your school has been set up with <strong id="onboard-student-count" style="color:#a78bfa;">—</strong> students already loaded by your agent. Let's finish setup in 2 steps.
+        </p>
+        <div style="background:rgba(124,58,237,0.1);border-radius:10px;padding:0.75rem;margin-bottom:0.75rem;">
+          <div style="font-size:0.82rem;font-weight:700;margin-bottom:0.4rem;">What needs your attention:</div>
+          <div style="font-size:0.78rem;color:var(--sub);line-height:1.8;">
+            💰 <span id="onboard-nofee-count" style="color:#f59e0b;">—</span> students have no fee amount set<br>
+            📚 <span id="onboard-noclass-count" style="color:#60a5fa;">—</span> students have no class assigned
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          <button onclick="onboardGoFees()" style="background:linear-gradient(135deg,#059669,#0284c7);color:#fff;border:none;border-radius:10px;padding:0.7rem;font-weight:700;font-size:0.85rem;cursor:pointer;">
+            💰 Step 1 — Set Fees & Confirm Students
+          </button>
+          <button onclick="onboardGoStudents()" style="background:rgba(96,165,250,0.15);border:1px solid rgba(96,165,250,0.3);color:#60a5fa;border-radius:10px;padding:0.7rem;font-weight:700;font-size:0.85rem;cursor:pointer;">
+            📚 Step 2 — Assign Classes
+          </button>
+          <button onclick="closeOnboardWizard()" style="background:none;border:none;color:var(--sub);font-size:0.78rem;cursor:pointer;padding:0.3rem;">
+            Skip for now (do this later)
+          </button>
+        </div>
+      </div>
+    </div>
+
     <section id="sec-support" class="sec">
       <div class="card" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:2px solid var(--money);">
         <div class="ct">👤 Your Agent</div>
@@ -569,6 +709,7 @@ function toggleEye(inputId, btn) {
     <button class="nlink" data-t="comms" onclick="go('comms')"><span class="ni">📢</span>Comms</button>
     <button class="nlink" data-t="analytics" onclick="go('analytics')"><span class="ni">📊</span>Analytics</button>
     <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🔒</span>Security</button>
+    <button class="nlink" data-t="ai" onclick="go('ai')"><span class="ni">🤖</span>Agents</button>
     <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
     <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Scorecard</button>
