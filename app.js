@@ -796,7 +796,8 @@ function loadSchoolIntoSD(sid, school) {
   SD.commsLog = school.commsLog || [];
   SD.opportunities = school.opportunities || defaultOpps();
   SD.remarks     = school.remarks     || {};
-  SD.securityLog = school.securityLog || [];
+  SD.securityLog   = school.securityLog   || [];
+  SD.morningAlerts = school.morningAlerts || {};
   Object.keys(SD).forEach(k => localStorage.setItem(`p_${sid}_${k}`, JSON.stringify(SD[k])));
   // Start AI Agent runtime after data is loaded
   if (typeof startAgentRuntime === 'function') setTimeout(() => startAgentRuntime(), 500);
@@ -4849,12 +4850,16 @@ function onboardGoStudents() {
 function startAgentRuntime() {
   BloomAgents.runAll(true);
   runSecurityChecks();
+  // Load morningAlerts from SD on startup
+  SD.morningAlerts = SD.morningAlerts || {};
+  // Schedule the 8:30am and 9:30am checks
+  MorningAlertSystem.scheduleDailyChecks();
   CommsAgent.checkBirthdays && (function(){
     const bdays = CommsAgent.checkBirthdays();
     if (bdays.length) BloomAgents._log("📢 Comms Agent", "Birthdays today: " + bdays.map(function(s){return s.name;}).join(", "), bdays.length + " student(s)");
   })();
-  // Re-run every 5 minutes silently
-  setInterval(() => BloomAgents.runAll(true), 5 * 60 * 1000);
+  // Re-run agents every 5 minutes silently
+  setInterval(function() { BloomAgents.runAll(true); }, 5 * 60 * 1000);
 }
 
 
@@ -5281,4 +5286,332 @@ function runSecurityChecks() {
   SecurityAgent.checkAttendanceAnomaly();
   SD.securityLog = SD.securityLog || [];
   renderSecurityLog();
+}
+
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// MORNING ALERT SYSTEM — Auto 8:30am absence check + no-reply follow-up
+//
+// Flow:
+// 1. App loads → schedules 8:30am check (or fires immediately if past 8:30)
+// 2. 8:30am → scans attendance for today
+//    - Students already marked Present → skip
+//    - Students marked Absent → send absence alert immediately
+//    - Students NOT YET MARKED (unknown) → send "we haven't seen your child" alert
+// 3. All alerts are logged in SD.morningAlerts with timestamp
+// 4. No-reply tracker: at 9:30am, re-checks who hasn't responded
+//    → sends follow-up escalation to parent + flags for principal
+// ════════════════════════════════════════════════════════════════════════════
+
+const MorningAlertSystem = {
+
+  // ── Core: fire the 8:30am check ─────────────────────────────────────────
+  runMorningCheck: function(forced) {
+    const students = SD.students || [];
+    if (!students.length) return;
+
+    const today     = new Date().toISOString().split('T')[0];
+    const school    = (SD.config && SD.config.schoolName) ? SD.config.schoolName : 'Our School';
+    const att       = (SD.attendance && SD.attendance[today]) ? SD.attendance[today] : {};
+    const alertKey  = 'morning_alert_sent_' + today;
+    const alreadySent = localStorage.getItem(alertKey);
+
+    // Don't double-send on same day unless forced
+    if (alreadySent && !forced) {
+      BloomAgents._log('⏰ Morning Alert', 'Already sent today — skipping', today);
+      return;
+    }
+
+    const displayDate = new Date(today + 'T00:00:00').toLocaleDateString('en-NG', {
+      weekday: 'long', day: 'numeric', month: 'long'
+    });
+
+    const absent      = [];  // marked Absent
+    const notMarked   = [];  // no record yet — unknown status
+    const present     = [];  // marked Present
+
+    students.forEach(function(s) {
+      const status = att[s.name];
+      if (status === 'Present')                   present.push(s);
+      else if (status === 'Absent' || status === 'A') absent.push(s);
+      else                                        notMarked.push(s);
+    });
+
+    // Nothing to alert if everyone is present
+    if (!absent.length && !notMarked.length) {
+      BloomAgents._log('⏰ Morning Alert', 'All students present — no alerts needed', today);
+      localStorage.setItem(alertKey, new Date().toISOString());
+      return;
+    }
+
+    // Only alert students who have a phone number
+    const toAlert = [...absent, ...notMarked].filter(function(s) { return s.phone; });
+    if (!toAlert.length) {
+      BloomAgents._log('⏰ Morning Alert', 'No parent contacts to alert', today);
+      localStorage.setItem(alertKey, new Date().toISOString());
+      return;
+    }
+
+    // Confirm before firing (principal must approve)
+    const summary =
+      (absent.length    ? '❌ Absent: '    + absent.length    + '\n' : '') +
+      (notMarked.length ? '❓ Not marked: ' + notMarked.length + '\n' : '') +
+      '\nTotal parents to notify: ' + toAlert.length;
+
+    if (!forced && !confirm(
+      '⏰ 8:30am Morning Alert\n\n' + summary + '\n\nSend attendance alerts now?'
+    )) return;
+
+    // Build alert log record
+    SD.morningAlerts = SD.morningAlerts || {};
+    SD.morningAlerts[today] = SD.morningAlerts[today] || { sent: [], noReply: [], escalated: [] };
+
+    // Fire messages
+    toAlert.forEach(function(s, i) {
+      const isAbsent   = absent.includes(s);
+      const isUnknown  = notMarked.includes(s);
+
+      let msgBody;
+      if (isAbsent) {
+        msgBody =
+          'Your child *' + s.name + '* (' + (s.class||'') + ') has been marked *ABSENT* today, *' + displayDate + '*.\n\n' +
+          'If this is expected, no action needed.\n' +
+          'If your child should be in school, please contact us immediately.\n\n' +
+          '📞 Reply *YES* to confirm you received this message.';
+      } else {
+        msgBody =
+          'We have *NOT YET SEEN* your child *' + s.name + '* (' + (s.class||'') + ') at school today, *' + displayDate + '*.\n\n' +
+          'Attendance has not been recorded as of 8:30am.\n\n' +
+          'If your child is on their way, no action needed.\n' +
+          'If your child is unwell or will not be in school today, please let us know.\n\n' +
+          '📞 Reply *YES* to confirm you received this message.';
+      }
+
+      const fullMsg = encodeURIComponent(
+        'Dear Parent / Guardian,\n\n' +
+        '*' + school + '* 🌸\n\n' +
+        msgBody + '\n\n' +
+        '— EduBloom Morning Alert System'
+      );
+
+      setTimeout(function() {
+        window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + fullMsg, '_blank');
+      }, i * 1100);
+
+      // Log this alert
+      SD.morningAlerts[today].sent.push({
+        name:      s.name,
+        phone:     s.phone,
+        class:     s.class || '',
+        status:    isAbsent ? 'absent' : 'unknown',
+        sentAt:    new Date().toISOString(),
+        replied:   false,
+        escalated: false
+      });
+    });
+
+    // Persist alert log
+    SQ.push('morningAlerts', SD.morningAlerts);
+    localStorage.setItem(alertKey, new Date().toISOString());
+
+    BloomAgents._log(
+      '⏰ Morning Alert',
+      'Sent to ' + toAlert.length + ' parents',
+      'Absent: ' + absent.length + ' · Unmarked: ' + notMarked.length + ' · ' + displayDate
+    );
+
+    // Schedule no-reply follow-up for 9:30am (1 hour later)
+    MorningAlertSystem.scheduleNoReplyCheck();
+
+    toast('⏰ 8:30am alerts sent to ' + toAlert.length + ' parents.');
+  },
+
+  // ── No-reply follow-up at 9:30am ─────────────────────────────────────────
+  // Since we cannot receive WA replies automatically, we treat anyone whose
+  // status hasn't been updated by 9:30am as "no reply" and escalate.
+  runNoReplyCheck: function() {
+    const today   = new Date().toISOString().split('T')[0];
+    const school  = (SD.config && SD.config.schoolName) ? SD.config.schoolName : 'Our School';
+    const alerts  = (SD.morningAlerts && SD.morningAlerts[today]) ? SD.morningAlerts[today] : null;
+    if (!alerts || !alerts.sent || !alerts.sent.length) return;
+
+    const att = (SD.attendance && SD.attendance[today]) ? SD.attendance[today] : {};
+    const displayDate = new Date(today + 'T00:00:00').toLocaleDateString('en-NG', {
+      weekday: 'long', day: 'numeric', month: 'long'
+    });
+
+    // Check who is STILL absent/unmarked and hasn't been resolved
+    const noReply = alerts.sent.filter(function(entry) {
+      if (entry.escalated) return false; // already escalated
+      const currentStatus = att[entry.name];
+      // If now marked Present, they showed up — no follow-up needed
+      if (currentStatus === 'Present') return false;
+      return true; // still absent or still not marked
+    });
+
+    if (!noReply.length) {
+      BloomAgents._log('⏰ Morning Alert', 'No-reply check: all resolved', today);
+      return;
+    }
+
+    // Show principal the no-reply list
+    const names = noReply.map(function(e) { return e.name + ' (' + e.class + ')'; }).join('\n');
+
+    if (!confirm(
+      '🔴 9:30am No-Reply Follow-Up\n\n' +
+      noReply.length + ' parent(s) have NOT confirmed receipt of the morning alert:\n\n' +
+      names + '\n\n' +
+      'Send escalation messages now?'
+    )) return;
+
+    noReply.forEach(function(entry, i) {
+      const s = (SD.students||[]).find(function(x) { return x.name === entry.name; });
+      if (!s || !s.phone) return;
+
+      const hasEmergency = s.safety && s.safety.emergencyPhone;
+
+      // Escalation message to parent
+      const parentMsg = encodeURIComponent(
+        'Dear Parent / Guardian,\n\n' +
+        '*' + school + '* 🌸 — FOLLOW-UP\n\n' +
+        '⚠️ We sent a message earlier about *' + s.name + '* and have not received a confirmation.\n\n' +
+        'As of 9:30am, your child has *not been confirmed at school*.\n\n' +
+        'Please reply to this message OR call the school immediately.\n\n' +
+        'If your child is safe and accounted for, simply reply *CONFIRMED*.\n\n' +
+        '— ' + school + ' Management'
+      );
+
+      setTimeout(function() {
+        window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + parentMsg, '_blank');
+      }, i * 1100);
+
+      // If there is a separate emergency contact, alert them too
+      if (hasEmergency) {
+        setTimeout(function() {
+          const emergMsg = encodeURIComponent(
+            'URGENT — *' + school + '*\n\n' +
+            'You are listed as the emergency contact for *' + s.name + '*.\n\n' +
+            'We have been unable to confirm this child\'s whereabouts today.\n\n' +
+            'Please contact the parent or call the school immediately.\n\n' +
+            '— ' + school + ' Security Team'
+          );
+          window.open('https://wa.me/' + s.safety.emergencyPhone.replace(/\D/g,'') + '?text=' + emergMsg, '_blank');
+        }, (noReply.length + i) * 1100);
+      }
+
+      // Mark as escalated in log
+      entry.escalated = true;
+      entry.escalatedAt = new Date().toISOString();
+      alerts.noReply.push({ name: entry.name, escalatedAt: entry.escalatedAt });
+    });
+
+    // Persist
+    SQ.push('morningAlerts', SD.morningAlerts);
+
+    BloomAgents._log(
+      '⏰ Morning Alert',
+      '9:30am no-reply escalation: ' + noReply.length + ' parent(s)',
+      noReply.map(function(e){ return e.name; }).join(', ')
+    );
+
+    toast('🔴 Escalation sent to ' + noReply.length + ' unconfirmed parent(s).');
+    renderMorningAlertStatus();
+  },
+
+  // ── Schedule the checks at the right times ───────────────────────────────
+  scheduleDailyChecks: function() {
+    const now     = new Date();
+    const today   = now.toISOString().split('T')[0];
+    const alertKey = 'morning_alert_sent_' + today;
+    const alreadySent = localStorage.getItem(alertKey);
+
+    // Target times in milliseconds from now
+    const t830  = new Date(today + 'T08:30:00').getTime();
+    const t930  = new Date(today + 'T09:30:00').getTime();
+    const nowMs = now.getTime();
+
+    // ── 8:30am check ──
+    if (nowMs < t830) {
+      // Schedule for later today
+      const msUntil830 = t830 - nowMs;
+      setTimeout(function() {
+        MorningAlertSystem.runMorningCheck(false);
+      }, msUntil830);
+      BloomAgents._log('⏰ Morning Alert', 'Scheduled for 8:30am today', Math.round(msUntil830/60000) + ' mins away');
+    } else if (!alreadySent && nowMs < t930) {
+      // It's between 8:30 and 9:30 — fire immediately if not sent
+      setTimeout(function() {
+        MorningAlertSystem.runMorningCheck(false);
+      }, 3000);
+      BloomAgents._log('⏰ Morning Alert', 'Past 8:30am — firing now (not yet sent today)', '');
+    } else if (alreadySent && nowMs > t830) {
+      BloomAgents._log('⏰ Morning Alert', 'Already sent today', alertKey);
+    }
+
+    // ── 9:30am no-reply check ──
+    if (nowMs < t930) {
+      const msUntil930 = t930 - nowMs;
+      setTimeout(function() {
+        MorningAlertSystem.runNoReplyCheck();
+      }, msUntil930);
+    } else {
+      // Past 9:30 — check if escalation was done
+      const alerts = SD.morningAlerts && SD.morningAlerts[today];
+      if (alerts && alerts.sent && alerts.sent.length && !alerts.noReply.length) {
+        // Escalation not yet done — offer it
+        setTimeout(function() {
+          MorningAlertSystem.runNoReplyCheck();
+        }, 5000);
+      }
+    }
+  },
+
+  scheduleNoReplyCheck: function() {
+    const now   = new Date();
+    const today = now.toISOString().split('T')[0];
+    const t930  = new Date(today + 'T09:30:00').getTime();
+    const nowMs = now.getTime();
+    const delay = Math.max(t930 - nowMs, 60000); // min 1 min if already past 9:30
+    setTimeout(function() {
+      MorningAlertSystem.runNoReplyCheck();
+    }, delay);
+  }
+};
+
+// ── Morning alert status panel renderer ────────────────────────────────────
+function renderMorningAlertStatus() {
+  const el = document.getElementById('morning-alert-status');
+  if (!el) return;
+
+  const today  = new Date().toISOString().split('T')[0];
+  const alerts = SD.morningAlerts && SD.morningAlerts[today];
+  const att    = (SD.attendance && SD.attendance[today]) ? SD.attendance[today] : {};
+
+  if (!alerts || !alerts.sent || !alerts.sent.length) {
+    el.innerHTML = '<p style="font-size:0.76rem;color:var(--sub);text-align:center;padding:0.5rem;">No morning alerts sent yet today.</p>';
+    return;
+  }
+
+  el.innerHTML = alerts.sent.map(function(entry) {
+    const currentStatus = att[entry.name];
+    const resolved  = currentStatus === 'Present';
+    const escalated = entry.escalated;
+    const color = resolved ? '#22c55e' : escalated ? '#ef4444' : '#f59e0b';
+    const icon  = resolved ? '✅' : escalated ? '🔴' : '⏳';
+    const label = resolved ? 'Now Present' : escalated ? 'Escalated 9:30am' : 'Awaiting Confirmation';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:0.76rem;">' +
+      '<span>' + icon + ' <b>' + esc(entry.name) + '</b> <span style="color:var(--sub);">(' + esc(entry.class) + ')</span></span>' +
+      '<span style="color:' + color + ';font-size:0.7rem;font-weight:700;">' + label + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+// ── Manual trigger for principal ────────────────────────────────────────────
+function triggerMorningAlertNow() {
+  MorningAlertSystem.runMorningCheck(true);
+}
+
+function triggerNoReplyCheckNow() {
+  MorningAlertSystem.runNoReplyCheck();
 }
