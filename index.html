@@ -481,6 +481,13 @@ function toggleEye(inputId, btn) {
         <button onclick="securityLogPickup()" style="width:100%;margin-top:0.5rem;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:0.55rem;font-weight:700;cursor:pointer;">🚨 Log & Alert Parent</button>
       </div>
 
+      <!-- EARLY DEPARTURE GATE -->
+      <div class="card" style="margin-bottom:0.75rem;border:1.5px solid rgba(245,158,11,0.4);">
+        <div class="ct" style="color:#f59e0b;">🚶 Early Departure Gate</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.5rem;">A student wants to leave before closing time? Record it here — parent is notified <strong>instantly</strong> via WhatsApp, and the collector is verified against the authorised list.</p>
+        <button onclick="openEarlyDeparture()" style="width:100%;background:#f59e0b;color:#111;border:none;border-radius:8px;padding:0.55rem;font-weight:800;cursor:pointer;font-size:0.85rem;">🚶 Open Early Departure Gate</button>
+      </div>
+
       <!-- VISITOR LOG -->
       <div class="card" style="margin-bottom:0.75rem;">
         <div class="ct">📋 Visitor Log</div>
@@ -669,6 +676,8 @@ function toggleEye(inputId, btn) {
           </select>
           <button onclick="commsAgentResult()" class="ai-mini-btn" style="background:#0369a1;">📊 Send Result Notifications</button>
           <button onclick="CommsAgent.sendBirthdayMessages()" class="ai-mini-btn" style="background:#7c3aed;">🎂 Send Birthdays</button>
+          <button onclick="checkMorningAbsentees()" class="ai-mini-btn" style="background:#ef4444;">❌ Absence Alerts</button>
+          <button onclick="sendLateResumptionAlert()" class="ai-mini-btn" style="background:#0369a1;">📅 Resumption Notice</button>
         </div>
       </div>
 
@@ -702,6 +711,72 @@ function toggleEye(inputId, btn) {
         <button onclick="localStorage.removeItem('agent_logs');renderAgentLog();" class="ai-mini-btn" style="margin-top:0.5rem;background:rgba(255,255,255,0.06);color:var(--sub);">🗑 Clear Log</button>
       </div>
     </section>
+
+    <!-- ═══ EARLY DEPARTURE MODAL ═══ -->
+    <div id="early-departure-modal" class="modal" style="display:none;">
+      <div class="mbox">
+        <button class="mclose" onclick="closeM('early-departure-modal')">✕</button>
+        <div class="ct" style="color:#f59e0b;">🚶 Early Departure Gate</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.6;">
+          Any student leaving before closing time must be recorded here. Parent is notified automatically via WhatsApp.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:0.45rem;">
+          <label>Student Name</label>
+          <input id="early-dep-student" placeholder="e.g. Kasali Mufeez" list="student-names-datalist">
+          <datalist id="student-names-datalist"></datalist>
+
+          <label style="margin-top:0.3rem;">Time of Departure</label>
+          <input id="early-dep-time" type="time">
+
+          <label style="margin-top:0.3rem;">Reason for Early Departure</label>
+          <select id="early-dep-reason" style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.6rem;font-size:0.82rem;">
+            <option value="">— Select reason —</option>
+            <option value="Medical appointment (doctor/clinic)">🏥 Medical appointment</option>
+            <option value="Family emergency">🚨 Family emergency</option>
+            <option value="Feeling unwell / sick">🤒 Feeling unwell / sick</option>
+            <option value="Parent request">👪 Parent request</option>
+            <option value="Religious / cultural observance">🕌 Religious / cultural observance</option>
+            <option value="Exam / external assessment">📝 Exam / external assessment</option>
+            <option value="Other (see collector name)">📌 Other</option>
+          </select>
+
+          <label style="margin-top:0.3rem;">Collected By (name of person)</label>
+          <input id="early-dep-collector" placeholder="e.g. Mum Fatima, Uncle Tunde — leave blank if student walks">
+
+          <div id="early-dep-result" style="display:none;padding:0.6rem;border-radius:8px;font-size:0.8rem;margin-top:0.4rem;font-weight:700;line-height:1.5;"></div>
+
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+            <button onclick="processEarlyDeparture()" style="flex:1;background:#f59e0b;color:#111;border:none;border-radius:8px;padding:0.6rem;font-weight:800;cursor:pointer;">✅ Confirm & Notify Parent</button>
+            <button onclick="closeM('early-departure-modal')" class="btn-ghost" style="flex:1;">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ RESUMPTION NOTICE MODAL ═══ -->
+    <div id="resumption-alert-modal" class="modal" style="display:none;">
+      <div class="mbox">
+        <button class="mclose" onclick="closeM('resumption-alert-modal')">✕</button>
+        <div class="ct">📅 Send Resumption Notice</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.6;">
+          Notify all parents of the next term start date and any special instructions.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:0.45rem;">
+          <label>Resumption Date</label>
+          <input id="resumption-date" type="date">
+
+          <label style="margin-top:0.3rem;">Message to Parents</label>
+          <textarea id="resumption-msg" rows="4" placeholder="e.g. School resumes for Second Term. Students should arrive by 7:30am. All fees must be paid on or before resumption day. School uniform is compulsory." style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.5rem 0.6rem;font-size:0.8rem;resize:none;"></textarea>
+
+          <div style="font-size:0.72rem;color:var(--sub);">The resumption date will be added automatically to the message.</div>
+
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+            <button onclick="confirmResumptionAlert()" style="flex:1;background:linear-gradient(135deg,#7c3aed,#0891b2);color:#fff;border:none;border-radius:8px;padding:0.6rem;font-weight:800;cursor:pointer;">📤 Send to All Parents</button>
+            <button onclick="closeM('resumption-alert-modal')" class="btn-ghost" style="flex:1;">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- ONBOARDING WIZARD MODAL -->
     <div id="onboard-wizard-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;padding:1rem;">
