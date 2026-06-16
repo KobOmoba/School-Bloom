@@ -702,6 +702,38 @@ function toggleEye(inputId, btn) {
         </div>
       </div>
 
+      <!-- MORNING ALERT AGENT CARD -->
+      <div class="ai-agent-card" style="border-left-color:#f59e0b;">
+        <div class="ai-agent-header">
+          <div class="ai-agent-avatar" style="background:rgba(245,158,11,0.15);">⏰</div>
+          <div>
+            <div class="ai-agent-name">Morning Alert Agent</div>
+            <div class="ai-agent-role">8:30am auto-check · No-reply escalation at 9:30am · Emergency contact cascade</div>
+          </div>
+        </div>
+
+        <!-- How it works -->
+        <div style="font-size:0.76rem;color:var(--sub);line-height:1.7;margin-bottom:0.7rem;background:rgba(245,158,11,0.06);border-radius:8px;padding:0.55rem;">
+          <div style="font-weight:700;color:#fbbf24;margin-bottom:0.3rem;">⏰ What happens automatically every school day:</div>
+          <div>📍 <b>8:30am</b> — Scans today's attendance. Sends WhatsApp to every parent whose child is <b>absent</b> or <b>not yet marked</b></div>
+          <div style="margin-top:0.25rem;">🔴 <b>9:30am</b> — Re-checks. Any parent who hasn't updated their child's status gets an <b>escalation message</b></div>
+          <div style="margin-top:0.25rem;">🚨 <b>Emergency contact</b> — If escalation still unresolved, the student's <b>second contact</b> (uncle, aunt, driver) is also alerted</div>
+        </div>
+
+        <!-- Today's alert status -->
+        <div style="font-weight:700;font-size:0.78rem;margin-bottom:0.35rem;">📋 Today's Alert Status</div>
+        <div id="morning-alert-status" style="max-height:160px;overflow-y:auto;margin-bottom:0.6rem;">
+          <p style="font-size:0.76rem;color:var(--sub);text-align:center;padding:0.5rem;">Loading...</p>
+        </div>
+
+        <!-- Manual triggers -->
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button onclick="triggerMorningAlertNow()" class="ai-mini-btn" style="background:#d97706;">⏰ Send 8:30am Alert Now</button>
+          <button onclick="triggerNoReplyCheckNow()" class="ai-mini-btn" style="background:#dc2626;">🔴 No-Reply Escalation Now</button>
+          <button onclick="renderMorningAlertStatus()" class="ai-mini-btn" style="background:rgba(255,255,255,0.07);color:var(--text);">🔄 Refresh Status</button>
+        </div>
+      </div>
+
       <!-- AGENT LOG -->
       <div class="ai-agent-card" style="border-left-color:#4b5563;">
         <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">🗂 Agent Activity Log</div>
@@ -937,7 +969,7 @@ function toggleEye(inputId, btn) {
     <button class="nlink" data-t="comms" onclick="go('comms')"><span class="ni">📢</span>Comms</button>
     <button class="nlink" data-t="analytics" onclick="go('analytics')"><span class="ni">📊</span>Analytics</button>
     <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🔒</span>Security</button>
-    <button class="nlink" data-t="ai" onclick="go('ai')"><span class="ni">🤖</span>Agents</button>
+    <button class="nlink" data-t="ai" onclick="go('ai');renderMorningAlertStatus();"><span class="ni">🤖</span>Agents</button>
     <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
     <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Scorecard</button>
@@ -1154,7 +1186,8 @@ function toggleEye(inputId, btn) {
       <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
         <button class="ca-mark-all" onclick="markAllPresent()">✅ All Present</button>
         <button class="ca-mark-all" style="color:var(--danger);" onclick="markAllAbsent()">❌ All Absent</button>
-        <button class="ca-mark-all" style="color:var(--warn);" onclick="notifyAbsentParents()">📲 Notify Absent</button>
+        <button class="ca-mark-all" style="color:var(--warn);" onclick="notifyAbsentParents()">📲 Notify Absent/Late</button>
+      <button class="ca-mark-all" style="color:#fbbf24;" onclick="triggerMorningAlertNow()">⏰ 8:30am Alert</button>
       </div>
     </div>
     <div id="ca-list"></div>
