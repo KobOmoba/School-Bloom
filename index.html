@@ -430,12 +430,78 @@ function toggleEye(inputId, btn) {
 
     <!-- 13. SECURITY -->
     <section id="sec-security" class="sec">
-      <div class="card">
-        <div class="ct">🔒 Security Gate</div>
-        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.65rem;">Instant search by student name or guardian name. No paper binders needed.</p>
-        <input type="text" id="sec-search" placeholder="Search student or guardian name…" oninput="securitySearch()">
+
+      <!-- ANOMALY BANNER -->
+      <div id="security-anomaly-banner" style="display:none;padding:0.65rem 0.9rem;border-radius:10px;border:1.5px solid;margin-bottom:0.75rem;font-size:0.8rem;font-weight:700;"></div>
+
+      <!-- PANIC BUTTONS -->
+      <div class="card" style="border:2px solid rgba(239,68,68,0.4);margin-bottom:0.75rem;">
+        <div class="ct" style="color:#ef4444;">🚨 Emergency Response</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.7rem;">One tap alerts ALL parents AND all staff simultaneously via WhatsApp.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.4rem;">
+          <button onclick="SecurityAgent.emergencyBroadcast('lockdown')" style="background:#dc2626;color:#fff;border:none;border-radius:10px;padding:0.65rem 0.5rem;font-weight:800;font-size:0.78rem;cursor:pointer;line-height:1.4;">
+            🔒 LOCKDOWN<br><span style="font-size:0.68rem;font-weight:400;">Students secured inside</span>
+          </button>
+          <button onclick="SecurityAgent.emergencyBroadcast('threat')" style="background:#b91c1c;color:#fff;border:none;border-radius:10px;padding:0.65rem 0.5rem;font-weight:800;font-size:0.78rem;cursor:pointer;line-height:1.4;">
+            ⚠️ SECURITY THREAT<br><span style="font-size:0.68rem;font-weight:400;">Active threat nearby</span>
+          </button>
+          <button onclick="SecurityAgent.emergencyBroadcast('fire')" style="background:#ea580c;color:#fff;border:none;border-radius:10px;padding:0.65rem 0.5rem;font-weight:800;font-size:0.78rem;cursor:pointer;line-height:1.4;">
+            🔥 FIRE / EVACUATION<br><span style="font-size:0.68rem;font-weight:400;">Students evacuated safely</span>
+          </button>
+          <button onclick="SecurityAgent.emergencyBroadcast('allclear')" style="background:#15803d;color:#fff;border:none;border-radius:10px;padding:0.65rem 0.5rem;font-weight:800;font-size:0.78rem;cursor:pointer;line-height:1.4;">
+            ✅ ALL CLEAR<br><span style="font-size:0.68rem;font-weight:400;">Situation resolved</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- COLLECTOR VERIFICATION -->
+      <div class="card" style="margin-bottom:0.75rem;">
+        <div class="ct">🛡️ Verify Pickup Person</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.6rem;">Before releasing any student — check if this person is authorised.</p>
+        <input type="text" id="verify-student" placeholder="Student name (e.g. Kasali Mufeez)" style="margin-bottom:0.4rem;">
+        <input type="text" id="verify-collector" placeholder="Person's name claiming to collect">
+        <button onclick="securityVerifyCollector()" style="width:100%;margin-top:0.5rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:0.55rem;font-weight:700;cursor:pointer;">🔍 Verify Now</button>
+        <div id="verify-result" style="display:none;margin-top:0.5rem;"></div>
+      </div>
+
+      <!-- STUDENT SEARCH (existing) -->
+      <div class="card" style="margin-bottom:0.75rem;">
+        <div class="ct">🔎 Student Lookup</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.5rem;">Search enrolled students instantly. No binders needed.</p>
+        <input type="text" id="sec-search" placeholder="Student or guardian name…" oninput="securitySearch()">
         <div id="security-results"></div>
       </div>
+
+      <!-- UNAUTHORIZED PICKUP LOG -->
+      <div class="card" style="margin-bottom:0.75rem;">
+        <div class="ct" style="color:#f59e0b;">🚫 Log Unauthorized Pickup Attempt</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.6rem;">Record and alert parent immediately when someone unverified tries to collect a child.</p>
+        <input type="text" id="pickup-student" placeholder="Student name">
+        <input type="text" id="pickup-person"  placeholder="Name/description of person who attempted" style="margin-top:0.4rem;">
+        <button onclick="securityLogPickup()" style="width:100%;margin-top:0.5rem;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:0.55rem;font-weight:700;cursor:pointer;">🚨 Log & Alert Parent</button>
+      </div>
+
+      <!-- VISITOR LOG -->
+      <div class="card" style="margin-bottom:0.75rem;">
+        <div class="ct">📋 Visitor Log</div>
+        <p style="font-size:0.76rem;color:var(--sub);margin-bottom:0.6rem;">Every person entering the school must be logged. Track who is inside at all times.</p>
+        <input type="text" id="visitor-name"    placeholder="Visitor full name">
+        <input type="text" id="visitor-purpose" placeholder="Purpose of visit" style="margin-top:0.4rem;">
+        <input type="text" id="visitor-phone"   placeholder="Visitor phone number (optional)" style="margin-top:0.4rem;">
+        <button onclick="securityLogVisitor()" style="width:100%;margin-top:0.5rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:0.55rem;font-weight:700;cursor:pointer;">📋 Log Visitor</button>
+      </div>
+
+      <!-- INCIDENT LOG -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+          <div class="ct" style="margin-bottom:0;">📁 Incident Log</div>
+          <button onclick="renderSecurityLog()" style="background:none;border:none;color:var(--sub);font-size:0.75rem;cursor:pointer;">🔄 Refresh</button>
+        </div>
+        <div id="security-incident-log">
+          <p style="font-size:0.78rem;color:var(--sub);text-align:center;padding:1rem;">No incidents logged today.</p>
+        </div>
+      </div>
+
     </section>
 
     <!-- 14. SUPPORT -->
@@ -576,6 +642,54 @@ function toggleEye(inputId, btn) {
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.4rem;">
           <button onclick="go('students')" class="ai-mini-btn" style="background:rgba(255,255,255,0.08);color:var(--text);">✏️ Edit Remarks →</button>
           <button onclick="go('analytics')" class="ai-mini-btn" style="background:rgba(255,255,255,0.08);color:var(--text);">🖨️ Print All Cards →</button>
+        </div>
+      </div>
+
+      <!-- AGENT 5: COMMS -->
+      <div class="ai-agent-card" style="border-left-color:#06b6d4;">
+        <div class="ai-agent-header">
+          <div class="ai-agent-avatar" style="background:rgba(6,182,212,0.15);">📢</div>
+          <div>
+            <div class="ai-agent-name">Comms Agent</div>
+            <div class="ai-agent-role">Parent broadcasts · Birthday messages · Result notifications</div>
+          </div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--sub);margin-bottom:0.65rem;line-height:1.6;">
+          Write one message and the agent delivers it to <strong>every parent</strong> via WhatsApp — one by one, automatically. Also sends birthdays and result alerts.
+        </div>
+        <!-- Broadcast composer -->
+        <textarea id="comms-agent-msg" rows="3" placeholder="Type your announcement here… e.g. School closes Friday for mid-term break. Resumption is Monday 23rd June." style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.5rem;font-size:0.78rem;resize:none;margin-bottom:0.5rem;"></textarea>
+        <button onclick="commsAgentBroadcast()" class="ai-mini-btn" style="background:#0891b2;width:100%;padding:0.45rem;font-size:0.8rem;">📤 Send to All Parents</button>
+
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.6rem;align-items:center;">
+          <select id="comms-term-select" style="flex:1;min-width:130px;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:7px;padding:0.35rem 0.5rem;font-size:0.76rem;">
+            <option value="First Term">First Term</option>
+            <option value="Second Term">Second Term</option>
+            <option value="Third Term">Third Term</option>
+          </select>
+          <button onclick="commsAgentResult()" class="ai-mini-btn" style="background:#0369a1;">📊 Send Result Notifications</button>
+          <button onclick="CommsAgent.sendBirthdayMessages()" class="ai-mini-btn" style="background:#7c3aed;">🎂 Send Birthdays</button>
+        </div>
+      </div>
+
+      <!-- AGENT 6: SECURITY -->
+      <div class="ai-agent-card" style="border-left-color:#ef4444;">
+        <div class="ai-agent-header">
+          <div class="ai-agent-avatar" style="background:rgba(239,68,68,0.15);">🔒</div>
+          <div>
+            <div class="ai-agent-name">Security Agent</div>
+            <div class="ai-agent-role">Emergency alerts · Pickup verification · Threat monitoring</div>
+          </div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--sub);margin-bottom:0.6rem;line-height:1.6;">
+          Detects mass absences, verifies who can collect students, and fires instant WhatsApp alerts to <strong>all parents + all staff</strong> in an emergency. Full incident log with timestamps.
+        </div>
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:0.6rem;margin-bottom:0.6rem;font-size:0.76rem;color:#fca5a5;line-height:1.6;">
+          🇳🇬 Built for Nigerian school safety — Kidnap threat detection, unauthorized pickup alerts, lockdown broadcasts, visitor tracking. All via WhatsApp — no app needed for parents.
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button onclick="go('security')" class="ai-mini-btn" style="background:#dc2626;font-size:0.8rem;padding:0.4rem 0.9rem;">🚨 Open Security Panel →</button>
+          <button onclick="SecurityAgent.checkAttendanceAnomaly()" class="ai-mini-btn" style="background:rgba(255,255,255,0.07);color:var(--text);">📊 Check Anomaly</button>
         </div>
       </div>
 
