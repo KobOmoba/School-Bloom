@@ -1349,15 +1349,54 @@ async function deleteStudent(idx) {
 // ── Edit Student (v2) ────────────────────────────────────────────────────
 function editStudent(idx) {
   const s = SD.students[idx]; if (!s) return;
+  const safety = s.safety || {};
   const html = `
-    <div style="display:flex;flex-direction:column;gap:0.5rem;">
-      <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Student</div>
-      <label>Full Name</label><input id="edit-s-name" value="${esc(s.name)}">
-      <label>Phone</label><input id="edit-s-phone" value="${esc(s.phone||'')}">
-      <label>Class</label><input id="edit-s-class" value="${esc(s.class||'')}">
-      <label>Total Fee (₦)</label><input id="edit-s-fee" type="number" value="${s.totalFee||''}">
-      <label>Date of Birth</label><input id="edit-s-dob" type="date" value="${esc(s.dob||'')}">
-      <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
+    <div style="display:flex;flex-direction:column;gap:0.45rem;">
+      <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Student Profile</div>
+
+      <label>Full Name</label>
+      <input id="edit-s-name" value="${esc(s.name)}">
+
+      <label>Parent / Guardian Phone (WhatsApp)</label>
+      <input id="edit-s-phone" value="${esc(s.phone||'')}" placeholder="+2348012345678">
+
+      <label>Class</label>
+      <input id="edit-s-class" value="${esc(s.class||'')}">
+
+      <label>Gender</label>
+      <select id="edit-s-gender" style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.6rem;">
+        <option value="" ${!s.gender?'selected':''}>— Select —</option>
+        <option value="Male"   ${s.gender==='Male'  ?'selected':''}>Male</option>
+        <option value="Female" ${s.gender==='Female'?'selected':''}>Female</option>
+      </select>
+
+      <label>Total Fee (₦)</label>
+      <input id="edit-s-fee" type="number" value="${s.totalFee||''}">
+
+      <label>Date of Birth</label>
+      <input id="edit-s-dob" type="date" value="${esc(s.dob||'')}">
+
+      <div style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.25);border-radius:8px;padding:0.65rem;margin-top:0.3rem;">
+        <div style="font-weight:800;font-size:0.8rem;color:#a78bfa;margin-bottom:0.5rem;">🛡️ Security & Safety</div>
+
+        <label style="font-size:0.76rem;">Guardian / Parent Full Name</label>
+        <input id="edit-s-guardian" value="${esc(safety.guardianName||'')}" placeholder="e.g. Mr. Kasali Adebayo">
+
+        <label style="font-size:0.76rem;margin-top:0.35rem;">Emergency Phone (different from parent)</label>
+        <input id="edit-s-emergency" value="${esc(safety.emergencyPhone||'')}" placeholder="e.g. Uncle's or Aunt's number" style="margin-top:0.2rem;">
+
+        <label style="font-size:0.76rem;margin-top:0.35rem;">Authorised Collectors</label>
+        <textarea id="edit-s-collectors" rows="2" placeholder="Names of people allowed to pick up this child, e.g. Mum Fatima, Uncle Tunde, Driver Emeka" style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.5rem;font-size:0.78rem;resize:none;margin-top:0.2rem;">${esc(safety.collectors||'')}</textarea>
+        <div style="font-size:0.68rem;color:var(--sub);margin-top:2px;">Separate names with a comma. The Security Agent checks this list before releasing any child.</div>
+
+        <label style="font-size:0.76rem;margin-top:0.35rem;">Medical / Special Notes</label>
+        <input id="edit-s-medical" value="${esc(safety.medical||'')}" placeholder="e.g. asthma, allergy to nuts, hearing aid" style="margin-top:0.2rem;">
+      </div>
+
+      <label style="margin-top:0.2rem;">Admission Number</label>
+      <input id="edit-s-admno" value="${esc(s.admissionNo||'')}" placeholder="e.g. BLM/2024/001">
+
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
         <button class="btn-brand" style="flex:1;" onclick="saveEditStudent(${idx})">💾 Save</button>
         <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-student-modal')">Cancel</button>
       </div>
@@ -1376,11 +1415,19 @@ async function saveEditStudent(idx) {
   const s = SD.students[idx]; if (!s) return;
   const old = s.name;
   const n = $('edit-s-name').value.trim(); if (!n) return alert('Name required.');
-  s.name = n;
-  s.phone = $('edit-s-phone').value.trim().replace(/\D/g, '');
-  s.class = $('edit-s-class').value.trim();
-  s.totalFee = parseFloat($('edit-s-fee').value) || s.totalFee || 50000;
-  if ($('edit-s-dob')) s.dob = $('edit-s-dob').value || s.dob || '';
+  s.name        = n;
+  s.phone       = ($('edit-s-phone')     ? $('edit-s-phone').value.trim().replace(/\D/g,'') : s.phone||'');
+  s.class       = ($('edit-s-class')     ? $('edit-s-class').value.trim()    : s.class||'');
+  s.gender      = ($('edit-s-gender')    ? $('edit-s-gender').value          : s.gender||'');
+  s.totalFee    = parseFloat($('edit-s-fee')?.value) || s.totalFee || 50000;
+  s.dob         = ($('edit-s-dob')       ? $('edit-s-dob').value             : s.dob||'');
+  s.admissionNo = ($('edit-s-admno')     ? $('edit-s-admno').value.trim()    : s.admissionNo||'');
+  s.safety = {
+    guardianName:   $('edit-s-guardian')   ? $('edit-s-guardian').value.trim()   : (s.safety||{}).guardianName||'',
+    emergencyPhone: $('edit-s-emergency')  ? $('edit-s-emergency').value.trim().replace(/\D/g,'') : (s.safety||{}).emergencyPhone||'',
+    collectors:     $('edit-s-collectors') ? $('edit-s-collectors').value.trim() : (s.safety||{}).collectors||'',
+    medical:        $('edit-s-medical')    ? $('edit-s-medical').value.trim()    : (s.safety||{}).medical||''
+  };
   if (old !== n && SD.attendance) {
     Object.keys(SD.attendance).forEach(date => {
       if (SD.attendance[date][old] !== undefined) {
@@ -2975,33 +3022,324 @@ async function saveClassAttendance(){
   toast('✅ Attendance saved.'); closeM('class-att-modal');
 }
 
-async function notifyAbsentParents(){
-  const date=$('ca-date')?.value, cls=$('ca-class-sel')?.value; if(!date||!cls) return;
-  const classStudents=SD.students.filter(s=>s.class===cls);
-  const att=SD.attendance[date]||{};
-  const absentees=classStudents.filter(s=>att[s.name]==='Absent');
-  if(!absentees.length) return alert('No absentees to notify.');
-  absentees.forEach(s=>{
-    if(s.phone){
-      const msg=`Dear Parent,\n\nYour child *${s.name}* was marked absent from class today (${date}). Kindly verify with the school administration.`;
-      window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
-    }
+// ════════════════════════════════════════════════════════════════════════
+// ATTENDANCE ALERT SYSTEM — Absence · Late · Early Departure · Resumption
+// ════════════════════════════════════════════════════════════════════════
+
+// ── Notify parents of ABSENT students ───────────────────────────────────
+async function notifyAbsentParents() {
+  const date = $('ca-date')?.value;
+  const cls  = $('ca-class-sel')?.value;
+  if (!date || !cls) return;
+
+  const classStudents = SD.students.filter(s => s.class === cls);
+  const att = SD.attendance[date] || {};
+  const absentees = classStudents.filter(s => att[s.name] === 'Absent');
+  const lateOnes  = classStudents.filter(s => att[s.name] === 'Late');
+
+  if (!absentees.length && !lateOnes.length) {
+    toast('✅ No absences or late arrivals to report!');
+    return;
+  }
+
+  const school = SD.config?.schoolName || 'Our School';
+  const displayDate = new Date(date).toLocaleDateString('en-NG', { weekday:'long', day:'numeric', month:'long' });
+  let sent = 0;
+
+  // Absent notifications
+  absentees.forEach(function(s, i) {
+    if (!s.phone) return;
+    const msg = encodeURIComponent(
+      'Dear Parent / Guardian,
+
+' +
+      '*' + school + '* 🌸
+
+' +
+      'This is to inform you that *' + s.name + '* (' + (s.class||'') + ') was *ABSENT* from school today, *' + displayDate + '*.
+
+' +
+      'If this was unplanned, please contact the class teacher or front desk immediately.
+
+' +
+      'If your child is unwell, kindly send a note tomorrow.
+
+' +
+      '— EduBloom Comms Agent'
+    );
+    setTimeout(function() {
+      window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + msg, '_blank');
+    }, i * 1200);
+    sent++;
   });
+
+  // Late notifications
+  lateOnes.forEach(function(s, i) {
+    if (!s.phone) return;
+    const delay = (absentees.length + i) * 1200;
+    const msg = encodeURIComponent(
+      'Dear Parent / Guardian,
+
+' +
+      '*' + school + '* 🌸
+
+' +
+      '*' + s.name + '* (' + (s.class||'') + ') arrived *LATE* to school today, *' + displayDate + '*.
+
+' +
+      'Kindly ensure your child leaves home earlier to avoid missing morning lessons.
+
+' +
+      'Thank you for your cooperation.
+
+' +
+      '— EduBloom Comms Agent'
+    );
+    setTimeout(function() {
+      window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + msg, '_blank');
+    }, delay);
+    sent++;
+  });
+
+  toast('📲 Sending alerts to ' + sent + ' parent(s)...');
+  logComm('Attendance Alert', 'Absent: ' + absentees.length + ' · Late: ' + lateOnes.length + ' · Date: ' + date);
+  BloomAgents._log('📚 Teacher Agent', 'Attendance alerts sent', absentees.length + ' absent · ' + lateOnes.length + ' late · ' + date);
 }
 
-function checkMorningAbsentees(){
-  const date=new Date().toISOString().split('T')[0], att=SD.attendance[date]||{};
-  const absentNames=Object.keys(att).filter(name=>att[name]==='Absent');
-  if(!absentNames.length) return alert('No students marked absent today.');
-  if(confirm(`Send absence notifications to parents of ${absentNames.length} children?`)){
-    absentNames.forEach(name=>{
-      const s=SD.students.find(x=>x.name===name);
-      if(s&&s.phone){
-        const msg=`Dear Parent, your child *${s.name}* was marked absent from class today (${date}). Please confirm.`;
-        window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
-      }
-    });
+// ── Morning check — all classes combined ─────────────────────────────────
+function checkMorningAbsentees() {
+  const date = new Date().toISOString().split('T')[0];
+  const att  = SD.attendance[date] || {};
+  const school = SD.config?.schoolName || 'Our School';
+  const displayDate = new Date(date).toLocaleDateString('en-NG', { weekday:'long', day:'numeric', month:'long' });
+
+  const absentList = Object.keys(att).filter(name => att[name] === 'Absent');
+  const lateList   = Object.keys(att).filter(name => att[name] === 'Late');
+
+  if (!absentList.length && !lateList.length) {
+    toast('✅ No absences or late arrivals recorded today.');
+    return;
   }
+
+  if (!confirm(
+    'Send attendance alerts for today (' + displayDate + ')?
+
+' +
+    '❌ Absent: ' + absentList.length + ' student(s)
+' +
+    '⏰ Late: '   + lateList.length   + ' student(s)'
+  )) return;
+
+  let sent = 0;
+  const allToAlert = [
+    ...absentList.map(name => ({ name, status: 'Absent' })),
+    ...lateList.map(name   => ({ name, status: 'Late'   }))
+  ];
+
+  allToAlert.forEach(function(entry, i) {
+    const s = SD.students.find(x => x.name === entry.name);
+    if (!s || !s.phone) return;
+    const isAbsent = entry.status === 'Absent';
+    const msg = encodeURIComponent(
+      'Dear Parent / Guardian,
+
+' +
+      '*' + school + '* 🌸
+
+' +
+      '*' + s.name + '* (' + (s.class||'') + ') was marked *' + (isAbsent ? 'ABSENT ❌' : 'LATE ⏰') + '* today, *' + displayDate + '*.
+
+' +
+      (isAbsent
+        ? 'Please contact the school if this was unplanned.
+'
+        : 'Kindly ensure earlier departure from home tomorrow.
+') +
+      '
+— EduBloom Comms Agent'
+    );
+    setTimeout(function() {
+      window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + msg, '_blank');
+    }, i * 1200);
+    sent++;
+  });
+
+  toast('📲 Sending ' + sent + ' attendance alerts...');
+  logComm('Morning Attendance Broadcast', absentList.length + ' absent · ' + lateList.length + ' late');
+}
+
+// ── Late Resumption Alert — school reopening after break ─────────────────
+function sendLateResumptionAlert() {
+  openM('resumption-alert-modal');
+}
+
+function confirmResumptionAlert() {
+  const msg     = $('resumption-msg')?.value.trim();
+  const dateStr = $('resumption-date')?.value;
+  if (!msg || !dateStr) { toast('Fill in the message and date.'); return; }
+
+  const school = SD.config?.schoolName || 'Our School';
+  const displayDate = new Date(dateStr).toLocaleDateString('en-NG', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const students = SD.students || [];
+  const withPhone = students.filter(s => s.phone);
+  if (!withPhone.length) { toast('No parent contacts found.'); return; }
+
+  const fullMsg = encodeURIComponent(
+    'Dear Parent / Guardian,
+
+' +
+    '*' + school + '* 🌸
+
+' +
+    '📢 *RESUMPTION NOTICE*
+
+' +
+    msg + '
+
+' +
+    '📅 *Resumption Date: ' + displayDate + '*
+
+' +
+    'Please ensure your child reports to school on time.
+
+' +
+    '— EduBloom Comms Agent'
+  );
+
+  if (!confirm('Send resumption notice to ' + withPhone.length + ' parents?')) return;
+  closeM('resumption-alert-modal');
+
+  withPhone.forEach(function(s, i) {
+    setTimeout(function() {
+      window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + fullMsg, '_blank');
+    }, i * 1200);
+  });
+
+  toast('📲 Resumption notice going to ' + withPhone.length + ' parents...');
+  logComm('Resumption Notice', 'Date: ' + displayDate + ' — sent to ' + withPhone.length + ' parents');
+  BloomAgents._log('📢 Comms Agent', 'Resumption notice sent', displayDate + ' · ' + withPhone.length + ' parents');
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// EARLY DEPARTURE SYSTEM
+// A student wanting to leave before closing time MUST be verified:
+// 1. Record the early departure with reason
+// 2. Notify parent instantly via WhatsApp
+// 3. Verify who is collecting (security check)
+// 4. Log in incident record
+// ════════════════════════════════════════════════════════════════════════
+
+function openEarlyDeparture(studentName) {
+  // Pre-fill name if passed (e.g. called from student profile)
+  if (studentName && $('early-dep-student')) $('early-dep-student').value = studentName;
+  // Set default time to now
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  if ($('early-dep-time')) $('early-dep-time').value = hh + ':' + mm;
+  // Populate datalist with student names
+  const dl = document.getElementById('student-names-datalist');
+  if (dl) {
+    dl.innerHTML = (SD.students||[]).map(function(s){ return '<option value="' + esc(s.name) + '">'; }).join('');
+  }
+  $('early-dep-result').style.display = 'none';
+  openM('early-departure-modal');
+}
+
+async function processEarlyDeparture() {
+  const studentName = $('early-dep-student')?.value.trim();
+  const reason      = $('early-dep-reason')?.value.trim();
+  const collectedBy = $('early-dep-collector')?.value.trim();
+  const timeStr     = $('early-dep-time')?.value || new Date().toTimeString().slice(0,5);
+
+  if (!studentName || !reason) { toast('Student name and reason are required.'); return; }
+
+  const s = (SD.students || []).find(x => x.name && x.name.toLowerCase().includes(studentName.toLowerCase()));
+  const school = SD.config?.schoolName || 'Our School';
+  const today  = new Date().toLocaleDateString('en-NG', { weekday:'long', day:'numeric', month:'long' });
+
+  // Security check — verify collector if provided
+  let securityNote = '';
+  if (collectedBy) {
+    const verify = SecurityAgent.verifyCollector(studentName, collectedBy);
+    if (verify.ok === false) {
+      const resultEl = $('early-dep-result');
+      resultEl.style.display   = 'block';
+      resultEl.style.background = 'rgba(239,68,68,0.12)';
+      resultEl.style.border    = '1.5px solid rgba(239,68,68,0.5)';
+      resultEl.style.color     = '#ef4444';
+      resultEl.innerHTML = '🚫 <strong>STOP — DO NOT RELEASE</strong><br>' + esc(verify.reason) + '<br><span style="font-size:0.72rem;">Authorised: ' + esc(verify.authorised||'None listed') + '</span>';
+      // Log the attempt
+      SecurityAgent.logUnauthorizedPickup(studentName, collectedBy);
+      return;
+    }
+    if (verify.ok === null) securityNote = '⚠️ Collector not verified — parent was called to confirm.';
+    if (verify.ok === true)  securityNote = '✅ Verified collector: ' + collectedBy;
+  }
+
+  // Log the early departure
+  const entry = {
+    type:         'early_departure',
+    student:      s ? s.name : studentName,
+    class:        s ? (s.class||'') : '',
+    reason:       reason,
+    collectedBy:  collectedBy || 'Self / walked',
+    time:         timeStr,
+    date:         new Date().toISOString().split('T')[0],
+    securityNote: securityNote,
+    approvedBy:   userRole || 'Staff'
+  };
+  SD.securityLog = SD.securityLog || [];
+  SD.securityLog.unshift(entry);
+  SQ.push('securityLog', SD.securityLog);
+
+  // WhatsApp parent notification
+  if (s && s.phone) {
+    const msg = encodeURIComponent(
+      'Dear Parent / Guardian,
+
+' +
+      '*' + school + '* 🌸
+
+' +
+      '📢 *EARLY DEPARTURE NOTICE*
+
+' +
+      '*' + (s.name) + '* (' + (s.class||'') + ') left school early today (' + today + ') at *' + timeStr + '*.
+
+' +
+      '📌 Reason: *' + reason + '*
+' +
+      (collectedBy ? '👤 Collected by: *' + collectedBy + '*
+' : '') +
+      (securityNote ? '
+' + securityNote + '
+' : '') +
+      '
+If you did NOT authorise this, please call the school immediately.
+
+' +
+      '— EduBloom Security Agent'
+    );
+    window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + msg, '_blank');
+  }
+
+  BloomAgents._log('🔒 Security Agent', 'Early departure: ' + (s?.name||studentName), 'Time: ' + timeStr + ' · Reason: ' + reason + (collectedBy ? ' · By: ' + collectedBy : ''));
+
+  // Show success
+  const resultEl = $('early-dep-result');
+  resultEl.style.display   = 'block';
+  resultEl.style.background = 'rgba(34,197,94,0.1)';
+  resultEl.style.border    = '1.5px solid rgba(34,197,94,0.3)';
+  resultEl.style.color     = '#22c55e';
+  resultEl.innerHTML = '✅ Logged & parent notified via WhatsApp.<br><span style="font-size:0.72rem;color:var(--sub);">' + (securityNote||'No security flags.') + '</span>';
+
+  // Clear form
+  if ($('early-dep-reason'))    $('early-dep-reason').value = '';
+  if ($('early-dep-collector')) $('early-dep-collector').value = '';
+
+  renderSecurityLog();
+  toast('✅ Early departure logged. Parent alerted.');
 }
 
 // ── Subject Scores Modal ──────────────────────────────────────────────────
