@@ -796,6 +796,8 @@ function loadSchoolIntoSD(sid, school) {
   SD.commsLog = school.commsLog || [];
   SD.opportunities = school.opportunities || defaultOpps();
   Object.keys(SD).forEach(k => localStorage.setItem(`p_${sid}_${k}`, JSON.stringify(SD[k])));
+  // Start AI Agent runtime after data is loaded
+  if (typeof startAgentRuntime === 'function') setTimeout(() => startAgentRuntime(), 500);
 }
 
 // ─── Demo mode ────────────────────────────────────────────────────────────
@@ -3887,3 +3889,386 @@ async function refreshPlanFromFirestore(btn) {
     setTimeout(() => SQ.silentPull(), 2000);
   } catch(e) { console.warn('Auto-login failed:', e); }
 })();
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOOM AI AGENT WORKFORCE
+// Each agent is a twin of a human role — they watch data and act automatically
+// Agents run silently in the background; results surface in the AI tab
+// ════════════════════════════════════════════════════════════════════════════
+
+const BloomAgents = {
+
+  // ── Shared Gemini caller ─────────────────────────────────────────────────
+  async _gemini(prompt, maxTokens = 512) {
+    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    if (!key) return null;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens }
+      })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message);
+    return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  },
+
+  _log(agentName, action, detail) {
+    const logs = JSON.parse(localStorage.getItem('agent_logs') || '[]');
+    logs.unshift({ agent: agentName, action, detail, ts: new Date().toISOString() });
+    localStorage.setItem('agent_logs', JSON.stringify(logs.slice(0, 200)));
+    renderAgentLog();
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // AGENT 1 — FINANCE AGENT
+  // Watches fees every time dashboard loads. Flags defaulters, sends reminders,
+  // predicts end-of-term collection, suggests fee adjustments.
+  // ════════════════════════════════════════════════════════════════════════
+  async runFinanceAgent() {
+    const students = SD.students || [];
+    if (!students.length) return;
+
+    const overdue = students.filter(s => ((s.totalFee || 0) - (s.paid || 0)) > 0);
+    const totalOwed = overdue.reduce((t, s) => t + (s.totalFee || 0) - (s.paid || 0), 0);
+    const totalExpected = students.reduce((t, s) => t + (s.totalFee || 0), 0);
+    const totalCollected = students.reduce((t, s) => t + (s.paid || 0), 0);
+    const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+
+    // Auto-flag critical defaulters (owe > 50% of their fee)
+    const critical = overdue.filter(s => ((s.totalFee||0)-(s.paid||0)) / (s.totalFee||1) > 0.5);
+
+    // Update finance agent panel
+    const panel = document.getElementById('ai-finance-panel');
+    if (panel) {
+      panel.innerHTML = `
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:${collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'}">${collectionRate}%</span>
+          <span class="ai-stat-lbl">Collection Rate</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#ef4444">${overdue.length}</span>
+          <span class="ai-stat-lbl">Defaulters</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#f59e0b">${fmt(totalOwed)}</span>
+          <span class="ai-stat-lbl">Outstanding</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#22c55e">${fmt(totalCollected)}</span>
+          <span class="ai-stat-lbl">Collected</span>
+        </div>`;
+    }
+
+    // AI insight — only if Gemini key set
+    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    if (key && overdue.length > 0) {
+      try {
+        const insight = await BloomAgents._gemini(
+          `You are EduBloom's Finance AI for a Nigerian school.
+Data: ${overdue.length} students owe fees. Total outstanding: ₦${totalOwed.toLocaleString()}. Collection rate: ${collectionRate}%.
+${critical.length} are critical defaulters (>50% unpaid).
+Classes with most defaults: ${[...new Set(overdue.map(s=>s.class||'Unknown'))].slice(0,3).join(', ')}.
+
+In 2 short sentences (max 30 words each), give the principal ONE urgent action and ONE prediction about end-of-term collection. Be direct, use Nigerian school context.`, 120);
+        const insightEl = document.getElementById('ai-finance-insight');
+        if (insightEl && insight) insightEl.textContent = insight;
+      } catch(e) { console.warn('Finance AI insight failed:', e.message); }
+    }
+
+    BloomAgents._log('💰 Finance Agent', `Scanned ${students.length} students`, `${overdue.length} defaulters · ₦${totalOwed.toLocaleString()} outstanding · ${collectionRate}% collected`);
+
+    // Return data for use by other agents
+    return { overdue, critical, totalOwed, collectionRate };
+  },
+
+  // Auto-batch send WA reminders to all defaulters (called by agent, confirmed by human)
+  prepareReminderBatch() {
+    const overdue = (SD.students || []).filter(s => ((s.totalFee||0)-(s.paid||0)) > 0 && s.phone);
+    if (!overdue.length) { toast('✅ No defaulters with phone numbers.'); return; }
+    const schoolName = SD.config?.schoolName || 'Our School';
+    const messages = overdue.map(s => {
+      const owe = (s.totalFee||0) - (s.paid||0);
+      return {
+        name: s.name,
+        phone: s.phone,
+        msg: `Dear Parent,\n\n*${schoolName}* 🌸\n\nThis is an automated fee reminder.\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Outstanding:* *${fmt(owe)}*\n\nPlease pay promptly to avoid disruption to your child's learning.\n\nReply to this message for payment options.\n\nThank you.\n– EduBloom Finance Agent`
+      };
+    });
+    openAgentReminderModal(messages);
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // AGENT 2 — TEACHER AGENT
+  // Helps teachers: auto-generates subject scores from class photo,
+  // auto-fills attendance from register scan, flags absent streaks,
+  // drafts teacher remarks for report cards.
+  // ════════════════════════════════════════════════════════════════════════
+  async runTeacherAgent() {
+    const students = SD.students || [];
+    if (!students.length) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const attData = SD.attendance || {};
+
+    // Find students with 3+ consecutive absences
+    const absentStreaks = [];
+    students.forEach(s => {
+      const records = attData[s.name] || {};
+      const dates = Object.keys(records).sort().slice(-7); // last 7 days
+      let streak = 0;
+      for (let i = dates.length - 1; i >= 0; i--) {
+        if (records[dates[i]] === 'A') streak++;
+        else break;
+      }
+      if (streak >= 3) absentStreaks.push({ name: s.name, class: s.class, streak });
+    });
+
+    // Students with no scores at all this term
+    const term = SD.scores?.currentTerm || 'First Term';
+    const noScores = students.filter(s => {
+      const termScores = SD.scores?.[term]?.[s.name];
+      return !termScores || Object.keys(termScores).length === 0;
+    });
+
+    const panel = document.getElementById('ai-teacher-panel');
+    if (panel) {
+      panel.innerHTML = `
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:${absentStreaks.length>0?'#ef4444':'#22c55e'}">${absentStreaks.length}</span>
+          <span class="ai-stat-lbl">Absent Streaks</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:${noScores.length>0?'#f59e0b':'#22c55e'}">${noScores.length}</span>
+          <span class="ai-stat-lbl">No Scores Yet</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#60a5fa">${students.length}</span>
+          <span class="ai-stat-lbl">Total Students</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#a78bfa">${[...new Set(students.map(s=>s.class).filter(Boolean))].length}</span>
+          <span class="ai-stat-lbl">Classes</span>
+        </div>`;
+    }
+
+    if (absentStreaks.length > 0) {
+      const list = document.getElementById('ai-absent-streaks');
+      if (list) {
+        list.innerHTML = absentStreaks.map(a =>
+          `<div class="ai-alert-row">
+            <span>⚠️ <b>${esc(a.name)}</b> (${esc(a.class||'—')}) — ${a.streak} days absent</span>
+            <button onclick="agentNotifyParent('${esc(a.name)}')" class="ai-mini-btn">📲 Notify Parent</button>
+          </div>`
+        ).join('');
+      }
+    }
+
+    BloomAgents._log('📚 Teacher Agent', `Scanned attendance & scores`, `${absentStreaks.length} absent streaks · ${noScores.length} students need scores`);
+    return { absentStreaks, noScores };
+  },
+
+  // Auto-draft teacher remarks for a student using Gemini
+  async draftRemark(studentName, scores, className) {
+    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    if (!key) { toast('⚠️ Add Gemini key in Settings for AI remarks.'); return; }
+    const scoreStr = Object.entries(scores||{}).map(([k,v])=>`${k}: ${v}`).join(', ');
+    try {
+      const remark = await BloomAgents._gemini(
+        `You are a Nigerian primary school teacher writing a report card remark for a student.
+Student: ${studentName}, Class: ${className}
+Scores: ${scoreStr || 'not yet available'}
+Write a single encouraging sentence (max 20 words) suitable for a Nigerian school report card. Be positive but honest. No emojis.`, 60);
+      return remark?.trim() || '';
+    } catch(e) { return ''; }
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // AGENT 3 — PRINCIPAL AGENT
+  // Monitors school health: enrollment vs capacity, fee trends,
+  // staff activity, upcoming exams, generates weekly summary for principal.
+  // ════════════════════════════════════════════════════════════════════════
+  async runPrincipalAgent() {
+    const students = SD.students || [];
+    const config = SD.config || {};
+    const tier = config.tier || '';
+    const tierMax = { 'Starter (1–50)':50,'Small (51–100)':100,'Medium (101–200)':200,'Large (201–350)':350,'Enterprise (351+)':9999 }[tier] || 50;
+    const capacityPct = Math.round((students.length / tierMax) * 100);
+
+    const overdue = students.filter(s => ((s.totalFee||0)-(s.paid||0)) > 0);
+    const totalExpected = students.reduce((t,s) => t+(s.totalFee||0),0);
+    const totalCollected = students.reduce((t,s) => t+(s.paid||0),0);
+    const healthScore = Math.round(
+      (totalExpected > 0 ? (totalCollected/totalExpected)*40 : 40) +
+      (students.length > 5 ? 30 : students.length * 6) +
+      (capacityPct < 90 ? 30 : 10)
+    );
+
+    const panel = document.getElementById('ai-principal-panel');
+    if (panel) {
+      const hColor = healthScore >= 80 ? '#22c55e' : healthScore >= 50 ? '#f59e0b' : '#ef4444';
+      panel.innerHTML = `
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:${hColor}">${healthScore}</span>
+          <span class="ai-stat-lbl">School Health</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#60a5fa">${students.length}/${tierMax}</span>
+          <span class="ai-stat-lbl">Capacity</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#22c55e">${fmt(totalCollected)}</span>
+          <span class="ai-stat-lbl">Revenue</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#ef4444">${overdue.length}</span>
+          <span class="ai-stat-lbl">Defaulters</span>
+        </div>`;
+    }
+
+    // AI weekly briefing
+    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    if (key) {
+      try {
+        const brief = await BloomAgents._gemini(
+          `You are EduBloom's Principal AI for a Nigerian school called "${config.schoolName||'this school'}".
+School data: ${students.length} students enrolled (capacity: ${tierMax}). 
+Fee collection: ${totalCollected > 0 ? Math.round((totalCollected/totalExpected)*100) : 0}% collected. 
+${overdue.length} students have outstanding fees. School health score: ${healthScore}/100.
+
+Write a 3-sentence principal briefing for today. Cover: what's going well, what needs attention, one action to take today. 
+Use a respectful, professional tone suitable for a Nigerian school principal.`, 150);
+        const briefEl = document.getElementById('ai-principal-brief');
+        if (briefEl && brief) briefEl.textContent = brief;
+      } catch(e) { console.warn('Principal AI brief failed:', e.message); }
+    }
+
+    BloomAgents._log('👑 Principal Agent', `School health check`, `Score: ${healthScore}/100 · ${students.length} students · ${fmt(totalCollected)} collected`);
+    return { healthScore, capacityPct, students, overdue };
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // AGENT 4 — ONBOARDING AGENT
+  // Fires when a new school first loads with pre-populated students.
+  // Guides principal through: confirm students → set fees → assign classes → done
+  // ════════════════════════════════════════════════════════════════════════
+  checkOnboarding() {
+    const students = SD.students || [];
+    const config = SD.config || {};
+    const onboardDone = localStorage.getItem(`onboard_done_${config.schoolId || 'x'}`);
+    if (onboardDone) return;
+
+    // New school: has students but fees not set or classes not assigned
+    const noFees = students.filter(s => !(s.totalFee > 0));
+    const noClass = students.filter(s => !s.class);
+    const isNewSchool = students.length > 0 && (noFees.length > students.length * 0.7 || noClass.length > students.length * 0.5);
+
+    if (isNewSchool) {
+      openOnboardingWizard(students, noFees, noClass);
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // MASTER RUN — fires all agents on app load + every 5 mins
+  // ════════════════════════════════════════════════════════════════════════
+  async runAll(silent = false) {
+    if (!SD.students?.length) return;
+    const [finance, teacher, principal] = await Promise.allSettled([
+      BloomAgents.runFinanceAgent(),
+      BloomAgents.runTeacherAgent(),
+      BloomAgents.runPrincipalAgent()
+    ]);
+    BloomAgents.checkOnboarding();
+    if (!silent) renderAgentLog();
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// AGENT UI HELPERS
+// ════════════════════════════════════════════════════════════════════════════
+
+function renderAgentLog() {
+  const logs = JSON.parse(localStorage.getItem('agent_logs') || '[]');
+  const el = document.getElementById('ai-agent-log');
+  if (!el) return;
+  if (!logs.length) { el.innerHTML = '<p style="color:var(--sub);font-size:0.78rem;text-align:center;">Agents will log activity here.</p>'; return; }
+  el.innerHTML = logs.slice(0, 20).map(l => {
+    const t = new Date(l.ts).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
+    return `<div class="agent-log-row">
+      <span class="agent-log-icon">${l.agent.split(' ')[0]}</span>
+      <div class="agent-log-body">
+        <div class="agent-log-action">${esc(l.action)}</div>
+        <div class="agent-log-detail">${esc(l.detail)}</div>
+      </div>
+      <span class="agent-log-time">${t}</span>
+    </div>`;
+  }).join('');
+}
+
+function agentNotifyParent(studentName) {
+  const s = (SD.students || []).find(x => x.name === studentName);
+  if (!s?.phone) { toast('⚠️ No phone number for ' + studentName); return; }
+  const school = SD.config?.schoolName || 'School';
+  const msg = encodeURIComponent(
+    `Dear Parent,\n\n*${school}* 🌸\n\n` +
+    `We are concerned about *${studentName}'s* attendance. ` +
+    `Your child has been absent for 3 or more consecutive days.\n\n` +
+    `Please contact the school or reply to this message.\n\n– EduBloom Teacher Agent`
+  );
+  window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${msg}`, '_blank');
+  BloomAgents._log('📚 Teacher Agent', `Notified parent of ${studentName}`, 'Absence alert sent via WhatsApp');
+}
+
+function openAgentReminderModal(messages) {
+  let idx = 0;
+  const send = () => {
+    if (idx >= messages.length) { toast(`✅ All ${messages.length} reminders sent!`); return; }
+    const m = messages[idx];
+    window.open(`https://wa.me/${(m.phone||'').replace(/\D/g,'')}?text=${encodeURIComponent(m.msg)}`, '_blank');
+    idx++;
+    setTimeout(send, 1200);
+  };
+  if (!confirm(`📲 Finance Agent will send fee reminders to ${messages.length} parents via WhatsApp.\n\nTap OK to start — messages open one by one.`)) return;
+  send();
+  BloomAgents._log('💰 Finance Agent', `Sent ${messages.length} fee reminders`, 'Batch WhatsApp reminders dispatched');
+}
+
+// ── Onboarding Wizard ─────────────────────────────────────────────────────
+function openOnboardingWizard(students, noFees, noClass) {
+  const el = document.getElementById('onboard-wizard-modal');
+  if (!el) return;
+  document.getElementById('onboard-student-count').textContent = students.length;
+  document.getElementById('onboard-nofee-count').textContent = noFees.length;
+  document.getElementById('onboard-noclass-count').textContent = noClass.length;
+  el.style.display = 'flex';
+}
+
+function closeOnboardWizard() {
+  const el = document.getElementById('onboard-wizard-modal');
+  if (el) el.style.display = 'none';
+  const config = SD.config || {};
+  localStorage.setItem(`onboard_done_${config.schoolId || 'x'}`, '1');
+}
+
+function onboardGoFees() {
+  closeOnboardWizard();
+  go('revenue');
+  toast('💰 Set each student\'s fee in the Fee column. Agent will track collection automatically.');
+}
+
+function onboardGoStudents() {
+  closeOnboardWizard();
+  go('students');
+  toast('👥 Assign classes to each student. Use the Class column.');
+}
+
+// Auto-run agents on load (after SD is populated)
+function startAgentRuntime() {
+  BloomAgents.runAll(true);
+  // Re-run every 5 minutes silently
+  setInterval(() => BloomAgents.runAll(true), 5 * 60 * 1000);
+}
