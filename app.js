@@ -5375,17 +5375,24 @@ const MorningAlertSystem = {
       let msgBody;
       if (isAbsent) {
         msgBody =
-          'Your child *' + s.name + '* (' + (s.class||'') + ') has been marked *ABSENT* today, *' + displayDate + '*.\n\n' +
-          'If this is expected, no action needed.\n' +
-          'If your child should be in school, please contact us immediately.\n\n' +
-          '📞 Reply *YES* to confirm you received this message.';
+          'Your child *' + s.name + '* (' + (s.class||'') + ') has *NOT been seen at school* as of 8:30am today, *' + displayDate + '*.\n\n' +
+          'Kindly reply with ONE of the following so we can confirm whereabouts:\n\n' +
+          '1️⃣ Reply *SICK* — Child is unwell and staying home\n' +
+          '2️⃣ Reply *COMING* — Child is on the way\n' +
+          '3️⃣ Reply *EXCUSED* — Planned absence (travel, appointment, etc.)\n' +
+          '4️⃣ Reply *UNKNOWN* — You are not sure where your child is\n\n' +
+          '⚠️ *No reply within 1 hour means we will escalate to your emergency contact.*\n\n' +
+          '— ' + school + ' Safety Team';
       } else {
         msgBody =
-          'We have *NOT YET SEEN* your child *' + s.name + '* (' + (s.class||'') + ') at school today, *' + displayDate + '*.\n\n' +
-          'Attendance has not been recorded as of 8:30am.\n\n' +
-          'If your child is on their way, no action needed.\n' +
-          'If your child is unwell or will not be in school today, please let us know.\n\n' +
-          '📞 Reply *YES* to confirm you received this message.';
+          'Your child *' + s.name + '* (' + (s.class||'') + ') has *NOT been seen at school* as of 8:30am today, *' + displayDate + '*.\n\n' +
+          'Kindly reply with ONE of the following so we can confirm whereabouts:\n\n' +
+          '1️⃣ Reply *SICK* — Child is unwell and staying home\n' +
+          '2️⃣ Reply *COMING* — Child is on the way\n' +
+          '3️⃣ Reply *EXCUSED* — Planned absence (travel, appointment, etc.)\n' +
+          '4️⃣ Reply *UNKNOWN* — You are not sure where your child is\n\n' +
+          '⚠️ *No reply within 1 hour means we will escalate to your emergency contact.*\n\n' +
+          '— ' + school + ' Safety Team';
       }
 
       const fullMsg = encodeURIComponent(
@@ -5475,11 +5482,16 @@ const MorningAlertSystem = {
       const parentMsg = encodeURIComponent(
         'Dear Parent / Guardian,\n\n' +
         '*' + school + '* 🌸 — FOLLOW-UP\n\n' +
-        '⚠️ We sent a message earlier about *' + s.name + '* and have not received a confirmation.\n\n' +
-        'As of 9:30am, your child has *not been confirmed at school*.\n\n' +
-        'Please reply to this message OR call the school immediately.\n\n' +
-        'If your child is safe and accounted for, simply reply *CONFIRMED*.\n\n' +
-        '— ' + school + ' Management'
+        '🔴 *URGENT — No Response Received*\n\n' +
+        'We sent a safety alert this morning about *' + s.name + '* and have received *no reply*.\n\n' +
+        'As of 9:30am, we *cannot confirm the whereabouts* of your child.\n\n' +
+        'You MUST respond to this message immediately with one of:\n\n' +
+        '1️⃣ *SICK* — Unwell at home\n' +
+        '2️⃣ *COMING* — On the way\n' +
+        '3️⃣ *EXCUSED* — Known absence\n' +
+        '4️⃣ *UNKNOWN* — You do not know where your child is\n\n' +
+        'If we do not hear from you, we will contact your *emergency contact* and notify the *school authority*.\n\n' +
+        '— ' + school + ' Safety Team'
       );
 
       setTimeout(function() {
@@ -5492,9 +5504,11 @@ const MorningAlertSystem = {
           const emergMsg = encodeURIComponent(
             'URGENT — *' + school + '*\n\n' +
             'You are listed as the emergency contact for *' + s.name + '*.\n\n' +
-            'We have been unable to confirm this child\'s whereabouts today.\n\n' +
-            'Please contact the parent or call the school immediately.\n\n' +
-            '— ' + school + ' Security Team'
+            'As of 9:30am, the parent of this child has *not responded* to our safety alert.\n\n' +
+            'We cannot confirm this child\'s whereabouts today.\n\n' +
+            'Please contact the parent *immediately* and confirm whether ' + s.name + ' is safe.\n\n' +
+            'Then reply to this message: *SAFE* or *UNKNOWN*.\n\n' +
+            '— ' + school + ' Safety Team'
           );
           window.open('https://wa.me/' + s.safety.emergencyPhone.replace(/\D/g,'') + '?text=' + emergMsg, '_blank');
         }, (noReply.length + i) * 1100);
