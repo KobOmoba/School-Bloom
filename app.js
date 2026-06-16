@@ -795,7 +795,8 @@ function loadSchoolIntoSD(sid, school) {
   SD.socialPages = school.socialPages || [];
   SD.commsLog = school.commsLog || [];
   SD.opportunities = school.opportunities || defaultOpps();
-  SD.remarks = school.remarks || {};
+  SD.remarks     = school.remarks     || {};
+  SD.securityLog = school.securityLog || [];
   Object.keys(SD).forEach(k => localStorage.setItem(`p_${sid}_${k}`, JSON.stringify(SD[k])));
   // Start AI Agent runtime after data is loaded
   if (typeof startAgentRuntime === 'function') setTimeout(() => startAgentRuntime(), 500);
@@ -4509,6 +4510,437 @@ function onboardGoStudents() {
 // Auto-run agents on load (after SD is populated)
 function startAgentRuntime() {
   BloomAgents.runAll(true);
+  runSecurityChecks();
+  CommsAgent.checkBirthdays && (function(){
+    const bdays = CommsAgent.checkBirthdays();
+    if (bdays.length) BloomAgents._log("📢 Comms Agent", "Birthdays today: " + bdays.map(function(s){return s.name;}).join(", "), bdays.length + " student(s)");
+  })();
   // Re-run every 5 minutes silently
   setInterval(() => BloomAgents.runAll(true), 5 * 60 * 1000);
+}
+
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// AGENT 5 — COMMS AGENT
+// Handles all parent communication: announcements, birthdays, result
+// notifications, emergency broadcasts. No human manually writing messages.
+// ════════════════════════════════════════════════════════════════════════════
+
+const CommsAgent = {
+
+  // ── Send a school-wide broadcast to ALL parents ─────────────────────────
+  broadcastToAll(message, type) {
+    const students = SD.students || [];
+    const withPhone = students.filter(s => s.phone);
+    if (!withPhone.length) { toast("No parent phone numbers saved yet."); return; }
+
+    const school = SD.config && SD.config.schoolName ? SD.config.schoolName : "Our School";
+    const fullMsg = "*" + school + "* \uD83C\uDF38\n\n" + message + "\n\n\u2014 EduBloom Comms Agent";
+    const encoded = encodeURIComponent(fullMsg);
+
+    // Queue messages — open one WA tab per parent, staggered
+    let idx = 0;
+    const next = function() {
+      if (idx >= withPhone.length) {
+        toast("\u2705 Broadcast sent to " + withPhone.length + " parents.");
+        logComm("Broadcast: " + (type || "Announcement"), "Sent to " + withPhone.length + " parents.");
+        CommsAgent._log("broadcast", type || "Announcement", withPhone.length + " parents reached");
+        return;
+      }
+      const s = withPhone[idx];
+      window.open("https://wa.me/" + s.phone.replace(/\D/g, "") + "?text=" + encoded, "_blank");
+      idx++;
+      setTimeout(next, 1300);
+    };
+
+    if (!confirm("Send this message to ALL " + withPhone.length + " parents?\n\n" + message.substring(0, 120) + (message.length > 120 ? "..." : ""))) return;
+    next();
+  },
+
+  // ── Birthday scanner — runs daily, finds today's birthdays ──────────────
+  checkBirthdays() {
+    const students = SD.students || [];
+    const today = new Date();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    const todayMMDD = mm + "-" + dd;
+
+    const birthdays = students.filter(function(s) {
+      if (!s.dob) return false;
+      // Support formats: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY
+      const dob = s.dob.replace(/\//g, "-");
+      const parts = dob.split("-");
+      let bMM, bDD;
+      if (parts[0].length === 4) { bMM = parts[1]; bDD = parts[2]; }
+      else { bDD = parts[0]; bMM = parts[1]; }
+      return (bMM + "-" + bDD) === todayMMDD;
+    });
+
+    return birthdays;
+  },
+
+  sendBirthdayMessages() {
+    const birthdays = CommsAgent.checkBirthdays();
+    if (!birthdays.length) { toast("No birthdays today \uD83C\uDF82"); return; }
+    const school = SD.config && SD.config.schoolName ? SD.config.schoolName : "Our School";
+
+    birthdays.forEach(function(s) {
+      if (!s.phone) return;
+      const msg = encodeURIComponent(
+        "Happy Birthday \uD83C\uDF89 to *" + s.name + "*!\n\n" +
+        "From all of us at *" + school + "*, we wish you a wonderful birthday today. May this year bring you great success in your studies and beyond.\n\n" +
+        "\uD83C\uDF82\uD83C\uDF38 \u2014 EduBloom"
+      );
+      setTimeout(function() {
+        window.open("https://wa.me/" + s.phone.replace(/\D/g, "") + "?text=" + msg, "_blank");
+      }, birthdays.indexOf(s) * 1200);
+    });
+
+    logComm("Birthday Messages", "Sent to " + birthdays.length + " students: " + birthdays.map(function(s) { return s.name; }).join(", "));
+    CommsAgent._log("birthday", "Sent birthday wishes", birthdays.length + " student(s): " + birthdays.map(function(s) { return s.name; }).join(", "));
+    toast("\uD83C\uDF82 Birthday messages sent for " + birthdays.length + " student(s)!");
+  },
+
+  // ── Term result notification — tells parents results are ready ───────────
+  sendResultNotifications(term) {
+    const students = SD.students || [];
+    const school = SD.config && SD.config.schoolName ? SD.config.schoolName : "Our School";
+    const withPhone = students.filter(function(s) { return s.phone; });
+    if (!withPhone.length) { toast("No parent contacts found."); return; }
+
+    let idx = 0;
+    const next = function() {
+      if (idx >= withPhone.length) {
+        toast("\u2705 Result notifications sent to " + withPhone.length + " parents.");
+        logComm("Result Notification: " + term, "Sent to " + withPhone.length + " parents.");
+        CommsAgent._log("results", term + " result notifications sent", withPhone.length + " parents notified");
+        return;
+      }
+      const s = withPhone[idx];
+      const subs = SD.config && SD.config.subjects ? SD.config.subjects : [];
+      const sid = s.id || students.indexOf(s);
+      const termData = (SD.scores && SD.scores[term] ? SD.scores[term][sid] : null) || {};
+      const totals = subs.map(function(sub) {
+        const v = termData[sub] || {};
+        return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
+      }).filter(function(v) { return v > 0; });
+      const avg = totals.length ? Math.round(totals.reduce(function(a,b){return a+b;},0)/totals.length) : 0;
+
+      const msg = encodeURIComponent(
+        "Dear Parent,\n\n*" + school + "* \uD83C\uDF38\n\n" +
+        "The " + term + " results for *" + s.name + "* are now ready.\n\n" +
+        (avg > 0 ? "\uD83D\uDCCA Average Score: *" + avg + "%*\n\n" : "") +
+        "Please visit the school to collect the report card or contact your class teacher.\n\n" +
+        "\u2014 EduBloom Comms Agent"
+      );
+      window.open("https://wa.me/" + s.phone.replace(/\D/g, "") + "?text=" + msg, "_blank");
+      idx++;
+      setTimeout(next, 1300);
+    };
+
+    if (!confirm("Send " + term + " result notifications to " + withPhone.length + " parents?")) return;
+    next();
+  },
+
+  _log: function(type, action, detail) {
+    BloomAgents._log("\uD83D\uDCE2 Comms Agent [" + type + "]", action, detail);
+  }
+};
+
+// ── Comms Agent UI functions ─────────────────────────────────────────────
+function commsAgentBroadcast() {
+  const msg = document.getElementById("comms-agent-msg") ? document.getElementById("comms-agent-msg").value.trim() : "";
+  if (!msg) { toast("Type your message first."); return; }
+  CommsAgent.broadcastToAll(msg, "Custom Announcement");
+}
+
+function commsAgentResult() {
+  const term = document.getElementById("comms-term-select") ? document.getElementById("comms-term-select").value : "First Term";
+  CommsAgent.sendResultNotifications(term);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// AGENT 6 — SECURITY AGENT
+// Real threat response for Nigerian school context:
+// - Unauthorized pickup alert
+// - Panic/emergency broadcast to ALL parents instantly
+// - Unknown visitor log
+// - Daily attendance anomaly (sudden mass absence = flag)
+// - Safe arrival confirmation system
+// - Authorized collector verification
+// ════════════════════════════════════════════════════════════════════════════
+
+const SecurityAgent = {
+
+  // ── PANIC BUTTON — mass emergency alert to all parents ──────────────────
+  // This is the most critical function. One tap sends to everyone.
+  emergencyBroadcast(level) {
+    const students = SD.students || [];
+    const school = SD.config && SD.config.schoolName ? SD.config.schoolName : "Our School";
+    const addr = SD.config && SD.config.address ? SD.config.address : "";
+    const allPhones = [];
+
+    students.forEach(function(s) {
+      if (s.phone) allPhones.push({ name: s.name, phone: s.phone, type: "parent" });
+      if (s.safety && s.safety.emergencyPhone) allPhones.push({ name: s.name + " (emergency)", phone: s.safety.emergencyPhone, type: "emergency" });
+    });
+
+    // Also alert staff
+    (SD.staff || []).forEach(function(st) {
+      if (st.phone) allPhones.push({ name: st.name, phone: st.phone, type: "staff" });
+    });
+
+    const unique = allPhones.filter(function(p, i, arr) {
+      return arr.findIndex(function(x) { return x.phone === p.phone; }) === i;
+    });
+
+    if (!unique.length) { alert("CRITICAL: No contact numbers saved!\n\nGo to Students and add parent phone numbers immediately."); return; }
+
+    const levelMessages = {
+      "lockdown": "\uD83D\uDEA8 *SCHOOL LOCKDOWN — " + school.toUpperCase() + "*\n\nDO NOT come to the school to pick up your child right now.\n\nThe school is in LOCKDOWN. All students are SAFE and secured indoors.\n\nWe will send an ALL CLEAR when it is safe.\n\nDo NOT call the school line — keep it free for emergency services.\n\n\uD83D\uDCCD " + addr,
+      "threat":   "\u26A0\uFE0F *SECURITY ALERT — " + school.toUpperCase() + "*\n\nThere is an active security threat near the school. Students are SAFE and accounted for.\n\nWe are cooperating with security forces. Do NOT attempt to come to the school now.\n\nYou will receive an update within 30 minutes.\n\n\uD83D\uDCCD " + addr,
+      "fire":     "\uD83D\uDD25 *FIRE/EVACUATION ALERT — " + school.toUpperCase() + "*\n\nAll students have been safely evacuated. No casualties.\n\nPickup point: Please go to the DESIGNATED ASSEMBLY POINT near the school.\n\nBring your ID to collect your child.\n\n\uD83D\uDCCD " + addr,
+      "allclear": "\u2705 *ALL CLEAR — " + school.toUpperCase() + "*\n\nThe earlier security alert has been resolved. All students are SAFE.\n\nNormal school activities have resumed. Thank you for your patience.\n\n\u2014 " + school + " Management"
+    };
+
+    const msg = levelMessages[level] || levelMessages["threat"];
+    const encoded = encodeURIComponent(msg);
+
+    const levelNames = { lockdown: "LOCKDOWN", threat: "SECURITY ALERT", fire: "FIRE/EVACUATION", allclear: "ALL CLEAR" };
+    const confirmText = level === "allclear"
+      ? "Send ALL CLEAR to " + unique.length + " contacts?"
+      : "SEND " + (levelNames[level]||"EMERGENCY") + " ALERT to " + unique.length + " contacts (parents + staff)?\n\nThis will open WhatsApp for each contact.";
+
+    if (!confirm(confirmText)) return;
+
+    // Fire immediately — no delay for emergency
+    let idx = 0;
+    const fireNext = function() {
+      if (idx >= unique.length) {
+        SecurityAgent._log("EMERGENCY: " + (levelNames[level]||level), unique.length + " contacts alerted", "CRITICAL EVENT");
+        alert("\u2705 Alert sent to " + unique.length + " contacts.\n\nIf any contact was unreachable, call them directly.");
+        return;
+      }
+      window.open("https://wa.me/" + unique[idx].phone.replace(/\D/g,"") + "?text=" + encoded, "_blank");
+      idx++;
+      setTimeout(fireNext, 800);
+    };
+    fireNext();
+  },
+
+  // ── Unauthorized pickup attempt logger ───────────────────────────────────
+  logUnauthorizedPickup(studentName, attemptedBy) {
+    const students = SD.students || [];
+    const s = students.find(function(x) { return x.name && x.name.toLowerCase() === studentName.toLowerCase(); });
+    const school = SD.config && SD.config.schoolName ? SD.config.schoolName : "Our School";
+
+    // Alert parent immediately
+    if (s && s.phone) {
+      const msg = encodeURIComponent(
+        "\u26A0\uFE0F *PICKUP ALERT — " + school + "*\n\n" +
+        "Someone we could NOT verify just attempted to collect *" + s.name + "* from school.\n\n" +
+        "Person identified as: *" + attemptedBy + "*\n\n" +
+        "We have REFUSED the pickup and your child is SAFE.\n\n" +
+        "Please call the school NOW or reply to confirm if this person is authorised.\n\n" +
+        "\u2014 EduBloom Security Agent"
+      );
+      window.open("https://wa.me/" + s.phone.replace(/\D/g,"") + "?text=" + msg, "_blank");
+    }
+
+    // Log the incident
+    const incident = {
+      type: "unauthorized_pickup",
+      student: studentName,
+      attemptedBy: attemptedBy,
+      time: new Date().toISOString(),
+      reportedBy: (SD.currentUser && SD.currentUser.name) ? SD.currentUser.name : userRole || "Staff"
+    };
+    SD.securityLog = SD.securityLog || [];
+    SD.securityLog.unshift(incident);
+    SQ.push("securityLog", SD.securityLog);
+
+    SecurityAgent._log("Unauthorized Pickup", studentName + " — attempted by: " + attemptedBy, "Parent alerted via WhatsApp");
+    renderSecurityLog();
+    toast("\u26A0\uFE0F Incident logged. Parent alerted.");
+  },
+
+  // ── Visitor log ──────────────────────────────────────────────────────────
+  logVisitor(name, purpose, phone) {
+    const visit = {
+      type: "visitor",
+      name: name,
+      purpose: purpose,
+      phone: phone || "",
+      timeIn: new Date().toISOString(),
+      timeOut: null,
+      clearedBy: null
+    };
+    SD.securityLog = SD.securityLog || [];
+    SD.securityLog.unshift(visit);
+    SQ.push("securityLog", SD.securityLog);
+    SecurityAgent._log("Visitor Logged", name + " — " + purpose, "Logged at " + new Date().toLocaleTimeString());
+    renderSecurityLog();
+  },
+
+  checkoutVisitor: function(idx) {
+    SD.securityLog = SD.securityLog || [];
+    if (!SD.securityLog[idx]) return;
+    SD.securityLog[idx].timeOut = new Date().toISOString();
+    SD.securityLog[idx].clearedBy = userRole || "Staff";
+    SQ.push("securityLog", SD.securityLog);
+    renderSecurityLog();
+    toast("\u2705 Visitor checked out.");
+  },
+
+  // ── Anomaly detector: large sudden absence (potential mass threat) ───────
+  checkAttendanceAnomaly() {
+    const students = SD.students || [];
+    if (students.length < 5) return;
+    const today = new Date().toISOString().split("T")[0];
+    const attData = SD.attendance || {};
+
+    // Count today's absences
+    let presentToday = 0, absentToday = 0, notMarked = 0;
+    students.forEach(function(s) {
+      const status = attData[today] ? attData[today][s.name] : null;
+      if (status === "Present") presentToday++;
+      else if (status === "Absent" || status === "A") absentToday++;
+      else notMarked++;
+    });
+
+    const absentPct = Math.round((absentToday / students.length) * 100);
+    const el = document.getElementById("security-anomaly-banner");
+    if (!el) return;
+
+    if (absentPct >= 40) {
+      el.style.display = "block";
+      el.style.background = "rgba(239,68,68,0.15)";
+      el.style.borderColor = "rgba(239,68,68,0.5)";
+      el.innerHTML = "\uD83D\uDEA8 <strong>ANOMALY DETECTED:</strong> " + absentPct + "% of students absent today (" + absentToday + "/" + students.length + "). This is unusually high — verify school safety.";
+      SecurityAgent._log("Attendance Anomaly", absentPct + "% absent today", "Possible mass incident — manual check recommended");
+    } else if (absentPct >= 25) {
+      el.style.display = "block";
+      el.style.background = "rgba(245,158,11,0.12)";
+      el.style.borderColor = "rgba(245,158,11,0.4)";
+      el.innerHTML = "\u26A0\uFE0F High absence today: " + absentToday + " students (" + absentPct + "%) not in school.";
+    } else {
+      el.style.display = "none";
+    }
+  },
+
+  // ── Verify if a person is authorised to collect a student ───────────────
+  verifyCollector(studentName, collectorName) {
+    const s = (SD.students || []).find(function(x) {
+      return x.name && x.name.toLowerCase().includes(studentName.toLowerCase());
+    });
+    if (!s) return { ok: false, reason: "Student not found in system" };
+
+    const authorised = s.safety && s.safety.collectors ? s.safety.collectors : "";
+    if (!authorised) return {
+      ok: null,
+      reason: "No authorised collectors listed for " + s.name + ". Call parent to confirm.",
+      phone: s.phone || ""
+    };
+
+    const isAuth = authorised.toLowerCase().includes(collectorName.toLowerCase());
+    return {
+      ok: isAuth,
+      name: s.name,
+      authorised: authorised,
+      reason: isAuth
+        ? collectorName + " is listed as an authorised collector for " + s.name
+        : collectorName + " is NOT in the authorised list. DO NOT release student."
+    };
+  },
+
+  _log: function(action, detail, severity) {
+    BloomAgents._log("\uD83D\uDD12 Security Agent", action, detail + (severity ? " [" + severity + "]" : ""));
+  }
+};
+
+// ── Security Agent UI helpers ────────────────────────────────────────────
+function renderSecurityLog() {
+  const el = document.getElementById("security-incident-log");
+  if (!el) return;
+  const log = SD.securityLog || [];
+  if (!log.length) {
+    el.innerHTML = "<p style='font-size:0.78rem;color:var(--sub);text-align:center;padding:1rem;'>No incidents logged today.</p>";
+    return;
+  }
+  el.innerHTML = log.slice(0, 30).map(function(e, i) {
+    const t = new Date(e.timeIn || e.time).toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" });
+    const isPickup = e.type === "unauthorized_pickup";
+    const isVisitor = e.type === "visitor";
+    const color = isPickup ? "#ef4444" : isVisitor ? "#f59e0b" : "#60a5fa";
+    const icon  = isPickup ? "\uD83D\uDEA8" : isVisitor ? "\uD83D\uDC64" : "\uD83D\uDCCC";
+    return "<div style='padding:0.5rem;border-left:3px solid " + color + ";margin-bottom:0.4rem;background:rgba(255,255,255,0.03);border-radius:0 6px 6px 0;font-size:0.78rem;'>" +
+      "<div style='display:flex;justify-content:space-between;align-items:center;'>" +
+      "<span>" + icon + " <strong>" + esc(isPickup ? "UNAUTH PICKUP — " + e.student : isVisitor ? "VISITOR: " + e.name : e.type) + "</strong></span>" +
+      "<span style='color:var(--sub);font-size:0.7rem;'>" + t + "</span></div>" +
+      (isPickup ? "<div style='color:#ef4444;font-size:0.72rem;margin-top:2px;'>Attempted by: " + esc(e.attemptedBy) + " · Reported by: " + esc(e.reportedBy) + "</div>" : "") +
+      (isVisitor ? "<div style='color:var(--sub);font-size:0.72rem;margin-top:2px;'>Purpose: " + esc(e.purpose) + (e.timeOut ? " · \u2705 Checked out" : " · <span style=\"color:#f59e0b;\">Still inside</span>" + "<button onclick=\"SecurityAgent.checkoutVisitor(" + i + ")\" style=\"background:#059669;color:#fff;border:none;border-radius:4px;padding:1px 6px;font-size:0.68rem;cursor:pointer;margin-left:6px;\">Check Out</button>") + "</div>" : "") +
+    "</div>";
+  }).join("");
+}
+
+function securityVerifyCollector() {
+  const student = document.getElementById("verify-student") ? document.getElementById("verify-student").value.trim() : "";
+  const collector = document.getElementById("verify-collector") ? document.getElementById("verify-collector").value.trim() : "";
+  const resultEl = document.getElementById("verify-result");
+  if (!student || !collector) { toast("Enter both student name and collector name."); return; }
+
+  const r = SecurityAgent.verifyCollector(student, collector);
+  if (!resultEl) return;
+
+  if (r.ok === true) {
+    resultEl.style.background = "rgba(34,197,94,0.1)";
+    resultEl.style.borderColor = "rgba(34,197,94,0.4)";
+    resultEl.style.color = "#22c55e";
+    resultEl.innerHTML = "\u2705 <strong>CLEARED</strong> — " + esc(r.reason);
+  } else if (r.ok === false) {
+    resultEl.style.background = "rgba(239,68,68,0.12)";
+    resultEl.style.borderColor = "rgba(239,68,68,0.5)";
+    resultEl.style.color = "#ef4444";
+    resultEl.innerHTML = "\uD83D\uDEAB <strong>DO NOT RELEASE</strong> — " + esc(r.reason) + (r.authorised ? "<br><span style='font-size:0.72rem;color:#aaa;'>Authorised: " + esc(r.authorised) + "</span>" : "");
+  } else {
+    resultEl.style.background = "rgba(245,158,11,0.1)";
+    resultEl.style.borderColor = "rgba(245,158,11,0.4)";
+    resultEl.style.color = "#f59e0b";
+    resultEl.innerHTML = "\u26A0\uFE0F <strong>CALL PARENT</strong> — " + esc(r.reason) + (r.phone ? " <a href='tel:" + esc(r.phone) + "' style='color:#60a5fa;margin-left:6px;'>\uD83D\uDCDE " + esc(r.phone) + "</a>" : "");
+  }
+  resultEl.style.display = "block";
+  resultEl.style.padding = "0.6rem";
+  resultEl.style.borderRadius = "8px";
+  resultEl.style.border = "1.5px solid";
+  resultEl.style.marginTop = "0.5rem";
+  resultEl.style.fontWeight = "700";
+  resultEl.style.fontSize = "0.82rem";
+}
+
+function securityLogPickup() {
+  const student = document.getElementById("pickup-student") ? document.getElementById("pickup-student").value.trim() : "";
+  const person  = document.getElementById("pickup-person")  ? document.getElementById("pickup-person").value.trim()  : "";
+  if (!student || !person) { toast("Fill in both fields."); return; }
+  SecurityAgent.logUnauthorizedPickup(student, person);
+  document.getElementById("pickup-student").value = "";
+  document.getElementById("pickup-person").value  = "";
+}
+
+function securityLogVisitor() {
+  const name    = document.getElementById("visitor-name")    ? document.getElementById("visitor-name").value.trim()    : "";
+  const purpose = document.getElementById("visitor-purpose") ? document.getElementById("visitor-purpose").value.trim() : "";
+  const phone   = document.getElementById("visitor-phone")   ? document.getElementById("visitor-phone").value.trim()   : "";
+  if (!name || !purpose) { toast("Visitor name and purpose are required."); return; }
+  SecurityAgent.logVisitor(name, purpose, phone);
+  document.getElementById("visitor-name").value    = "";
+  document.getElementById("visitor-purpose").value = "";
+  if (document.getElementById("visitor-phone")) document.getElementById("visitor-phone").value = "";
+}
+
+// Run security anomaly check after school data loads
+function runSecurityChecks() {
+  SecurityAgent.checkAttendanceAnomaly();
+  SD.securityLog = SD.securityLog || [];
+  renderSecurityLog();
 }
