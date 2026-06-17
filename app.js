@@ -1774,266 +1774,6 @@ function renderTab(tab) {
   else if (tab === 'safety') c.innerHTML = buildSafety(s, activeIdx);
 }
 
-
-// ── BLOOMCOLLECT — Kora Payment Gateway ───────────────────────────────
-// BloomCollect lets parents pay school fees online via Kora.
-// AariNAT earns 1.5% on every transaction processed.
-// School must have a Kora public key stored in their config.
-
-const BLOOMCOLLECT_FEE_PCT = 0.015; // 1.5% AariNAT transaction fee
-
-function getKoraKey() {
-  return (schoolData && schoolData.config && schoolData.config.koraPublicKey) || '';
-}
-
-function bloomCollectEnabled() {
-  return !!(getKoraKey()) && isPremium();
-}
-
-function bloomCollectFee(amount) {
-  return Math.round(amount * BLOOMCOLLECT_FEE_PCT);
-}
-
-function openBloomCollect(studentIdx) {
-  const s = SD.students[studentIdx];
-  if (!s) return;
-  const owe = (s.totalFee || 0) - (s.paid || 0);
-  if (owe <= 0) return alert('This student has no outstanding balance.');
-  if (!bloomCollectEnabled()) {
-    alert('BloomCollect is a Premium feature.\nUpgrade your plan or contact AariNAT to set up your Kora account.');
-    return;
-  }
-
-  const fee = bloomCollectFee(owe);
-  const total = owe + fee;
-  const koraKey = getKoraKey();
-  const parentPhone = s.parentPhone || '';
-  const parentEmail = s.parentEmail || (parentPhone ? parentPhone.replace(/\D/g,'') + '@parent.edubloom.com.ng' : '');
-  const ref = 'BC-' + schoolId + '-' + s.id + '-' + Date.now();
-
-  // Show confirm modal first
-  const modal = document.createElement('div');
-  modal.id = 'bc-modal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:20px;padding:28px;max-width:380px;width:100%;font-family:inherit;">
-      <div style="text-align:center;margin-bottom:16px;">
-        <div style="font-size:32px;margin-bottom:4px;">💳</div>
-        <div style="font-size:18px;font-weight:800;color:#0A0F1E;">BloomCollect</div>
-        <div style="font-size:12px;color:#7B8EAD;letter-spacing:1px;text-transform:uppercase;">Powered by Kora</div>
-      </div>
-      <div style="background:#f8fafc;border-radius:12px;padding:16px;margin-bottom:16px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:13px;color:#7B8EAD;">Student</span>
-          <span style="font-size:13px;font-weight:700;color:#0A0F1E;">${s.name}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:13px;color:#7B8EAD;">Outstanding Fee</span>
-          <span style="font-size:13px;font-weight:700;color:#dc2626;">₦${owe.toLocaleString()}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:13px;color:#7B8EAD;">Processing Fee (1.5%)</span>
-          <span style="font-size:13px;color:#7B8EAD;">₦${fee.toLocaleString()}</span>
-        </div>
-        <div style="border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">
-          <span style="font-size:14px;font-weight:700;color:#0A0F1E;">Total Charged</span>
-          <span style="font-size:14px;font-weight:900;color:#00C853;">₦${total.toLocaleString()}</span>
-        </div>
-      </div>
-      <div style="margin-bottom:12px;">
-        <label style="font-size:12px;color:#7B8EAD;font-weight:600;display:block;margin-bottom:4px;">Parent Email (for receipt)</label>
-        <input id="bc-email" type="email" value="${parentEmail}"
-          style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;box-sizing:border-box;" placeholder="parent@email.com"/>
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="font-size:12px;color:#7B8EAD;font-weight:600;display:block;margin-bottom:4px;">Parent Phone</label>
-        <input id="bc-phone" type="tel" value="${parentPhone}"
-          style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;box-sizing:border-box;" placeholder="e.g. 08012345678"/>
-      </div>
-      <button onclick="launchKoraCheckout(${studentIdx},'${ref}',${owe},${fee},${total},'${koraKey}')"
-        style="width:100%;padding:14px;background:linear-gradient(135deg,#00C853,#00897B);border:none;border-radius:12px;
-               color:#fff;font-size:15px;font-weight:800;cursor:pointer;letter-spacing:0.5px;">
-        💳 Pay ₦${total.toLocaleString()} via BloomCollect
-      </button>
-      <button onclick="document.getElementById('bc-modal').remove()"
-        style="width:100%;padding:10px;background:none;border:none;color:#7B8EAD;font-size:13px;cursor:pointer;margin-top:8px;">
-        Cancel
-      </button>
-    </div>`;
-  document.body.appendChild(modal);
-}
-
-function launchKoraCheckout(studentIdx, ref, owe, fee, total, koraKey) {
-  const emailEl = document.getElementById('bc-email');
-  const phoneEl = document.getElementById('bc-phone');
-  const email = emailEl ? emailEl.value.trim() : '';
-  const phone = phoneEl ? phoneEl.value.trim() : '';
-  const s = SD.students[studentIdx];
-
-  if (!email) { alert('Please enter parent email to continue.'); return; }
-
-  // Remove modal
-  const modal = document.getElementById('bc-modal');
-  if (modal) modal.remove();
-
-  // Load Kora inline JS SDK dynamically
-  if (!window.Kora) {
-    const script = document.createElement('script');
-    script.src = 'https://korahq.com/assets/gate/kora-inline.min.js';
-    script.onload = () => _fireKora(studentIdx, ref, owe, fee, total, koraKey, email, phone, s);
-    script.onerror = () => {
-      alert('Could not load Kora payment SDK. Please check your internet connection.');
-    };
-    document.head.appendChild(script);
-  } else {
-    _fireKora(studentIdx, ref, owe, fee, total, koraKey, email, phone, s);
-  }
-}
-
-function _fireKora(studentIdx, ref, owe, fee, total, koraKey, email, phone, s) {
-  try {
-    const handler = window.Kora.create({
-      key: koraKey,
-      reference: ref,
-      amount: total * 100,          // Kora uses kobo
-      currency: 'NGN',
-      customer: {
-        name: s.parentName || s.name + ' Parent',
-        email: email,
-        mobile_money: { number: phone, operator: 'AIRTEL' }
-      },
-      narration: `School fee for ${s.name} — ${schoolData?.schoolName || 'EduBloom School'}`,
-      metadata: {
-        schoolId: schoolId,
-        studentId: s.id,
-        studentName: s.name,
-        bloomcollect: true,
-        aarinat_fee: fee
-      },
-      onSuccess: function(res) {
-        bloomCollectSuccess(studentIdx, owe, fee, ref, res);
-      },
-      onFailed: function(res) {
-        console.error('Kora payment failed:', res);
-        alert('Payment was not completed. Please try again.');
-      },
-      onClose: function() {
-        console.log('BloomCollect checkout closed.');
-      }
-    });
-    handler.openIframe();
-  } catch(e) {
-    alert('Could not initialise BloomCollect. Please contact support.\n' + e.message);
-  }
-}
-
-async function bloomCollectSuccess(studentIdx, owe, fee, ref, koraResponse) {
-  const s = SD.students[studentIdx];
-  // Record the payment (owe amount, excluding the processing fee which goes to AariNAT)
-  s.paid = (s.paid || 0) + owe;
-  if (!s.paymentHistory) s.paymentHistory = [];
-  s.paymentHistory.unshift({
-    amount: owe,
-    method: 'BloomCollect (Kora)',
-    date: new Date().toISOString().split('T')[0],
-    ref: ref,
-    by: userRole,
-    bloomcollect: true,
-    processingFee: fee
-  });
-
-  // Log to Firestore bloomcollect_transactions collection for AariNAT reconciliation
-  try {
-    await db.collection('bloomcollect_transactions').add({
-      schoolId: schoolId,
-      studentId: s.id,
-      studentName: s.name,
-      amount: owe,
-      processingFee: fee,
-      total: owe + fee,
-      ref: ref,
-      koraRef: koraResponse?.reference || '',
-      method: 'Kora',
-      recordedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      term: schoolData?.config?.currentTerm || '',
-      session: schoolData?.config?.currentSession || ''
-    });
-  } catch(e) { console.warn('BloomCollect transaction log failed (offline?):', e.message); }
-
-  await SQ.push('students', SD.students);
-  checkTierStatus();
-  renderTab('fees');
-  renderBanner();
-  renderRevenue();
-
-  // WhatsApp receipt to parent
-  const phone = s.parentPhone ? s.parentPhone.replace(/\D/g,'') : '';
-  if (phone) {
-    const msg = encodeURIComponent(
-      `✅ *Payment Confirmed — BloomCollect*\n\n` +
-      `Student: *${s.name}*\n` +
-      `Amount Paid: *₦${owe.toLocaleString()}*\n` +
-      `Reference: ${ref}\n` +
-      `School: ${schoolData?.schoolName || ''}\n\n` +
-      `Your child's school fee has been received. Thank you! 🎓\n\n` +
-      `_Powered by EduBloom · school.edubloom.com.ng_`
-    );
-    window.open(`https://wa.me/${phone.startsWith('0') ? '234'+phone.slice(1) : phone}?text=${msg}`, '_blank');
-  }
-
-  alert(`✅ Payment of ₦${owe.toLocaleString()} confirmed!\nReference: ${ref}`);
-}
-
-// ── BloomCollect Settings (Principal only) ────────────────────────────
-function renderBloomCollectSettings() {
-  if (!canManageSettings()) return '';
-  const key = getKoraKey();
-  return `
-    <div class="card" style="margin-top:1rem;border:2px solid rgba(0,200,83,0.3);">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <div style="font-size:24px;">💳</div>
-        <div>
-          <div style="font-weight:800;font-size:15px;color:var(--text);">BloomCollect</div>
-          <div style="font-size:11px;color:var(--money);font-weight:600;text-transform:uppercase;letter-spacing:1px;">Powered by Kora · ${isPremium()?'Active':'Premium Only'}</div>
-        </div>
-        <div style="margin-left:auto;background:${key?'rgba(0,200,83,0.15)':'rgba(255,82,82,0.1)'};
-                    color:${key?'#00C853':'#FF5252'};font-size:11px;font-weight:700;
-                    padding:4px 10px;border-radius:20px;">${key?'✅ Connected':'⚠️ Not Set Up'}</div>
-      </div>
-      <div style="font-size:13px;color:var(--sub);margin-bottom:12px;">
-        Enable parents to pay school fees online. A 1.5% processing fee is charged on each transaction.
-      </div>
-      <label style="font-size:12px;font-weight:600;color:var(--sub);">Kora Public Key</label>
-      <input type="text" id="kora-key-input" value="${key}"
-        placeholder="pk_live_xxxxxxxxxxxxxxxxx"
-        style="width:100%;margin-top:4px;margin-bottom:10px;padding:10px;border:1px solid var(--border);
-               border-radius:8px;font-size:13px;font-family:monospace;box-sizing:border-box;background:var(--bg);color:var(--text);"/>
-      <button onclick="saveKoraKey()" class="btn-money" style="width:100%;">💾 Save Kora Key</button>
-      ${key ? `<button onclick="testBloomCollect()" style="width:100%;margin-top:8px;padding:10px;
-        background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:10px;
-        color:var(--money);font-weight:700;cursor:pointer;font-size:13px;">🧪 Test BloomCollect</button>` : ''}
-    </div>`;
-}
-
-async function saveKoraKey() {
-  const key = document.getElementById('kora-key-input')?.value?.trim();
-  if (!key) return alert('Please enter your Kora Public Key.');
-  if (!key.startsWith('pk_')) return alert('Invalid Kora key. It should start with pk_live_ or pk_test_');
-  try {
-    await db.collection('schools').doc(schoolId).update({ 'config.koraPublicKey': key });
-    if (!schoolData.config) schoolData.config = {};
-    schoolData.config.koraPublicKey = key;
-    alert('✅ Kora key saved. BloomCollect is now active!');
-    renderSettings();
-  } catch(e) { alert('Failed to save: ' + e.message); }
-}
-
-function testBloomCollect() {
-  alert('BloomCollect test mode:\nKora key is set ✅\nTo test a live payment, record a payment on any student and choose "💳 BloomCollect".');
-}
-
-// ── END BLOOMCOLLECT ───────────────────────────────────────────────────
-
 // ── FEES TAB ──────────────────────────────────────────────────────────
 function buildFees(s, idx) {
   if (!canSeeFees()) {
@@ -2056,8 +1796,6 @@ function buildFees(s, idx) {
     <label>Method</label><select id="pay-method"><option>Bank Transfer</option><option>Cash</option><option>POS</option><option>Online</option></select>
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
-    ${bloomCollectEnabled() && owe > 0 ? `<button class="btn-wa" style="margin-top:0.4rem;background:linear-gradient(135deg,#00C853,#00897B);border:none;" onclick="openBloomCollect(${idx})">💳 BloomCollect — Pay Online</button>` : ''}
-    ${bloomCollectEnabled() && owe > 0 ? `<button class="btn-wa" style="margin-top:0.4rem;background:linear-gradient(135deg,#00C853,#00897B);border:none;" onclick="openBloomCollect(${idx})">💳 BloomCollect — Pay Online</button>` : ''}
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
     ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`
   <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
@@ -4374,6 +4112,27 @@ function loadSettings() {
 
 
 // ── Gemini API key management (Settings panel) ────────────────────────────
+
+  // BloomCollect — Kora key status
+  const koraKey = (schoolData && schoolData.config && schoolData.config.koraPublicKey) || '';
+  const koraInp = $('set-kora-key');
+  const koraBadge = $('bc-status-badge');
+  const koraStatus = $('kora-key-status');
+  if (koraInp) koraInp.value = koraKey;
+  if (koraBadge) {
+    koraBadge.textContent = koraKey ? '✅ Active' : '⚠️ Not Set Up';
+    koraBadge.style.background = koraKey ? 'rgba(0,200,83,0.15)' : 'rgba(255,82,82,0.1)';
+    koraBadge.style.color = koraKey ? '#00C853' : '#FF5252';
+  }
+  if (koraStatus) {
+    koraStatus.textContent = koraKey
+      ? '✅ BloomCollect active — parents can pay online'
+      : 'Paste your Kora public key above to activate BloomCollect';
+    koraStatus.style.color = koraKey ? '#22c55e' : '#f59e0b';
+  }
+
+}
+
 function loadGeminiKeySetting() {
   const saved = localStorage.getItem('gemini_api_key') || window.GEMINI_API_KEY || '';
   const inp = $('set-gemini-key');
@@ -4449,7 +4208,32 @@ function loadPresetSubjects(type) {
   renderSubjectChips();
 }
 
-async function saveSettings() {
+async 
+// ── BloomCollect Kora key helpers (Settings) ──────────────────────────
+async function saveKoraKey() {
+  const inp = $('set-kora-key');
+  const key = (inp?.value || '').trim();
+  if (!key) return alert('Please enter your Kora Public Key.');
+  if (!key.startsWith('pk_')) return alert('Invalid Kora key. Must start with pk_live_ or pk_test_');
+  try {
+    await db.collection('schools').doc(schoolId).update({ 'config.koraPublicKey': key });
+    if (!schoolData.config) schoolData.config = {};
+    schoolData.config.koraPublicKey = key;
+    loadSettings();
+    alert('✅ Kora key saved. BloomCollect is now active!');
+  } catch(e) { alert('Failed to save: ' + e.message); }
+}
+async function clearKoraKey() {
+  if (!confirm('Remove Kora key? BloomCollect will be disabled.')) return;
+  try {
+    await db.collection('schools').doc(schoolId).update({ 'config.koraPublicKey': '' });
+    if (schoolData.config) schoolData.config.koraPublicKey = '';
+    loadSettings();
+    alert('Kora key removed.');
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+function saveSettings() {
   const newName = $('set-name')?.value.trim(); if(!newName) return alert('School name is required.');
   SD.config.schoolName  = newName;
   SD.config.whatsapp    = $('set-phone')?.value.trim()||'';
