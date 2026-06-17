@@ -221,6 +221,24 @@ async function _readOnePage(file, pageNum, total, fbEl) {
       ocrOverlayStep('load', 'Image loaded — sending to cloud...', 20);
       ocrOverlayPages(pageNum, total);
 
+      // ── 0. Base44 OCR (server-side, primary) ─────────────────────────────
+      try {
+        ocrOverlayStep('upload', 'Sending to Base44 AI OCR...', 30);
+        var b44Resp = await fetch('https://superagent-626f0107.base44.app/functions/bloomOCR', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64: b64, mime: mime || 'image/jpeg' })
+        });
+        if (b44Resp.ok) {
+          var b44Data = await b44Resp.json();
+          if (b44Data.students && b44Data.students.length > 0) {
+            ocrOverlayStep('done', '\u2705 ' + b44Data.students.length + ' names found via Base44 AI', 100);
+            console.log('Base44 OCR:', b44Data.students.length, 'names via', b44Data.provider);
+            resolve(b44Data.students); return;
+          }
+        }
+      } catch (e) { console.warn('Base44 OCR failed, trying Gemini...', e.message); }
+
       // ── 1. Gemini (only when key is configured) ────────────────────────
       if (GEMINI_KEY) {
         try {
