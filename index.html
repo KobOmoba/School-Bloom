@@ -938,7 +938,7 @@ function toggleEye(inputId, btn) {
     </section>
 
 
-      <!-- BloomCollect — Kora Payment Gateway -->
+      <!-- BloomCollect — Bank Account for Fee Collection -->
       <div class="card" id="bloomcollect-settings-card" style="border-left:4px solid #00C853;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
           <div style="font-size:24px;">💳</div>
@@ -949,17 +949,39 @@ function toggleEye(inputId, btn) {
           <div id="bc-status-badge" style="margin-left:auto;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;background:rgba(255,82,82,0.1);color:#FF5252;">⚠️ Not Set Up</div>
         </div>
         <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.55;">
-          Enable parents to pay school fees online via <strong>BloomCollect</strong>. A 1.5% processing fee is charged per transaction. Paste your Kora public key below to activate.
+          Enable parents to pay school fees online via <strong>BloomCollect</strong>. A 2% processing fee applies per transaction (1.5% Kora + 0.5% AariNAT platform fee). Fees collected go directly into your school's bank account below.
         </p>
-        <label>Kora Public Key <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(get yours at korahq.com → Dashboard → API Keys)</span></label>
-        <div class="pwd-wrap">
-          <input type="password" id="set-kora-key" placeholder="pk_live_xxxxxxxxxxxxxxxxx" autocomplete="off"
-            style="font-family:monospace;font-size:0.78rem;">
-          <button type="button" class="eye-btn" onclick="toggleEye('set-kora-key',this)" tabindex="-1">👁️</button>
-        </div>
-        <div id="kora-key-status" style="font-size:0.75rem;margin:0.4rem 0 0.75rem;color:var(--sub);"></div>
-        <button class="btn-money btn-sm" onclick="saveKoraKey()">💾 Save Kora Key</button>
-        <button class="btn-ghost btn-sm" onclick="clearKoraKey()" style="margin-left:0.4rem;">🗑️ Clear</button>
+        <label>Bank Name</label>
+        <select id="set-bank-name" style="margin-bottom:0.5rem;">
+          <option value="">— Select Bank —</option>
+          <option>Access Bank</option>
+          <option>Ecobank Nigeria</option>
+          <option>FCMB</option>
+          <option>Fidelity Bank</option>
+          <option>First Bank of Nigeria</option>
+          <option>GTBank</option>
+          <option>Heritage Bank</option>
+          <option>Keystone Bank</option>
+          <option>Kuda Bank</option>
+          <option>Moniepoint</option>
+          <option>Opay</option>
+          <option>Palmpay</option>
+          <option>Polaris Bank</option>
+          <option>Stanbic IBTC Bank</option>
+          <option>Sterling Bank</option>
+          <option>UBA</option>
+          <option>Union Bank</option>
+          <option>VFD Microfinance Bank</option>
+          <option>Wema Bank</option>
+          <option>Zenith Bank</option>
+        </select>
+        <label>Account Number <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(10-digit NUBAN)</span></label>
+        <input type="text" id="set-bank-account" placeholder="0123456789" maxlength="10" inputmode="numeric" pattern="[0-9]{10}">
+        <label>Account Name</label>
+        <input type="text" id="set-bank-acct-name" placeholder="e.g. Wisdom Walks Academy">
+        <div id="bc-bank-status" style="font-size:0.75rem;margin:0.4rem 0 0.75rem;color:var(--sub);"></div>
+        <button class="btn-money btn-sm" onclick="saveBankDetails()">💾 Save Bank Details</button>
+        <button class="btn-ghost btn-sm" onclick="clearBankDetails()" style="margin-left:0.4rem;">🗑️ Clear</button>
       </div>
 
     <!-- 16. OPPORTUNITIES -->
