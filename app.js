@@ -3069,21 +3069,11 @@ async function notifyAbsentParents() {
   absentees.forEach(function(s, i) {
     if (!s.phone) return;
     const msg = encodeURIComponent(
-      'Dear Parent / Guardian,
-
-' +
-      '*' + school + '* 🌸
-
-' +
-      'This is to inform you that *' + s.name + '* (' + (s.class||'') + ') was *ABSENT* from school today, *' + displayDate + '*.
-
-' +
-      'If this was unplanned, please contact the class teacher or front desk immediately.
-
-' +
-      'If your child is unwell, kindly send a note tomorrow.
-
-' +
+      'Dear Parent / Guardian,\n\n' +
+      '*' + school + '* 🌸\n\n' +
+      'This is to inform you that *' + s.name + '* (' + (s.class||'') + ') was *ABSENT* from school today, *' + displayDate + '*.\n\n' +
+      'If this was unplanned, please contact the class teacher or front desk immediately.\n\n' +
+      'If your child is unwell, kindly send a note tomorrow.\n\n' +
       '— EduBloom Comms Agent'
     );
     setTimeout(function() {
@@ -3097,21 +3087,11 @@ async function notifyAbsentParents() {
     if (!s.phone) return;
     const delay = (absentees.length + i) * 1200;
     const msg = encodeURIComponent(
-      'Dear Parent / Guardian,
-
-' +
-      '*' + school + '* 🌸
-
-' +
-      '*' + s.name + '* (' + (s.class||'') + ') arrived *LATE* to school today, *' + displayDate + '*.
-
-' +
-      'Kindly ensure your child leaves home earlier to avoid missing morning lessons.
-
-' +
-      'Thank you for your cooperation.
-
-' +
+      'Dear Parent / Guardian,\n\n' +
+      '*' + school + '* 🌸\n\n' +
+      '*' + s.name + '* (' + (s.class||'') + ') arrived *LATE* to school today, *' + displayDate + '*.\n\n' +
+      'Kindly ensure your child leaves home earlier to avoid missing morning lessons.\n\n' +
+      'Thank you for your cooperation.\n\n' +
       '— EduBloom Comms Agent'
     );
     setTimeout(function() {
@@ -3141,11 +3121,8 @@ function checkMorningAbsentees() {
   }
 
   if (!confirm(
-    'Send attendance alerts for today (' + displayDate + ')?
-
-' +
-    '❌ Absent: ' + absentList.length + ' student(s)
-' +
+    'Send attendance alerts for today (' + displayDate + ')?\n\n' +
+    '❌ Absent: ' + absentList.length + ' student(s)\n' +
     '⏰ Late: '   + lateList.length   + ' student(s)'
   )) return;
 
@@ -3160,22 +3137,13 @@ function checkMorningAbsentees() {
     if (!s || !s.phone) return;
     const isAbsent = entry.status === 'Absent';
     const msg = encodeURIComponent(
-      'Dear Parent / Guardian,
-
-' +
-      '*' + school + '* 🌸
-
-' +
-      '*' + s.name + '* (' + (s.class||'') + ') was marked *' + (isAbsent ? 'ABSENT ❌' : 'LATE ⏰') + '* today, *' + displayDate + '*.
-
-' +
+      'Dear Parent / Guardian,\n\n' +
+      '*' + school + '* 🌸\n\n' +
+      '*' + s.name + '* (' + (s.class||'') + ') was marked *' + (isAbsent ? 'ABSENT ❌' : 'LATE ⏰') + '* today, *' + displayDate + '*.\n\n' +
       (isAbsent
-        ? 'Please contact the school if this was unplanned.
-'
-        : 'Kindly ensure earlier departure from home tomorrow.
-') +
-      '
-— EduBloom Comms Agent'
+        ? 'Please contact the school if this was unplanned.\n'
+        : 'Kindly ensure earlier departure from home tomorrow.\n') +
+      '\n— EduBloom Comms Agent'
     );
     setTimeout(function() {
       window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + msg, '_blank');
@@ -3204,24 +3172,12 @@ function confirmResumptionAlert() {
   if (!withPhone.length) { toast('No parent contacts found.'); return; }
 
   const fullMsg = encodeURIComponent(
-    'Dear Parent / Guardian,
-
-' +
-    '*' + school + '* 🌸
-
-' +
-    '📢 *RESUMPTION NOTICE*
-
-' +
-    msg + '
-
-' +
-    '📅 *Resumption Date: ' + displayDate + '*
-
-' +
-    'Please ensure your child reports to school on time.
-
-' +
+    'Dear Parent / Guardian,\n\n' +
+    '*' + school + '* 🌸\n\n' +
+    '📢 *RESUMPTION NOTICE*\n\n' +
+    msg + '\n\n' +
+    '📅 *Resumption Date: ' + displayDate + '*\n\n' +
+    'Please ensure your child reports to school on time.\n\n' +
     '— EduBloom Comms Agent'
   );
 
@@ -3315,29 +3271,14 @@ async function processEarlyDeparture() {
   // WhatsApp parent notification
   if (s && s.phone) {
     const msg = encodeURIComponent(
-      'Dear Parent / Guardian,
-
-' +
-      '*' + school + '* 🌸
-
-' +
-      '📢 *EARLY DEPARTURE NOTICE*
-
-' +
-      '*' + (s.name) + '* (' + (s.class||'') + ') left school early today (' + today + ') at *' + timeStr + '*.
-
-' +
-      '📌 Reason: *' + reason + '*
-' +
-      (collectedBy ? '👤 Collected by: *' + collectedBy + '*
-' : '') +
-      (securityNote ? '
-' + securityNote + '
-' : '') +
-      '
-If you did NOT authorise this, please call the school immediately.
-
-' +
+      'Dear Parent / Guardian,\n\n' +
+      '*' + school + '* 🌸\n\n' +
+      '📢 *EARLY DEPARTURE NOTICE*\n\n' +
+      '*' + (s.name) + '* (' + (s.class||'') + ') left school early today (' + today + ') at *' + timeStr + '*.\n\n' +
+      '📌 Reason: *' + reason + '*\n' +
+      (collectedBy ? '👤 Collected by: *' + collectedBy + '*\n' : '') +
+      (securityNote ? '\n' + securityNote + '\n' : '') +
+      '\nIf you did NOT authorise this, please call the school immediately.\n\n' +
       '— EduBloom Security Agent'
     );
     window.open('https://wa.me/' + s.phone.replace(/\D/g,'') + '?text=' + msg, '_blank');
@@ -4112,7 +4053,7 @@ function loadSettings() {
 
 
 // ── Gemini API key management (Settings panel) ────────────────────────────
-
+function loadKoraKeyStatus() {
   // BloomCollect — Kora key status
   const koraKey = (schoolData && schoolData.config && schoolData.config.koraPublicKey) || '';
   const koraInp = $('set-kora-key');
@@ -4233,7 +4174,7 @@ async function clearKoraKey() {
   } catch(e) { alert('Failed: ' + e.message); }
 }
 
-function saveSettings() {
+async function saveSettings() {
   const newName = $('set-name')?.value.trim(); if(!newName) return alert('School name is required.');
   SD.config.schoolName  = newName;
   SD.config.whatsapp    = $('set-phone')?.value.trim()||'';
@@ -4751,34 +4692,20 @@ Use a respectful, professional tone suitable for a Nigerian school principal.`, 
       try {
         if (onProgress) onProgress(done, total, s.name);
 
-        const teacherPrompt = "You are a Nigerian primary/secondary school class teacher writing a report card remark.
-" +
-          "Student: " + s.name + ", Class: " + (s.class||"unknown") + ", School: " + schoolName + "
-" +
-          "Term: " + term + ", Average: " + avg + "%, Grade: " + grade + "
-" +
-          "Subjects: " + scoreLines + "
-" +
-          "Days Present: " + daysPresent + "
-
-" +
-          "Write ONE sentence (max 25 words) as the class teacher remark for this student's report card.
-" +
-          "- Address the parent. Be specific about performance. Warm but honest tone.
-" +
+        const teacherPrompt = "You are a Nigerian primary/secondary school class teacher writing a report card remark.\n" +
+          "Student: " + s.name + ", Class: " + (s.class||"unknown") + ", School: " + schoolName + "\n" +
+          "Term: " + term + ", Average: " + avg + "%, Grade: " + grade + "\n" +
+          "Subjects: " + scoreLines + "\n" +
+          "Days Present: " + daysPresent + "\n\n" +
+          "Write ONE sentence (max 25 words) as the class teacher remark for this student's report card.\n" +
+          "- Address the parent. Be specific about performance. Warm but honest tone.\n" +
           "- Nigerian school report card style. No emojis. Output the remark only.";
 
-        const principalPrompt = "You are the Head Teacher/Principal of " + schoolName + ", a Nigerian school.
-" +
-          "Writing the principal comment on the report card for: " + s.name + " (Class: " + (s.class||"—") + ").
-" +
-          "Term: " + term + ". Average: " + avg + "%. Grade: " + grade + ".
-
-" +
-          "Write ONE sentence (max 20 words) as the Principal comment.
-" +
-          "- Formal administrative tone. Acknowledge performance. Encourage continued effort.
-" +
+        const principalPrompt = "You are the Head Teacher/Principal of " + schoolName + ", a Nigerian school.\n" +
+          "Writing the principal comment on the report card for: " + s.name + " (Class: " + (s.class||"—") + ").\n" +
+          "Term: " + term + ". Average: " + avg + "%. Grade: " + grade + ".\n\n" +
+          "Write ONE sentence (max 20 words) as the Principal comment.\n" +
+          "- Formal administrative tone. Acknowledge performance. Encourage continued effort.\n" +
           "- Start with student first name or This student. No emojis. Output the comment only.";
 
         const teacherRemark   = await BloomAgents._gemini(teacherPrompt, 80);
