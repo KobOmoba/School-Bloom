@@ -4049,29 +4049,36 @@ function loadSettings() {
   updateLogoBadges(cfg.logo);
   renderSubjectChips();
   loadGeminiKeySetting();
+  loadBankDetails();
 }
 
 
-// ── Gemini API key management (Settings panel) ────────────────────────────
-function loadKoraKeyStatus() {
-  // BloomCollect — Kora key status
-  const koraKey = (schoolData && schoolData.config && schoolData.config.koraPublicKey) || '';
-  const koraInp = $('set-kora-key');
-  const koraBadge = $('bc-status-badge');
-  const koraStatus = $('kora-key-status');
-  if (koraInp) koraInp.value = koraKey;
-  if (koraBadge) {
-    koraBadge.textContent = koraKey ? '✅ Active' : '⚠️ Not Set Up';
-    koraBadge.style.background = koraKey ? 'rgba(0,200,83,0.15)' : 'rgba(255,82,82,0.1)';
-    koraBadge.style.color = koraKey ? '#00C853' : '#FF5252';
+// ── BloomCollect — Bank Account Details (Settings) ────────────────────────
+// Schools register their bank account here so fees go directly to them.
+// AariNAT's Kora key lives server-side in the Cloud Function only — never here.
+// Fee structure: Kora 1.5% + AariNAT 0.5% = 2% total per transaction.
+function loadBankDetails() {
+  const bd = SD.config.bankDetails || {};
+  const bankSel  = $('set-bank-name');
+  const acctInp  = $('set-bank-account');
+  const nameInp  = $('set-bank-acct-name');
+  const badge    = $('bc-status-badge');
+  const statusEl = $('bc-bank-status');
+  if (bankSel) bankSel.value = bd.bankName      || '';
+  if (acctInp) acctInp.value = bd.accountNumber || '';
+  if (nameInp) nameInp.value = bd.accountName   || '';
+  const isSet = !!(bd.bankName && bd.accountNumber && bd.accountName);
+  if (badge) {
+    badge.textContent       = isSet ? '✅ Active' : '⚠️ Not Set Up';
+    badge.style.background  = isSet ? 'rgba(0,200,83,0.15)' : 'rgba(255,82,82,0.1)';
+    badge.style.color       = isSet ? '#00C853' : '#FF5252';
   }
-  if (koraStatus) {
-    koraStatus.textContent = koraKey
-      ? '✅ BloomCollect active — parents can pay online'
-      : 'Paste your Kora public key above to activate BloomCollect';
-    koraStatus.style.color = koraKey ? '#22c55e' : '#f59e0b';
+  if (statusEl) {
+    statusEl.textContent = isSet
+      ? '✅ BloomCollect active — ' + (bd.bankName||'') + ' · ' + (bd.accountNumber||'')
+      : 'Enter your school bank account above to activate BloomCollect';
+    statusEl.style.color = isSet ? '#22c55e' : '#f59e0b';
   }
-
 }
 
 function loadGeminiKeySetting() {
@@ -4149,29 +4156,29 @@ function loadPresetSubjects(type) {
   renderSubjectChips();
 }
 
-async 
-// ── BloomCollect Kora key helpers (Settings) ──────────────────────────
-async function saveKoraKey() {
-  const inp = $('set-kora-key');
-  const key = (inp?.value || '').trim();
-  if (!key) return alert('Please enter your Kora Public Key.');
-  if (!key.startsWith('pk_')) return alert('Invalid Kora key. Must start with pk_live_ or pk_test_');
-  try {
-    await db.collection('schools').doc(schoolId).update({ 'config.koraPublicKey': key });
-    if (!schoolData.config) schoolData.config = {};
-    schoolData.config.koraPublicKey = key;
-    loadSettings();
-    alert('✅ Kora key saved. BloomCollect is now active!');
-  } catch(e) { alert('Failed to save: ' + e.message); }
+
+// ── BloomCollect Kora bank detail helpers (Settings) ──────────────────────
+async function saveBankDetails() {
+  const bankName      = ($('set-bank-name')?.value     || '').trim();
+  const accountNumber = ($('set-bank-account')?.value  || '').replace(/\D/g,'');
+  const accountName   = ($('set-bank-acct-name')?.value || '').trim();
+  if (!bankName)                  return toast('❌ Select a bank.');
+  if (accountNumber.length !== 10) return toast('❌ Account number must be exactly 10 digits.');
+  if (!accountName)               return toast('❌ Enter the account name.');
+  SD.config.bankDetails = { bankName, accountNumber, accountName };
+  await SQ.push('config', SD.config);
+  saveLocal('config', SD.config);
+  loadBankDetails();
+  toast('✅ Bank details saved — BloomCollect is now active!');
 }
-async function clearKoraKey() {
-  if (!confirm('Remove Kora key? BloomCollect will be disabled.')) return;
-  try {
-    await db.collection('schools').doc(schoolId).update({ 'config.koraPublicKey': '' });
-    if (schoolData.config) schoolData.config.koraPublicKey = '';
-    loadSettings();
-    alert('Kora key removed.');
-  } catch(e) { alert('Failed: ' + e.message); }
+
+async function clearBankDetails() {
+  if (!confirm('Remove bank details? BloomCollect will be disabled.')) return;
+  SD.config.bankDetails = {};
+  await SQ.push('config', SD.config);
+  saveLocal('config', SD.config);
+  loadBankDetails();
+  toast('Bank details cleared.');
 }
 
 async function saveSettings() {
