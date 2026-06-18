@@ -4056,7 +4056,7 @@ function loadSettings() {
 // ── BloomCollect — Bank Account Details (Settings) ────────────────────────
 // Schools register their bank account here so fees go directly to them.
 // AariNAT's Kora key lives server-side in the Cloud Function only — never here.
-// Fee structure: Kora 1.5% + AariNAT 0.5% = 2% total per transaction.
+// Fee structure: Kora 1.5% + AariNAT 1% = 2.5% total per transaction.
 function loadBankDetails() {
   const bd = SD.config.bankDetails || {};
   const bankSel  = $('set-bank-name');
