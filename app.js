@@ -221,7 +221,27 @@ async function _readOnePage(file, pageNum, total, fbEl) {
       ocrOverlayStep('load', 'Image loaded — sending to cloud...', 20);
       ocrOverlayPages(pageNum, total);
 
-      // ── 0. Base44 OCR (server-side, primary) ─────────────────────────────
+      // ── 0. AariNAT OCR — Firebase Cloud Function (primary) ──────────────
+      //    Groq Vision (Llama 4 Scout) · endpoint owned by AariNAT
+      const AARINAT_OCR_URL = 'https://us-central1-educationbloom-699ed.cloudfunctions.net/aarinatOCR';
+      try {
+        ocrOverlayStep('upload', 'AariNAT OCR scanning...', 30);
+        var b44Resp = await fetch(AARINAT_OCR_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64: b64, mime: mime || 'image/jpeg' })
+        });
+        if (b44Resp.ok) {
+          var b44Data = await b44Resp.json();
+          if (b44Data.students && b44Data.students.length > 0) {
+            ocrOverlayStep('done', '\u2705 ' + b44Data.students.length + ' names found — AariNAT OCR', 100);
+            console.log('AariNAT OCR:', b44Data.students.length, 'names');
+            resolve(b44Data.students); return;
+          }
+        }
+      } catch (e) { console.warn('AariNAT OCR failed, trying Base44...', e.message); }
+
+      // ── 0b. Base44 (secondary fallback) ────────────────────────────────
       try {
         ocrOverlayStep('upload', 'Sending to Base44 AI OCR...', 30);
         var b44Resp = await fetch('https://superagent-626f0107.base44.app/functions/bloomOCR', {
