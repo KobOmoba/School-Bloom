@@ -223,7 +223,7 @@ async function _readOnePage(file, pageNum, total, fbEl) {
 
       // ── 0. AariNAT OCR — Firebase Cloud Function (primary) ──────────────
       //    Groq Vision (Llama 4 Scout) · endpoint owned by AariNAT
-      const AARINAT_OCR_URL = 'https://us-central1-educationbloom-699ed.cloudfunctions.net/aarinatOCR';
+      const AARINAT_OCR_URL = 'https://aarinat-ocr.aarinat-company-limited.workers.dev';
       try {
         ocrOverlayStep('upload', 'AariNAT OCR scanning...', 30);
         var b44Resp = await fetch(AARINAT_OCR_URL, {
