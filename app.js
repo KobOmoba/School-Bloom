@@ -444,8 +444,13 @@ function extractNigerianNames(raw) {
     const low = line.toLowerCase();
     if (UI_BLACKLIST.some(b => low.includes(b))) return null;
     if (/^(class|serial|no\b|names?|balance|term|from|date|\bsn\b|s\/n)/i.test(line)) return null;
-    // Strip leading serial numbers: "1.", "- 2", "* 3", etc.
-    let c = line.replace(/^[-–•*x✓✗✔]?\s*\d+[.):\s]+/, '').trim();
+
+    // ── Reject lines that are entirely class/grade names ──────────────────
+    if (/^\s*(BASIC\s+(ONE|TWO|THREE|FOUR|FIVE|SIX|\d+)|NURSERY(\s*\d|\s*1\s*[&AND]+\s*2)?|PRE.?NURSERY|JSS\s*[1-3]|SS[S]?\s*[1-3]|PRIMARY\s*[1-6]|KG\s*[12]?|UNKNOWN|RECEPTION)\s*$/i.test(line)) return null;
+
+    // Strip ALL leading non-letter chars — handles X14, V17, ✓14, •3, "- 2" etc.
+    let c = line.replace(/^[^a-zA-Z]+/, '').trim();
+
     // Strip trailing balance/fee noise
     c = c.replace(/\bBALANCE[\s\d,]*$/i, '')
          .replace(/[\d,]+\s*$/, '')
@@ -453,6 +458,10 @@ function extractNigerianNames(raw) {
          .replace(/[^a-zA-Z\s'\-]/g, ' ')
          .replace(/\s+/g, ' ')
          .trim();
+
+    // ── Merge OCR column-split artifacts: "RASA Q" → "RASAQ"
+    c = c.replace(/\b([A-Z]{3,})\s+([A-Z]{1,2})\b(?!\s+[A-Z]{3,})/g, '$1$2');
+
     if (!c || c.length < 2) return null;
     return c.toUpperCase();
   };
