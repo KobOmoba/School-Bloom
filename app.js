@@ -207,182 +207,109 @@ function ocrOverlayHide(delayMs) {
 // ── OCR engine: OCR.space (cloud) with Gemini upgrade path ───────────────
 // Tesseract removed — unreliable on school registers, wastes 30s
 // Returns array of {surname, firstname, fullName}
-async function _readOnePage(file, pageNum, total, fbEl) {
+// OCR key cache per scan
+let _ocrKeys = null;
+async function _getOcrKeys() {
+  if (_ocrKeys) return _ocrKeys;
+  try {
+    const sd = await db.collection('admin_settings').doc('main').get();
+    if (sd.exists) { _ocrKeys={groqKey:sd.data().groqApiKey||'',hfKey:sd.data().hfApiKey||''}; return _ocrKeys; }
+  } catch(e){ console.warn('OCR key fetch:',e.message); }
+  return (_ocrKeys={groqKey:'',hfKey:''});
+}
+
+async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
   return new Promise(resolve => {
     const reader = new FileReader();
-
     reader.onload = async ev => {
-      const imgData = ev.target.result;   // full data URI
-      const b64    = imgData.split(',')[1];
-      const mime   = file.type || 'image/jpeg';
-
-      // Show thumbnail in overlay
-      ocrOverlayThumb(imgData);
-      ocrOverlayStep('load', 'Image loaded — sending to cloud...', 20);
-      ocrOverlayPages(pageNum, total);
-
-      // ── 0. AariNAT OCR — Firebase Cloud Function (primary) ──────────────
-      //    Groq Vision (Llama 4 Scout) · endpoint owned by AariNAT
-      const AARINAT_OCR_URL = 'https://aarinat-ocr.aarinat-company-limited.workers.dev';
-      try {
-        ocrOverlayStep('upload', 'AariNAT OCR scanning...', 30);
-        var b44Resp = await fetch(AARINAT_OCR_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64: b64, mime: mime || 'image/jpeg' })
-        });
-        if (b44Resp.ok) {
-          var b44Data = await b44Resp.json();
-          if (b44Data.students && b44Data.students.length > 0) {
-            ocrOverlayStep('done', '\u2705 ' + b44Data.students.length + ' names found — AariNAT OCR', 100);
-            console.log('AariNAT OCR:', b44Data.students.length, 'names');
-            resolve(b44Data.students); return;
-          }
-        }
-      } catch (e) { console.warn('AariNAT OCR failed, trying Base44...', e.message); }
-
-      // ── 0b. Base44 (secondary fallback) ────────────────────────────────
-      try {
-        ocrOverlayStep('upload', 'Sending to Base44 AI OCR...', 30);
-        var b44Resp = await fetch('https://superagent-626f0107.base44.app/functions/bloomOCR', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64: b64, mime: mime || 'image/jpeg' })
-        });
-        if (b44Resp.ok) {
-          var b44Data = await b44Resp.json();
-          if (b44Data.students && b44Data.students.length > 0) {
-            ocrOverlayStep('done', '\u2705 ' + b44Data.students.length + ' names found via Base44 AI', 100);
-            console.log('Base44 OCR:', b44Data.students.length, 'names via', b44Data.provider);
-            resolve(b44Data.students); return;
-          }
-        }
-      } catch (e) { console.warn('Base44 OCR failed, trying Gemini...', e.message); }
-
-      // ── 1. Gemini (only when key is configured) ────────────────────────
-      if (GEMINI_KEY) {
-        try {
-          ocrOverlayStep('upload', 'Sending to Gemini AI...', 35);
-          const names = await geminiOCR(b64, mime);
-          if (names && names.length) {
-            ocrOverlayStep('done', `✅ ${names.length} names found via Gemini AI`, 100);
-            resolve(names); return;
-          }
-        } catch (e) { console.warn(`Page ${pageNum} Gemini failed:`, e.message); }
-      }
-
-      // ── 2. OCR.space — single clean API call ──────────────────────────
-      // Only valid free-key params: base64image, language, apikey, OCREngine,
-      // scale, detectOrientation, filetype.  isHandwritten/isTable cause HTTP 400.
-      try {
-        ocrOverlayStep('upload', 'Uploading to cloud OCR...', 40);
-
-        const mimeToFt = {
-          'image/jpeg':'JPG','image/jpg':'JPG','image/png':'PNG',
-          'image/webp':'JPG','image/heic':'JPG','image/heif':'JPG',
-          'application/pdf':'PDF'
+      const imgData = ev.target.result;
+      ocrOverlayThumb(imgData); ocrOverlayPages(pageNum, total);
+      ocrOverlayStep('load','Image loaded — preparing...',20);
+      const resizedUrl = await new Promise(res => {
+        const img=new Image();
+        img.onload=()=>{
+          const s=Math.min(1,800/Math.max(img.width,img.height));
+          const c=document.createElement('canvas');
+          c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+          c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+          res(c.toDataURL('image/jpeg',0.85));
         };
-        const ft = mimeToFt[mime] || 'JPG';
-
-        const ocrParams = new URLSearchParams({
-          base64image:       imgData,   // full data URI
-          language:          'eng',
-          apikey:            'helloworld',
-          OCREngine:         '2',       // best engine for mixed print/handwriting
-          scale:             'true',
-          detectOrientation: 'true',
-          filetype:          ft
-        });
-
-        ocrOverlayStep('read', 'Cloud OCR reading text...', 60);
-
-        const controller = new AbortController();
-        const ocrTimeout = setTimeout(() => controller.abort(), 30000);
-
-        let result;
-        try {
-          const resp = await fetch('https://api.ocr.space/parse/image', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body:    ocrParams.toString(),
-            signal:  controller.signal
-          });
-          clearTimeout(ocrTimeout);
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          result = await resp.json();
-        } catch (fetchErr) {
-          clearTimeout(ocrTimeout);
-          const why = fetchErr.name === 'AbortError' ? 'timed out — check connection' : fetchErr.message;
-          ocrOverlayStep('error', '⚠️ Network error: ' + why, 60);
-          throw fetchErr;
+        img.onerror=()=>res(imgData); img.src=imgData;
+      });
+      const b64=resizedUrl.split(',')[1];
+      const {groqKey,hfKey}=await _getOcrKeys();
+      const parseAiNames=rawText=>{
+        let text=rawText.replace(/<think>[\s\S]*?<\/think>/gi,'').trim(),arr=[];
+        try{
+          const cb=text.match(/```(?:json)?\s*([\s\S]*?)```/);if(cb)text=cb[1].trim();
+          const p=JSON.parse(text);arr=p.names||p.students||(Array.isArray(p)?p:[]);
+        }catch(e){
+          const fb=(typeof extractNigerianNames==='function'?extractNigerianNames(text):extractStudentNames(text));
+          return fb.map(n=>{const p=n.split(/\s+/);return{surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n};});
         }
-
-        // Check API-level errors
-        if (result.error) throw new Error(result.error);
-        if (result.IsErroredOnProcessing) throw new Error((result.ErrorMessage||[]).join('; '));
-
-        ocrOverlayStep('read', 'Extracting student names...', 80);
-        const text = (result.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
-        console.log('✅ OCR.space text:', text.substring(0, 400));
-
-        if (text.trim().length > 2) {
-          // Nigerian register format (most accurate)
-          const ng = extractNigerianNames(text);
-          if (ng.length) {
-            ocrOverlayStep('done', `✅ ${ng.length} names found`, 100);
-            resolve(ng.map(n => { const p = n.trim().split(/\s+/); return { surname: p[0]||'', firstname: p.slice(1).join(' ')||'', fullName: n }; }));
-            return;
-          }
-          // Generic name parser
-          const gn = extractStudentNames(text);
-          if (gn.length) {
-            ocrOverlayStep('done', `✅ ${gn.length} names found`, 100);
-            resolve(gn.map(n => ({ surname: '', firstname: '', fullName: n })));
-            return;
-          }
-          // Last resort — pair adjacent single-word lines (two-column register support)
-          const rawLn = text.split(/\r?\n/)
-            .map(l => l.replace(/^[-\d.)\s*•✓✗]+/, '').replace(/[\d,]+\s*$/, '').trim().toUpperCase())
-            .filter(l => l.length >= 2 && /[A-Z]{2,}/.test(l));
-          const sngl = rawLn.filter(l => l.split(/\s+/).length === 1).length;
-          const paired = [];
-          if (rawLn.length >= 4 && sngl / rawLn.length > 0.55) {
-            for (let ri = 0; ri < rawLn.length; ri += 2) {
-              const sur = rawLn[ri] || ''; const fst = rawLn[ri+1] || '';
-              if (sur.length >= 2) paired.push({ surname: sur, firstname: fst.length >= 2 ? fst : '', fullName: sur + (fst.length >= 2 ? ' ' + fst : '') });
-            }
-          } else {
-            rawLn.slice(0, 80).forEach(l => {
-              const w = l.split(/\s+/);
-              paired.push({ surname: w[0]||'', firstname: w.slice(1).join(' ')||'', fullName: l });
-            });
-          }
-          if (paired.length) {
-            ocrOverlayStep('done', `📋 ${paired.length} names — please review`, 100);
-            resolve(paired); return;
-          }
+        return arr.map(e=>{
+          if(typeof e==='string'){const p=e.trim().toUpperCase().split(/\s+/);return{surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:e.trim().toUpperCase()};}
+          const sur=(e.surname||'').trim().toUpperCase(),fst=(e.firstname||e.firstName||'').trim().toUpperCase();
+          return{surname:sur,firstname:fst,fullName:(e.fullName||sur+' '+fst).trim().toUpperCase()};
+        }).filter(s=>s.fullName.length>=2);
+      };
+      const callHF=async()=>{
+        if(!hfKey)throw new Error('No HF key');
+        const HF_MODEL='Qwen/Qwen2.5-VL-7B-Instruct';
+        const HF_URL='https://api-inference.huggingface.co/models/'+HF_MODEL+'/v1/chat/completions';
+        const HF_BODY=JSON.stringify({model:HF_MODEL,max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:'School register. List every student name.\nReturn ONLY: {"names":["SURNAME FIRSTNAME",...]}'  }]}]});
+        const hfFetch=async ms=>{
+          const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),ms);
+          const r=await fetch(HF_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+hfKey},body:HF_BODY,signal:ctrl.signal});
+          clearTimeout(t);return r;
+        };
+        let resp=await hfFetch(60000);
+        if(resp.status===503){
+          const eb=await resp.json().catch(()=>({}));
+          const wait=Math.min(Math.ceil(eb.estimated_time||25),45);
+          for(let s=wait;s>0;s--){ocrOverlayStep('scan','🤗 HF model loading — ready in '+s+'s...',35);await new Promise(r=>setTimeout(r,1000));}
+          resp=await hfFetch(60000);
         }
-
-        // OCR returned blank — image may be too blurry
-        ocrOverlayStep('error', '⚠️ No text found — try a clearer photo', 100);
-        resolve([]);
-        return;
-
-      } catch (e) {
-        console.warn(`Page ${pageNum} OCR.space failed:`, e.message);
-        ocrOverlayStep('error', '⚠️ OCR failed: ' + e.message.substring(0, 60), 100);
-        resolve([]);
-        return;
+        if(!resp.ok)throw new Error('HF HTTP '+resp.status);
+        const data=await resp.json();
+        return parseAiNames(data.choices?.[0]?.message?.content||'');
+      };
+      if(!skipGroq&&groqKey){
+        try{
+          ocrOverlayStep('upload','Groq Vision scanning (page '+pageNum+'/'+total+')...',50);
+          const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),45000);
+          const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({model:'qwen/qwen3.6-27b',reasoning_effort:'none',max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:'School register. List every student name.\nReturn ONLY: {"names":["SURNAME FIRSTNAME",...]}'  }]}]})});
+          clearTimeout(t);
+          if(resp.status===401||resp.status===403){ocrOverlayStep('error','⚠️ Groq key invalid',100);resolve([]);return;}
+          if(resp.ok){const data=await resp.json();const raw=(data.choices?.[0]?.message?.content||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();const names=parseAiNames(raw);if(names.length){ocrOverlayStep('done','✅ '+names.length+' names — Groq (page '+pageNum+')',100);resolve(names);return;}}
+        }catch(e){console.warn('School Groq p'+pageNum+':',e.message);}
       }
-    };
-
-    reader.onerror = () => {
-      ocrOverlayStep('error', '❌ Could not read file — use an image or PDF', 100);
+      try{
+        ocrOverlayStep('scan','🤗 '+(skipGroq?'HuggingFace scanning':'Trying HuggingFace')+' (page '+pageNum+'/'+total+')...',skipGroq?30:70);
+        const names=await callHF();
+        if(names.length){ocrOverlayStep('read','🤗 HF: '+names.length+' names (page '+pageNum+')',100);resolve(names);return;}
+      }catch(e){console.warn('School HF p'+pageNum+':',e.message);ocrOverlayStep('scan','🤗 HF done, trying OCR.space...',80);}
+      try{
+        ocrOverlayStep('upload','Uploading to OCR.space...',40);
+        const ocrParams=new URLSearchParams({base64image:resizedUrl,language:'eng',apikey:'helloworld',OCREngine:'2',scale:'true',detectOrientation:'true',filetype:'JPG'});
+        ocrOverlayStep('read','OCR.space reading...',60);
+        const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),30000);
+        const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:ocrParams.toString(),signal:ctrl.signal});
+        clearTimeout(t);
+        if(!resp.ok)throw new Error('HTTP '+resp.status);
+        const result=await resp.json();
+        if(result.IsErroredOnProcessing)throw new Error((result.ErrorMessage||[]).join('; '));
+        const text=(result.ParsedResults||[]).map(r=>r.ParsedText||'').join('\n');
+        if(text.trim().length>2){
+          const names=(typeof extractNigerianNames==='function'?extractNigerianNames(text):extractStudentNames(text));
+          if(names.length){ocrOverlayStep('done','✅ '+names.length+' names — OCR.space (page '+pageNum+')',100);resolve(names.map(n=>{const p=n.split(/\s+/);return{surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n};}));return;}
+        }
+      }catch(e){console.warn('School OCR.space p'+pageNum+':',e.message);}
+      ocrOverlayStep('error','⚠️ Could not read page '+pageNum+' — try clearer photo',100);
       resolve([]);
     };
-
-    // Step 1: read file
-    ocrOverlayStep('load', 'Reading file...', 10);
+    reader.onerror=()=>{ocrOverlayStep('error','❌ Could not read file',100);resolve([]);;};
+    ocrOverlayStep('load','Reading file...',10);
     reader.readAsDataURL(file);
   });
 }
@@ -1503,12 +1430,7 @@ function handleCSV(e) {
   const texts = files.filter(f => !ocrFiles.includes(f));
   texts.forEach(f => importStudentsFromText(f));
   if (ocrFiles.length) {
-    // If no Gemini key, show warning + option to add key before proceeding
-    if (!GEMINI_KEY) {
-      showGeminiKeyPrompt(() => processImagesSequentially(ocrFiles));
-    } else {
-      processImagesSequentially(ocrFiles);
-    }
+    processImagesSequentially(ocrFiles);
   }
 }
 
@@ -1585,45 +1507,29 @@ function skipGeminiKey() {
 let _ocrPending = [];
 
 async function processImagesSequentially(files) {
-  const fbEl = $('csv-fb'); _ocrPending = [];
-
-  // Show the upload overlay for the first file
-  if (files.length > 0) {
-    const firstName = files[0].name || 'image';
-    ocrOverlayShow(firstName);
-  }
-
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    // Update overlay filename for multi-file uploads
-    if (i > 0) {
-      const fn = document.getElementById('ocr-filename');
-      if (fn) fn.textContent = f.name || `Image ${i+1}`;
+  const fbEl=$('csv-fb');_ocrPending=[];
+  _ocrKeys=null; await _getOcrKeys();
+  if(files.length>0)ocrOverlayShow(files[0].name||'image');
+  const GROQ_DELAY=15,HF_DELAY=5;
+  for(let i=0;i<files.length;i++){
+    if(i>0){
+      const ds=i<3?GROQ_DELAY:HF_DELAY;
+      for(let s=ds;s>0;s--){ocrOverlayStep('scan','⏳ '+s+'s before page '+(i+1)+' of '+files.length+' ('+(i<3?'Groq':'HuggingFace')+')...',10);await new Promise(r=>setTimeout(r,1000));}
+      const fn=document.getElementById('ocr-filename');if(fn)fn.textContent=files[i].name||'Image '+(i+1);
     }
-    if (fbEl) fbEl.textContent = `📸 Reading page ${i+1} of ${files.length}...`;
-    const names = await _readOnePage(f, i + 1, files.length, fbEl);
+    if(fbEl)fbEl.textContent='📸 Reading page '+(i+1)+' of '+files.length+'...';
+    const names=await _readOnePage(files[i],i+1,files.length,fbEl,i>=3);
     _ocrPending.push(...names);
   }
-
-  if (!_ocrPending.length) {
-    ocrOverlayHide(2000);
-    if (fbEl) fbEl.textContent = '❌ Could not read any names. Try a clearer, well-lit photo.';
-    return;
-  }
-  const existingKeys = new Set(SD.students.map(s => s.name.toLowerCase().replace(/[^a-z]/g, '')));
-  _ocrPending = _ocrPending.filter(n => {
-    const key = (n.fullName || '').toLowerCase().replace(/[^a-z]/g, '');
-    return key.length > 1 && !existingKeys.has(key);
-  });
-  const totalFound = _ocrPending.length;
-  if (fbEl) fbEl.textContent = `✅ Found ${totalFound} name${totalFound!==1?'s':''} — review below.`;
-  ocrOverlayStep('done', `✅ ${totalFound} name${totalFound!==1?'s':''} ready to review`, 100);
-  // Hide overlay after brief success pause, then open review immediately
-  setTimeout(() => {
-    ocrOverlayHide(0);
-    ocrShowReview(_ocrPending);
-  }, 900);
+  if(!_ocrPending.length){ocrOverlayHide(2000);if(fbEl)fbEl.textContent='❌ Could not read any names. Try clearer photo.';return;}
+  const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
+  _ocrPending=_ocrPending.filter(n=>{const k=(n.fullName||'').toLowerCase().replace(/[^a-z]/g,'');return k.length>1&&!existingKeys.has(k);});
+  const tot=_ocrPending.length;
+  if(fbEl)fbEl.textContent='✅ Found '+tot+' name'+(tot!==1?'s':'')+' — review below.';
+  ocrOverlayStep('done','✅ '+tot+' name'+(tot!==1?'s':'')+' ready to review',100);
+  setTimeout(()=>{ocrOverlayHide(0);ocrShowReview(_ocrPending);},900);
 }
+
 
 function ocrShowReview(names) {
   const modal = $('ocr-review-modal');
