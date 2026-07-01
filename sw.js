@@ -1,10 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Educational Bloom · School Portal — Service Worker
-//  Version: 1.0.0 | AariNAT Company Limited
-//  Strategy: Cache-First for shell assets, Network-First for Firestore
+//  Version: 1.1.0 | AariNAT Company Limited
+//  Strategy: Network-First for shell (HTML/JS/CSS), Cache-First for static
+//  assets (icons/manifest/CDN), Network-First for Firestore
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME   = 'edu-bloom-v1';
+const CACHE_NAME   = 'edu-bloom-v2';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -19,9 +20,17 @@ const SHELL_ASSETS = [
   'https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js',
 ];
 
+// These files change during active development. Cache-First was freezing
+// them at whatever was cached on first install — pushed fixes never reliably
+// reached the device, because the browser kept getting the old cached
+// index.html (which itself points at an old app.js?v=... URL). Network-First
+// ensures every reload picks up the latest push when online, and still
+// falls back to cache for offline use.
+const NETWORK_FIRST = ['index.html', 'app.js', 'style.css'];
+
 // ── INSTALL — cache app shell ────────────────────────────────────────────────
 self.addEventListener('install', event => {
-  console.log('[SW] Installing Edu-BLOOM v1...');
+  console.log('[SW] Installing Edu-BLOOM v1.1.0...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(SHELL_ASSETS))
@@ -32,7 +41,7 @@ self.addEventListener('install', event => {
 
 // ── ACTIVATE — delete old caches ─────────────────────────────────────────────
 self.addEventListener('activate', event => {
-  console.log('[SW] Activating Edu-BLOOM v1...');
+  console.log('[SW] Activating Edu-BLOOM v1.1.0...');
   event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(
@@ -62,11 +71,29 @@ self.addEventListener('fetch', event => {
     return; // Let browser handle — Firestore has its own offline persistence
   }
 
-  // 3. Shell assets — Cache-First (fast offline load)
-  if (
-    url.origin === self.location.origin ||
-    url.hostname === 'www.gstatic.com'
-  ) {
+  const isSameOrigin = url.origin === self.location.origin;
+  const fileName = url.pathname.split('/').pop() || 'index.html';
+  const isShellDoc = isSameOrigin && (NETWORK_FIRST.includes(fileName) || url.pathname === '/' || url.pathname.endsWith('/'));
+
+  // 3. App shell (HTML/JS/CSS) — Network-First so pushed fixes land on next
+  //    reload; falls back to cache when offline.
+  if (isShellDoc) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then(cached => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // 4. Rarely-changing static assets (icons, manifest, CDN SDK) — Cache-First
+  if (isSameOrigin || url.hostname === 'www.gstatic.com') {
     event.respondWith(
       caches.match(event.request).then(cached => {
         if (cached) return cached;
@@ -90,7 +117,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // 4. Everything else — Network-First, fallback to cache
+  // 5. Everything else — Network-First, fallback to cache
   event.respondWith(
     fetch(event.request)
       .then(response => {
