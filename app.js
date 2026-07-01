@@ -1580,11 +1580,11 @@ function ocrShowReview(names) {
 
     const ni = document.createElement('input');
     ni.type = 'text'; ni.id = 'ocr-name-' + i; ni.value = fullName;
-    ni.style.cssText = 'flex:1;margin:0;padding:3px 6px;font-size:0.78rem;min-width:0;text-transform:uppercase;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);';
+    ni.style.cssText = 'flex:1;width:auto;margin:0;padding:3px 6px;font-size:0.78rem;min-width:0;text-transform:uppercase;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);';
 
     const ci = document.createElement('input');
     ci.type = 'text'; ci.id = 'ocr-cls-' + i; ci.placeholder = 'Class';
-    ci.style.cssText = 'width:64px;flex-shrink:0;margin:0;padding:3px 5px;font-size:0.74rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);';
+    ci.style.cssText = 'width:64px !important;flex-shrink:0;margin:0;padding:3px 5px;font-size:0.74rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);';
 
     const db = document.createElement('button');
     db.textContent = '✕';
