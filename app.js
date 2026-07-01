@@ -209,6 +209,23 @@ function ocrOverlayHide(delayMs) {
 // Returns array of {surname, firstname, fullName}
 // OCR key cache per scan
 let _ocrKeys = null;
+const GROQ_OCR_PROMPT = `You are reading a Nigerian school attendance/fee register photo.
+Columns: SERIAL NO | SURNAME | FIRST NAME | (other columns — ignore them).
+The image may be at any angle — read it correctly.
+
+TASK: Extract every student name visible. Combine as "SURNAME FIRSTNAME" (all caps).
+
+Nigerian name examples — surnames: OGUNLADE, KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, SHONPE, GBELEKALE, OLIYIDE, KOLANOLE, ADEGUNLE, ADEOYE, LAWAL, AYOMIDE, OBASA, OLATUNDE, ADENIYI, OLOOETU
+Firstnames: GABRIEL, RASAQ, GODWIN, ENOCH, ABIGEAL, KOREDE, MICHEAL, ADEMIDE, SUCCESS, EZEKIEL, AWAL, EMMANUEL, BIGGOLD, QUARDRI, MUEEZ, ZAINAB, SALAM, WAJUD
+
+Rules:
+1. Every row = one student — read ALL rows, do not skip any
+2. Ignore serial numbers, headers (NAMES, S/N), fee columns, dates, totals
+3. Unclear handwriting — make your BEST guess at the Nigerian name
+4. Output ONLY the JSON below — no explanation, no markdown, no extra text
+
+{"names":["OGUNLADE GABRIEL","KASALI RASAQ","ALAWODE SUCCESS"]}`;
+
 async function _getOcrKeys() {
   if (_ocrKeys) return _ocrKeys;
   try {
@@ -257,7 +274,7 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
         if(!hfKey)throw new Error('No HF key');
         const HF_MODEL='Qwen/Qwen2.5-VL-7B-Instruct';
         const HF_URL='https://api-inference.huggingface.co/models/'+HF_MODEL+'/v1/chat/completions';
-        const HF_BODY=JSON.stringify({model:HF_MODEL,max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:'School register. List every student name.\nReturn ONLY: {"names":["SURNAME FIRSTNAME",...]}'  }]}]});
+        const HF_BODY=JSON.stringify({model:HF_MODEL,temperature:0.2,max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:GROQ_OCR_PROMPT}]}]});
         const hfFetch=async ms=>{
           const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),ms);
           const r=await fetch(HF_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+hfKey},body:HF_BODY,signal:ctrl.signal});
@@ -278,7 +295,7 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
         try{
           ocrOverlayStep('upload','Groq Vision scanning (page '+pageNum+'/'+total+')...',50);
           const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),45000);
-          const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({model:'qwen/qwen3.6-27b',reasoning_effort:'none',max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:'School register. List every student name.\nReturn ONLY: {"names":["SURNAME FIRSTNAME",...]}'  }]}]})});
+          const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({model:'qwen/qwen3.6-27b',reasoning_effort:'none',temperature:0.2,max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:GROQ_OCR_PROMPT}]}]})});
           clearTimeout(t);
           if(resp.status===401||resp.status===403){ocrOverlayStep('error','⚠️ Groq key invalid',100);resolve([]);return;}
           if(resp.ok){const data=await resp.json();const raw=(data.choices?.[0]?.message?.content||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();const names=parseAiNames(raw);if(names.length){ocrOverlayStep('done','✅ '+names.length+' names — Groq (page '+pageNum+')',100);resolve(names);return;}}
@@ -1536,66 +1553,45 @@ function ocrShowReview(names) {
   const info  = $('ocr-review-info');
   if (!modal || !list) { console.error('OCR review modal not found in HTML'); return; }
 
-  // Populate the "Set class for ALL" dropdown from existing class arms
-  const classDropdown = $('ocr-class-all');
-  if (classDropdown) {
-    const arms = [...new Set((SD.students||[]).map(s=>s.class||'').filter(Boolean))].sort();
-    // Also include common Nigerian class names as defaults
-    const defaults = ['JSS1A','JSS1B','JSS2A','JSS2B','JSS3A','JSS3B','SS1A','SS1B','SS2A','SS2B','SS3A','SS3B'];
-    const allArms  = [...new Set([...arms, ...defaults])];
-    classDropdown.innerHTML = '<option value="">Set class for ALL ▾</option>' +
-      allArms.map(a => `<option value="${a}">${a}</option>`).join('');
-  }
-
-  if (info) info.textContent = `${names.length} name${names.length!==1?'s':''} found. ✏️ Edit any wrong names, 🗑️ delete bad ones, then tap Add Students.`;
-
   // Pre-filter: remove entries that have no usable name content
   const validNames = names.filter(n => {
     const full = (n.fullName || n.surname || '').trim();
     return full.length >= 2 && /[a-zA-Z]{2,}/.test(full);
   });
-  // Update info text with actual count after filtering
   if (info) info.textContent = `${validNames.length} name${validNames.length!==1?'s':''} found. ✏️ Edit wrong names, ✕ delete bad ones, then tap Add Students.`;
 
-  // ✅ FIX: DOM-based row building (createElement/appendChild) — innerHTML string
-  // concatenation was the confirmed root cause of the bloom-agent empty-list bug on
-  // Android/Brave and is replaced here for the same reason (parity fix).
+  // DOM-based row building (createElement/appendChild) — same pattern as
+  // bloom-agent, avoids the innerHTML string-concat failure on Android/Brave.
   while (list.firstChild) list.removeChild(list.firstChild);
   validNames.forEach((n, i) => {
     const sur = (n.surname  || '').trim().toUpperCase();
     const fst = (n.firstname|| '').trim().toUpperCase();
-    const fullName = n.fullName || ((sur + ' ' + fst).trim());
-    const surVal = sur || fullName.split(/\s+/)[0] || '';
-    const fstVal = fst || fullName.split(/\s+/).slice(1).join(' ') || '';
+    const fullName = (n.fullName || (sur + ' ' + fst)).trim().replace(/\s+/g,' ');
 
     const row = document.createElement('div');
     row.className = 'ocr-row';
     row.id = 'ocr-row-' + i;
-    row.style.cssText = 'display:flex;align-items:center;gap:4px;padding:7px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;';
+    row.style.cssText = 'display:flex;gap:4px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--border);';
 
     const chk = document.createElement('input');
     chk.type = 'checkbox'; chk.id = 'ocr-chk-' + i; chk.checked = true;
-    chk.style.cssText = 'width:20px;height:20px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;';
+    chk.style.cssText = 'width:18px;height:18px;flex-shrink:0;cursor:pointer;';
     chk.onchange = ocrUpdateCount;
 
-    const surInput = document.createElement('input');
-    surInput.type = 'text'; surInput.id = 'ocr-sur-' + i; surInput.value = surVal; surInput.placeholder = 'Surname';
-    surInput.style.cssText = 'width:110px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;font-weight:700;text-transform:uppercase;';
+    const ni = document.createElement('input');
+    ni.type = 'text'; ni.id = 'ocr-name-' + i; ni.value = fullName;
+    ni.style.cssText = 'flex:1;margin:0;padding:3px 6px;font-size:0.78rem;min-width:0;text-transform:uppercase;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);';
 
-    const fstInput = document.createElement('input');
-    fstInput.type = 'text'; fstInput.id = 'ocr-fst-' + i; fstInput.value = fstVal; fstInput.placeholder = 'First name';
-    fstInput.style.cssText = 'width:100px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;text-transform:uppercase;';
+    const ci = document.createElement('input');
+    ci.type = 'text'; ci.id = 'ocr-cls-' + i; ci.placeholder = 'Class';
+    ci.style.cssText = 'width:64px;flex-shrink:0;margin:0;padding:3px 5px;font-size:0.74rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);';
 
-    const clsInput = document.createElement('input');
-    clsInput.type = 'text'; clsInput.id = 'ocr-cls-' + i; clsInput.placeholder = 'Class';
-    clsInput.style.cssText = 'width:68px;border:1.5px solid var(--border);border-radius:7px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;';
+    const db = document.createElement('button');
+    db.textContent = '✕';
+    db.style.cssText = 'background:#fef2f2;border:1px solid #fecaca;border-radius:5px;padding:2px 7px;cursor:pointer;font-size:0.72rem;color:#dc2626;flex-shrink:0;';
+    db.onclick = () => { row.remove(); ocrUpdateCount(); };
 
-    const delBtn = document.createElement('button');
-    delBtn.textContent = '✕';
-    delBtn.style.cssText = 'background:#fef2f2;border:1.5px solid #fecaca;border-radius:7px;padding:5px 10px;cursor:pointer;color:#dc2626;font-size:0.82rem;font-weight:700;flex-shrink:0;';
-    delBtn.onclick = () => { row.remove(); ocrUpdateCount(); };
-
-    row.appendChild(chk); row.appendChild(surInput); row.appendChild(fstInput); row.appendChild(clsInput); row.appendChild(delBtn);
+    row.appendChild(chk); row.appendChild(ni); row.appendChild(ci); row.appendChild(db);
     list.appendChild(row);
   });
 
@@ -1605,8 +1601,11 @@ function ocrShowReview(names) {
 
 function ocrUpdateCount() {
   const checked = document.querySelectorAll('#ocr-review-list input[type=checkbox]:checked').length;
+  const total   = document.querySelectorAll('#ocr-review-list .ocr-row').length;
   const btn = $('ocr-confirm-btn');
-  if (btn) btn.textContent = `✅ Add ${checked} Student${checked!==1?'s':''}`;
+  const info = $('ocr-review-info');
+  if (btn) btn.textContent = `✅ Add ${checked} Student${checked!==1?'s':''} →`;
+  if (info) info.textContent = `${checked} of ${total} selected — edit names, set class, then tap Add.`;
 }
 function ocrSelectAll(val) {
   document.querySelectorAll('#ocr-review-list input[type=checkbox]').forEach(c => c.checked = val);
@@ -1615,8 +1614,6 @@ function ocrSelectAll(val) {
 function ocrSetClassAll() {
   const cls = ($('ocr-class-all')?.value || '').trim(); if (!cls) return;
   document.querySelectorAll('[id^=ocr-cls-]').forEach(el => { el.value = cls; });
-  // Reset dropdown so it acts as a one-shot action
-  const dd = $('ocr-class-all'); if (dd) dd.value = '';
 }
 async function ocrConfirmImport() {
   const rows = document.querySelectorAll('#ocr-review-list .ocr-row');
