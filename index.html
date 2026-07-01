@@ -1226,7 +1226,7 @@ function toggleEye(inputId, btn) {
   </div>
 </div>
 
-<script src="app.js?v=20260629a"></script>
+<script src="app.js?v=20260701a"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
@@ -1436,10 +1436,10 @@ window.addEventListener('appinstalled', () => {
 
     <!-- Bulk class assign + select all row -->
     <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;">
-      <select id="ocr-class-all" onchange="ocrSetClassAll()"
+      <input id="ocr-class-all" type="text" placeholder="Type class (e.g. JSS 2A)"
+        onkeydown="if(event.key==='Enter')ocrSetClassAll()"
         style="flex:1;padding:0.45rem 0.6rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;">
-        <option value="">Set class for ALL ▾</option>
-      </select>
+      <button onclick="ocrSetClassAll()" style="padding:0.45rem 0.8rem;border:1.5px solid var(--brand);border-radius:9px;font-size:0.78rem;background:var(--brand);color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;">Set →</button>
       <button onclick="ocrSelectAll(true)"  style="padding:0.45rem 0.7rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.78rem;background:var(--bg);color:var(--text);cursor:pointer;font-weight:700;">☑ All</button>
       <button onclick="ocrSelectAll(false)" style="padding:0.45rem 0.7rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.78rem;background:var(--bg);color:var(--text);cursor:pointer;font-weight:700;">☐ None</button>
     </div>
@@ -1447,10 +1447,9 @@ window.addEventListener('appinstalled', () => {
     <!-- Column headers -->
     <div style="display:flex;gap:4px;padding:4px 4px 6px;border-bottom:2px solid var(--brand);font-size:0.7rem;font-weight:800;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;">
       <span style="width:22px;flex-shrink:0;"></span>
-      <span style="width:110px;flex-shrink:0;">Surname</span>
-      <span style="width:100px;flex-shrink:0;">First Name</span>
-      <span style="width:68px;flex-shrink:0;">Class</span>
-      <span style="flex:1;"></span>
+      <span style="flex:1;">Name</span>
+      <span style="width:64px;flex-shrink:0;">Class</span>
+      <span style="width:30px;flex-shrink:0;"></span>
     </div>
 
     <!-- Name list (populated by JS) -->
