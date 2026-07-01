@@ -1510,15 +1510,14 @@ async function processImagesSequentially(files) {
   const fbEl=$('csv-fb');_ocrPending=[];
   _ocrKeys=null; await _getOcrKeys();
   if(files.length>0)ocrOverlayShow(files[0].name||'image');
-  const GROQ_DELAY=15,HF_DELAY=5;
+  const GROQ_DELAY=15;
   for(let i=0;i<files.length;i++){
     if(i>0){
-      const ds=i<3?GROQ_DELAY:HF_DELAY;
-      for(let s=ds;s>0;s--){ocrOverlayStep('scan','⏳ '+s+'s before page '+(i+1)+' of '+files.length+' ('+(i<3?'Groq':'HuggingFace')+')...',10);await new Promise(r=>setTimeout(r,1000));}
+      for(let s=GROQ_DELAY;s>0;s--){ocrOverlayStep('scan','⏳ '+s+'s before page '+(i+1)+' of '+files.length+'...',10);await new Promise(r=>setTimeout(r,1000));}
       const fn=document.getElementById('ocr-filename');if(fn)fn.textContent=files[i].name||'Image '+(i+1);
     }
     if(fbEl)fbEl.textContent='📸 Reading page '+(i+1)+' of '+files.length+'...';
-    const names=await _readOnePage(files[i],i+1,files.length,fbEl,i>=3);
+    const names=await _readOnePage(files[i],i+1,files.length,fbEl,false);
     _ocrPending.push(...names);
   }
   if(!_ocrPending.length){ocrOverlayHide(2000);if(fbEl)fbEl.textContent='❌ Could not read any names. Try clearer photo.';return;}
@@ -1558,28 +1557,47 @@ function ocrShowReview(names) {
   // Update info text with actual count after filtering
   if (info) info.textContent = `${validNames.length} name${validNames.length!==1?'s':''} found. ✏️ Edit wrong names, ✕ delete bad ones, then tap Add Students.`;
 
-  list.innerHTML = validNames.map((n, i) => {
-    // FIX: define sur/fst properly from the name object
+  // ✅ FIX: DOM-based row building (createElement/appendChild) — innerHTML string
+  // concatenation was the confirmed root cause of the bloom-agent empty-list bug on
+  // Android/Brave and is replaced here for the same reason (parity fix).
+  while (list.firstChild) list.removeChild(list.firstChild);
+  validNames.forEach((n, i) => {
     const sur = (n.surname  || '').trim().toUpperCase();
     const fst = (n.firstname|| '').trim().toUpperCase();
     const fullName = n.fullName || ((sur + ' ' + fst).trim());
-    // If surname/firstname not split, put everything in surname field
     const surVal = sur || fullName.split(/\s+/)[0] || '';
     const fstVal = fst || fullName.split(/\s+/).slice(1).join(' ') || '';
 
-    return `<div class="ocr-row" id="ocr-row-${i}" style="display:flex;align-items:center;gap:4px;padding:7px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
-      <input type="checkbox" id="ocr-chk-${i}" checked onchange="ocrUpdateCount()"
-        style="width:20px;height:20px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;">
-      <input type="text" id="ocr-sur-${i}" value="${surVal.replace(/"/g,'&quot;')}" placeholder="Surname"
-        style="width:110px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;font-weight:700;text-transform:uppercase;">
-      <input type="text" id="ocr-fst-${i}" value="${fstVal.replace(/"/g,'&quot;')}" placeholder="First name"
-        style="width:100px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;text-transform:uppercase;">
-      <input type="text" id="ocr-cls-${i}" placeholder="Class"
-        style="width:68px;border:1.5px solid var(--border);border-radius:7px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;">
-      <button onclick="document.getElementById('ocr-row-${i}').remove();ocrUpdateCount()"
-        style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:7px;padding:5px 10px;cursor:pointer;color:#dc2626;font-size:0.82rem;font-weight:700;flex-shrink:0;">✕</button>
-    </div>`;
-  }).join('');
+    const row = document.createElement('div');
+    row.className = 'ocr-row';
+    row.id = 'ocr-row-' + i;
+    row.style.cssText = 'display:flex;align-items:center;gap:4px;padding:7px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;';
+
+    const chk = document.createElement('input');
+    chk.type = 'checkbox'; chk.id = 'ocr-chk-' + i; chk.checked = true;
+    chk.style.cssText = 'width:20px;height:20px;cursor:pointer;accent-color:var(--brand);flex-shrink:0;';
+    chk.onchange = ocrUpdateCount;
+
+    const surInput = document.createElement('input');
+    surInput.type = 'text'; surInput.id = 'ocr-sur-' + i; surInput.value = surVal; surInput.placeholder = 'Surname';
+    surInput.style.cssText = 'width:110px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;font-weight:700;text-transform:uppercase;';
+
+    const fstInput = document.createElement('input');
+    fstInput.type = 'text'; fstInput.id = 'ocr-fst-' + i; fstInput.value = fstVal; fstInput.placeholder = 'First name';
+    fstInput.style.cssText = 'width:100px;border:1.5px solid var(--border);border-radius:7px;padding:5px 7px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;text-transform:uppercase;';
+
+    const clsInput = document.createElement('input');
+    clsInput.type = 'text'; clsInput.id = 'ocr-cls-' + i; clsInput.placeholder = 'Class';
+    clsInput.style.cssText = 'width:68px;border:1.5px solid var(--border);border-radius:7px;padding:5px 6px;font-size:0.78rem;background:var(--bg);color:var(--text);font-family:inherit;flex-shrink:0;';
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕';
+    delBtn.style.cssText = 'background:#fef2f2;border:1.5px solid #fecaca;border-radius:7px;padding:5px 10px;cursor:pointer;color:#dc2626;font-size:0.82rem;font-weight:700;flex-shrink:0;';
+    delBtn.onclick = () => { row.remove(); ocrUpdateCount(); };
+
+    row.appendChild(chk); row.appendChild(surInput); row.appendChild(fstInput); row.appendChild(clsInput); row.appendChild(delBtn);
+    list.appendChild(row);
+  });
 
   ocrUpdateCount();
   openM('ocr-review-modal');
