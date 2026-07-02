@@ -917,11 +917,11 @@ function toggleEye(inputId, btn) {
       <div class="card" style="border-left:4px solid #818cf8;">
         <div class="ct">🤖 AI-Powered Register Scanning</div>
         <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.55;">
-          Add a free <strong>Gemini API key</strong> to enable high-accuracy OCR for handwritten Nigerian school registers. Without it, OCR.space is used — which struggles with rotated handwriting.
+          Register scanning uses <strong>Groq Vision</strong>, centrally managed for all schools — no key setup needed. Use this field only to override with your own key for this device.
         </p>
-        <label>Gemini API Key <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(free at aistudio.google.com → Create API Key)</span></label>
+        <label>Groq API Key <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(free at console.groq.com — optional override)</span></label>
         <div class="pwd-wrap">
-          <input type="password" id="set-gemini-key" placeholder="AIzaSy..." autocomplete="off"
+          <input type="password" id="set-gemini-key" placeholder="gsk_..." autocomplete="off"
             style="font-family:monospace;font-size:0.78rem;">
           <button type="button" class="eye-btn" onclick="toggleEye('set-gemini-key',this)" tabindex="-1">👁️</button>
         </div>
