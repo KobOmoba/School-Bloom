@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════
 // EDUCATIONAL BLOOM — app.js (MERGED: v1 base + v2 extras)
 // Term-based scoring (CA1/CA2/CA3/Exam) is the canonical data model.
-// OCR uses full fallback chain: Gemini → OCR.space → Tesseract.
-// AI Tools / Voice Agent now use Gemini (see index.html inline scripts).
+// OCR uses full fallback chain: Groq Vision → HuggingFace Vision → OCR.space.
+// AI Tools (report card remarks, insights) now use Groq (see index.html inline scripts).
 // ═══════════════════════════════════════════════════════════════════════
 
 // ── Firebase ───────────────────────────────────────────────────────────────
@@ -42,173 +42,106 @@ function getTier(count) {
   return TIERS.find(t => count <= t.max) || TIERS[TIERS.length - 1];
 }
 
-// ── Gemini Flash OCR (Structured Outputs) — PRIMARY OCR ──────────────────
+// ── Groq Vision OCR (Structured Outputs) — PRIMARY OCR ──────────────────
 // Key stored encoded; managed via AariNAT Command Center Settings
-const GEMINI_KEY  = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';  // Set via settings or key prompt
-const GEMINI_MODELS = ['gemini-2.0-flash','gemini-2.0-flash-exp','gemini-1.5-flash','gemini-1.5-flash-latest'];
-
-const GEMINI_PROMPT = `You are reading a Nigerian primary/secondary school fee register.
-The register has columns: SERIAL NO | SURNAME | FIRST NAME | (fee columns).
-The image may be rotated — read it in any orientation.
-
-Your job: extract EVERY student's name as SURNAME + FIRSTNAME pairs.
-
-Nigerian name examples from this type of school:
-- Surnames: OGUNLADE, KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, ODEREYE, AKINDELE, ADEBAYO, AYANRINDE, SHONPE, OLATUNDE, GBELEKALE, FAFIOLU, OLIYIDE, KOLANOLE, ADEGUNLE, ADEOYE, SABIU, JOHN, LAWAL, OLOOТУ, AYOMIDE, OGUNSOLA, OLOWU, AFOLAБИ, IYELABOYE, OKEIOLUНMI, OBASA
-- Firstnames: GABRIEL, RASAQ, GODWIN, ENOCH, ABIGEAL, KOREDE, MICHEAL, ADEMIDE, AMIDAT, WIQUYAT, ISREAL, DORCAS, MARYAM, MUSTEQEEM, AMINAT, CYNTHIA, ELIZABETH, TIRESIMI, WASILAT, DEBORAH, SHINDARA
-
-Rules:
-1. Each row in the register = one student. Read ALL rows.
-2. Ignore: CLASS, SERIAL NO, NAMES (header), BALANCE, FROM LAST TERM, numbers, dates
-3. Do NOT split a single student into two entries
-4. If handwriting is unclear, make your BEST guess at the Nigerian name
-5. Return surname and firstname SEPARATELY
-
-Return ONLY valid JSON.`;
-
-const GEMINI_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    students: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: {
-          surname:   { type: 'STRING' },
-          firstname: { type: 'STRING' },
-          fullName:  { type: 'STRING' }
-        },
-        required: ['surname','firstname','fullName']
-      }
-    }
-  },
-  required: ['students']
-};
-
-async function geminiOCR(base64, mime) {
-  // Re-read key at call time (may have been set via the key prompt after page load)
-  const apiKey = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || GEMINI_KEY;
-  if (!apiKey) throw new Error('No Gemini key set — skipping to fallback');
-  let lastError = null;
-  for (const model of GEMINI_MODELS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { inline_data: { mime_type: mime, data: base64 } },
-            { text: GEMINI_PROMPT }
-          ]}],
-          generationConfig: {
-            response_mime_type: 'application/json',
-            response_schema: GEMINI_SCHEMA
-          }
-        })
-      });
-      const d = await r.json();
-      if (d.error) {
-        lastError = d.error.message || 'Gemini error';
-        if (d.error.code === 404 || d.error.status === 'NOT_FOUND') continue;
-        throw new Error(lastError);
-      }
-      const raw = d.candidates?.[0]?.content?.parts?.[0]?.text || '{"students":[]}';
-      const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-      const students = parsed.students || [];
-      console.log(`✅ Gemini OCR (${model}): ${students.length} names`);
-      return students;
-    } catch (e) {
-      lastError = e.message;
-      console.warn(`Gemini ${model} failed:`, e.message);
-    }
-  }
-  throw new Error('All Gemini models failed: ' + lastError);
-}
-
 
 // ── OCR Upload Overlay ──────────────────────────────────────────────────
 function ocrOverlayShow(filename) {
   const el = document.getElementById('ocr-overlay');
-  if (!el) return;
-  el.style.display = 'flex';
-  // Reset all steps
-  ['load','upload','read','done'].forEach(s => {
-    const icon = document.getElementById(`ocr-step-${s}-icon`);
-    const text = document.getElementById(`ocr-step-${s}-text`);
-    const row  = document.getElementById(`ocr-step-${s}`);
-    if (icon) icon.textContent = { load:'⏳', upload:'☁️', read:'🔍', done:'✅' }[s];
-    if (row)  row.style.color = '#94a3b8';
-  });
-  const bar = document.getElementById('ocr-bar');
-  if (bar) bar.style.width = '0%';
+  if (el) el.style.display = 'flex';
   const fn = document.getElementById('ocr-filename');
   if (fn) fn.textContent = filename || 'image';
-  const st = document.getElementById('ocr-status');
-  if (st) st.textContent = 'Preparing...';
-  const pg = document.getElementById('ocr-pages');
-  if (pg) { pg.style.display = 'none'; pg.textContent = ''; }
-  // Hide thumb until we have data
-  const tw = document.getElementById('ocr-thumb-wrap');
-  if (tw) tw.style.display = 'none';
+  ['load','upload','read','done'].forEach(s => {
+    const row = document.getElementById('ocr-step-' + s);
+    const icon = document.getElementById('ocr-step-' + s + '-icon');
+    if (row) row.style.color = '#94a3b8';
+    if (icon) icon.textContent = s === 'load' ? '⏳' : '🔍';
+  });
+  const loadRow = document.getElementById('ocr-step-load');
+  if (loadRow) loadRow.style.color = '#6366f1';
+  const bar = document.getElementById('ocr-bar');
+  if (bar) { bar.style.width = '0%'; bar.style.background = 'linear-gradient(90deg,#6366f1,#818cf8)'; }
+  const thumbWrap = document.getElementById('ocr-thumb-wrap');
+  if (thumbWrap) thumbWrap.style.display = 'none';
 }
 
 function ocrOverlayThumb(dataUrl) {
-  const img = document.getElementById('ocr-thumb');
   const wrap = document.getElementById('ocr-thumb-wrap');
-  if (!img || !wrap) return;
-  // Only show thumb for image types
-  if (dataUrl && dataUrl.startsWith('data:image')) {
-    img.src = dataUrl;
-    wrap.style.display = 'block';
-  }
+  const img  = document.getElementById('ocr-thumb');
+  if (wrap && img) { img.src = dataUrl; wrap.style.display = 'block'; }
 }
 
 function ocrOverlayStep(step, status, progress) {
-  // step: 'load' | 'upload' | 'read' | 'done' | 'error'
+  const map = { load: 'load', upload: 'upload', scan: 'upload', read: 'read', done: 'done', error: 'done' };
+  const key = map[step] || step;
+  const row  = document.getElementById('ocr-step-' + key);
+  const icon = document.getElementById('ocr-step-' + key + '-icon');
+  const text = document.getElementById('ocr-step-' + key + '-text');
+  if (row)  row.style.color = step === 'error' ? '#f87171' : '#6366f1';
+  if (icon) icon.textContent = step === 'error' ? '⚠️' : (step === 'done' ? '✅' : '🔍');
+  if (text && status) text.textContent = status;
   const bar = document.getElementById('ocr-bar');
-  const st  = document.getElementById('ocr-status');
-  if (bar && progress !== undefined) bar.style.width = progress + '%';
-  if (st  && status)  st.textContent = status;
-
-  const stepMap = { load: 0, upload: 1, read: 2, done: 3 };
-  const stepIdx = stepMap[step] ?? -1;
-  ['load','upload','read','done'].forEach((s, i) => {
-    const icon = document.getElementById(`ocr-step-${s}-icon`);
-    const row  = document.getElementById(`ocr-step-${s}`);
-    if (!icon || !row) return;
-    if (i < stepIdx)      { icon.textContent = '✅'; row.style.color = '#4ade80'; }
-    else if (i === stepIdx) {
-      if (step === 'error') { icon.textContent = '❌'; row.style.color = '#f87171'; }
-      else { icon.textContent = '🔄'; row.style.color = '#818cf8'; }
-    }
-    else { row.style.color = '#94a3b8'; }
+  if (bar) {
+    bar.style.width = Math.min(progress || 0, 100) + '%';
+    if (step === 'error') bar.style.background = 'linear-gradient(90deg,#f87171,#dc2626)';
+    if (step === 'done')  bar.style.background = 'linear-gradient(90deg,#34d399,#10b981)';
+  }
+  ['load','upload','read','done'].forEach(s => {
+    if (s === key) return;
+    const r = document.getElementById('ocr-step-' + s);
+    if (r && (progress || 0) >= 100 && step !== 'error') r.style.color = '#34d399';
   });
-  if (step === 'done')  { if (bar) bar.style.width = '100%'; if (bar) bar.style.background = 'linear-gradient(90deg,#22c55e,#4ade80)'; }
-  if (step === 'error') { if (bar) bar.style.background = '#ef4444'; }
 }
 
 function ocrOverlayPages(cur, total) {
-  const pg = document.getElementById('ocr-pages');
-  if (!pg) return;
-  if (total > 1) { pg.style.display = 'block'; pg.textContent = `Page ${cur} of ${total}`; }
+  const fn = document.getElementById('ocr-filename');
+  if (fn && total > 1) fn.textContent = 'Page ' + cur + ' of ' + total;
 }
 
 function ocrOverlayHide(delayMs) {
   setTimeout(() => {
     const el = document.getElementById('ocr-overlay');
     if (el) el.style.display = 'none';
-    // Reset bar colour for next use
     const bar = document.getElementById('ocr-bar');
     if (bar) bar.style.background = 'linear-gradient(90deg,#6366f1,#818cf8)';
   }, delayMs || 0);
 }
 
-// ── OCR engine: OCR.space (cloud) with Gemini upgrade path ───────────────
-// Tesseract removed — unreliable on school registers, wastes 30s
-// Returns array of {surname, firstname, fullName}
-// OCR key cache per scan
-let _ocrKeys = null;
+function resizeImageForOCR(dataURL) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1000;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => resolve(dataURL);
+    img.src = dataURL;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OCR ENGINE — Groq Vision (primary) → HuggingFace Vision → OCR.space
+// Exact copy of the Bloom Agent OCR pipeline — kept identical across both apps.
+// Keys are centrally managed in Firestore admin_settings/main (groqApiKey, hfApiKey)
+// and auto-synced into localStorage on login — never hardcoded per-app.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const AARINAT_OCR_URL = 'https://aarinat-ocr.aarinat-company-limited.workers.dev';
+
+const GROQ_KEY_STORAGE = 'groq_api_key';
+let _lastOcrError = '';
+function getGroqKey() { return window.GROQ_API_KEY || localStorage.getItem(GROQ_KEY_STORAGE) || ''; }
+const GROQ_OCR_MODEL = 'qwen/qwen3.6-27b'; // llama-4-scout deprecated June 17 2026
+
 const GROQ_OCR_PROMPT = `You are reading a Nigerian school attendance/fee register photo.
 Columns: SERIAL NO | SURNAME | FIRST NAME | (other columns — ignore them).
 The image may be at any angle — read it correctly.
@@ -226,107 +159,322 @@ Rules:
 
 {"names":["OGUNLADE GABRIEL","KASALI RASAQ","ALAWODE SUCCESS"]}`;
 
-async function _getOcrKeys() {
-  if (_ocrKeys) return _ocrKeys;
+const HF_OCR_MODEL = 'Qwen/Qwen2.5-VL-7B-Instruct';
+const HF_KEY_STORAGE = 'hf_api_key';
+function getHFKey() { return window.HF_API_KEY || localStorage.getItem(HF_KEY_STORAGE) || ''; }
+
+// Keys sync from Firestore admin_settings/main — survives browsing-data clears
+async function _fetchGroqKeyFromFirestore() {
+  if (!db) return;
   try {
-    const sd = await db.collection('admin_settings').doc('main').get();
-    if (sd.exists) { _ocrKeys={groqKey:sd.data().groqApiKey||'',hfKey:sd.data().hfApiKey||''}; return _ocrKeys; }
-  } catch(e){ console.warn('OCR key fetch:',e.message); }
-  return (_ocrKeys={groqKey:'',hfKey:''});
+    const snap = await db.collection('admin_settings').doc('main').get();
+    if (snap.exists) {
+      const d = snap.data();
+      const groqKey = d.groqApiKey || '';
+      if (groqKey) {
+        window.GROQ_API_KEY = groqKey;
+        localStorage.setItem(GROQ_KEY_STORAGE, groqKey);
+        console.log('✅ Groq key loaded from Firestore');
+      }
+      const hfKey = d.hfApiKey || '';
+      if (hfKey) {
+        window.HF_API_KEY = hfKey;
+        localStorage.setItem(HF_KEY_STORAGE, hfKey);
+        console.log('✅ HF key loaded from Firestore');
+      }
+    }
+  } catch(e) { /* offline — use whatever is in localStorage */ }
+}
+
+async function hfVisionOCR(base64, mime) {
+  const hfKey = getHFKey();
+  if (!hfKey) throw new Error('No HF API key — enter it in portal Settings');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  let resp;
+  try {
+    resp = await fetch(
+      'https://api-inference.huggingface.co/models/' + HF_OCR_MODEL + '/v1/chat/completions',
+      {
+        method: 'POST', signal: controller.signal,
+        headers: { 'Authorization': 'Bearer ' + hfKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: HF_OCR_MODEL,
+          messages: [{ role: 'user', content: [
+            { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + base64 } },
+            { type: 'text', text: GROQ_OCR_PROMPT }
+          ]}],
+          max_tokens: 600
+        })
+      }
+    );
+    clearTimeout(timer);
+  } catch(fe) { clearTimeout(timer); throw new Error('HF network error: ' + fe.message); }
+  if (resp.status === 503) {
+    const ed = await resp.json().catch(() => ({}));
+    const wait = Math.min(Math.ceil(ed.estimated_time || 25), 45);
+    const ld = document.getElementById('csv-loading');
+    for (let s = wait; s > 0; s--) {
+      if (ld) ld.textContent = '\ud83e\udd17 HF model loading \u2014 ready in ' + s + 's...';
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    const ctrl2 = new AbortController();
+    const t2 = setTimeout(() => ctrl2.abort(), 45000);
+    try {
+      resp = await fetch(
+        'https://api-inference.huggingface.co/models/' + HF_OCR_MODEL + '/v1/chat/completions',
+        { method:'POST', signal:ctrl2.signal,
+          headers:{'Authorization':'Bearer '+hfKey,'Content-Type':'application/json'},
+          body: JSON.stringify({model:HF_OCR_MODEL,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+base64}},{type:'text',text:GROQ_OCR_PROMPT}]}],temperature:0.2,max_tokens:600})
+        }
+      );
+      clearTimeout(t2);
+    } catch(fe2){ clearTimeout(t2); throw new Error('HF retry failed: '+fe2.message); }
+  }
+  if (!resp.ok) {
+    const ed = await resp.json().catch(() => ({}));
+    throw new Error('HF ' + resp.status + ': ' + (ed.error?.message || resp.statusText));
+  }
+  const data = await resp.json();
+  let text = data.choices?.[0]?.message?.content || '';
+  if (!text.trim()) throw new Error('HF returned empty response');
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  let jsonStr = text.trim();
+  const cb = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/); if (cb) jsonStr = cb[1].trim();
+  const ow = jsonStr.match(/\{[\s\S]*"students"\s*:\s*(\[[\s\S]*\])\s*\}/); if (ow) jsonStr = ow[1].trim();
+  const am = jsonStr.match(/(\[[\s\S]*\])/); if (am) jsonStr = am[1].trim();
+  let students;
+  try { students = JSON.parse(jsonStr); }
+  catch(_) {
+    const fb = extractNamesFromText(text);
+    return fb.map(n => { const p=n.trim().toUpperCase().split(/\s+/); return {surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n.trim().toUpperCase()}; }).filter(s=>s.fullName.length>=3);
+  }
+  if (!Array.isArray(students) || !students.length) throw new Error('HF returned 0 students');
+  return students.map(s => {
+    if (typeof s === 'string') {
+      const parts = s.trim().toUpperCase().split(/\s+/);
+      return { surname: parts[0]||'', firstname: parts.slice(1).join(' ')||'', fullName: s.trim().toUpperCase() };
+    }
+    const sur=(s.surname||'').trim().toUpperCase(), fst=(s.firstname||s.first_name||s.firstName||'').trim().toUpperCase();
+    const full=(s.fullName||s.full_name||'').trim().toUpperCase()||(sur+' '+fst).trim();
+    return {surname:sur, firstname:fst, fullName:full};
+  }).filter(s=>s.fullName.length>=2);
+}
+
+async function ocrSpaceOCR(base64, mime) {
+  const tryEngine = async (engine) => {
+    const fd = new FormData();
+    fd.append('base64Image', 'data:' + mime + ';base64,' + base64);
+    fd.append('language', 'eng');
+    fd.append('OCREngine', String(engine));
+    fd.append('isTable', 'true');
+    fd.append('apikey', 'helloworld');
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30000);
+    const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd, signal: ctrl.signal });
+    clearTimeout(t);
+    const data = await resp.json();
+    if (data.IsErroredOnProcessing) throw new Error('OCR.space E' + engine + ': ' + (data.ErrorMessage?.[0] || 'error'));
+    const text = (data.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
+    if (!text.trim()) throw new Error('OCR.space E' + engine + ' returned empty text');
+    return extractNamesFromText(text);
+  };
+  try { return await tryEngine(3); }
+  catch(e3) {
+    console.warn('OCR.space E3 failed:', e3.message, '— trying E2');
+    return await tryEngine(2);
+  }
+}
+
+async function groqVisionOCR(base64, mime, _retry) {
+  if (_retry === undefined) _retry = 0;
+  const apiKey = getGroqKey();
+  if (!apiKey) throw new Error('No Groq API key');
+
+  const controller = new AbortController();
+  const fetchTimer = setTimeout(() => controller.abort(), 45000);
+
+  let resp;
+  try {
+    resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify({
+        model: GROQ_OCR_MODEL,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + base64 } },
+            { type: 'text', text: GROQ_OCR_PROMPT }
+          ]
+        }],
+        temperature: 0.2,
+        max_tokens:  600,
+        reasoning_effort: "none",
+        response_format: { type: "json_object" }
+      })
+    });
+    clearTimeout(fetchTimer);
+  } catch (fetchErr) {
+    clearTimeout(fetchTimer);
+    if (fetchErr.name === 'AbortError') {
+      if (_retry >= 2) throw new Error('Groq timed out — page skipped (slow connection or server busy)');
+      const ld = document.getElementById('csv-loading');
+      for (let s = 25; s > 0; s--) {
+        if (ld) ld.textContent = '⏳ Groq slow — retrying in ' + s + 's... (' + (_retry + 1) + '/2)';
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      return groqVisionOCR(base64, mime, _retry + 1);
+    }
+    if (_retry < 2) {
+      const ld = document.getElementById('csv-loading');
+      for (let s = 15; s > 0; s--) {
+        if (ld) ld.textContent = '⏳ Network error — retrying in ' + s + 's... (' + (_retry + 1) + '/2)';
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      return groqVisionOCR(base64, mime, _retry + 1);
+    }
+    throw fetchErr;
+  }
+
+  if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
+    if (_retry >= 2) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error((errData.error && errData.error.message) || 'Groq unavailable — page skipped, try rescanning.');
+    }
+    const is429 = resp.status === 429;
+    const resetRaw = is429 ? (resp.headers.get('x-ratelimit-reset-tokens') || '65') : '25';
+    const waitSecs = Math.ceil(parseFloat(resetRaw)) + 5;
+    const reason = is429 ? 'rate limit' : 'over capacity';
+    const ld = document.getElementById('csv-loading');
+    for (let s = waitSecs; s > 0; s--) {
+      if (ld) ld.textContent = '⏳ Groq ' + reason + ' — retrying in ' + s + 's... (' + (_retry + 1) + '/2)';
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    return groqVisionOCR(base64, mime, _retry + 1);
+  }
+
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error('Groq API key invalid — check Settings');
+  }
+
+  if (!resp.ok) {
+    const errData = await resp.json().catch(() => ({}));
+    throw new Error((errData.error && errData.error.message) || ('Groq ' + resp.status));
+  }
+
+  const data = await resp.json();
+  let text = data.choices?.[0]?.message?.content || '';
+  if (!text.trim()) throw new Error('Groq returned empty response');
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  let jsonStr = text.trim();
+  const cb = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/); if (cb) jsonStr = cb[1].trim();
+  let parsed;
+  try { parsed = JSON.parse(jsonStr); }
+  catch(_) {
+    const fallbackNames = (typeof extractNamesFromText === 'function') ? extractNamesFromText(text) : [];
+    return fallbackNames.map(n => { const p=n.trim().toUpperCase().split(/\s+/); return {surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n.trim().toUpperCase()}; }).filter(s=>s.fullName.length>=3);
+  }
+  const names = Array.isArray(parsed) ? parsed : (parsed.names || parsed.students || []);
+  if (!Array.isArray(names) || !names.length) throw new Error('Groq returned 0 names');
+  return names.map(n => {
+    if (typeof n === 'string') {
+      const p = n.trim().toUpperCase().split(/\s+/);
+      return { surname: p[0]||'', firstname: p.slice(1).join(' ')||'', fullName: n.trim().toUpperCase() };
+    }
+    const sur=(n.surname||'').trim().toUpperCase(), fst=(n.firstname||n.first_name||n.firstName||'').trim().toUpperCase();
+    const full=(n.fullName||n.full_name||'').trim().toUpperCase()||(sur+' '+fst).trim();
+    return {surname:sur, firstname:fst, fullName:full};
+  }).filter(s=>s.fullName.length>=2);
 }
 
 async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
   return new Promise(resolve => {
     const reader = new FileReader();
+
     reader.onload = async ev => {
-      const imgData = ev.target.result;
-      ocrOverlayThumb(imgData); ocrOverlayPages(pageNum, total);
-      ocrOverlayStep('load','Image loaded — preparing...',20);
-      const resizedUrl = await new Promise(res => {
-        const img=new Image();
-        img.onload=()=>{
-          const s=Math.min(1,800/Math.max(img.width,img.height));
-          const c=document.createElement('canvas');
-          c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
-          c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-          res(c.toDataURL('image/jpeg',0.85));
-        };
-        img.onerror=()=>res(imgData); img.src=imgData;
-      });
-      const b64=resizedUrl.split(',')[1];
-      const {groqKey,hfKey}=await _getOcrKeys();
-      const parseAiNames=rawText=>{
-        let text=rawText.replace(/<think>[\s\S]*?<\/think>/gi,'').trim(),arr=[];
-        try{
-          const cb=text.match(/```(?:json)?\s*([\s\S]*?)```/);if(cb)text=cb[1].trim();
-          const p=JSON.parse(text);arr=p.names||p.students||(Array.isArray(p)?p:[]);
-        }catch(e){
-          const fb=(typeof extractNigerianNames==='function'?extractNigerianNames(text):extractStudentNames(text));
-          return fb.map(n=>{const p=n.split(/\s+/);return{surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n};});
-        }
-        return arr.map(e=>{
-          if(typeof e==='string'){const p=e.trim().toUpperCase().split(/\s+/);return{surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:e.trim().toUpperCase()};}
-          const sur=(e.surname||'').trim().toUpperCase(),fst=(e.firstname||e.firstName||'').trim().toUpperCase();
-          return{surname:sur,firstname:fst,fullName:(e.fullName||sur+' '+fst).trim().toUpperCase()};
-        }).filter(s=>s.fullName.length>=2);
-      };
-      const callHF=async()=>{
-        if(!hfKey)throw new Error('No HF key');
-        const HF_MODEL='Qwen/Qwen2.5-VL-7B-Instruct';
-        const HF_URL='https://api-inference.huggingface.co/models/'+HF_MODEL+'/v1/chat/completions';
-        const HF_BODY=JSON.stringify({model:HF_MODEL,temperature:0.2,max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:GROQ_OCR_PROMPT}]}]});
-        const hfFetch=async ms=>{
-          const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),ms);
-          const r=await fetch(HF_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+hfKey},body:HF_BODY,signal:ctrl.signal});
-          clearTimeout(t);return r;
-        };
-        let resp=await hfFetch(60000);
-        if(resp.status===503){
-          const eb=await resp.json().catch(()=>({}));
-          const wait=Math.min(Math.ceil(eb.estimated_time||25),45);
-          for(let s=wait;s>0;s--){ocrOverlayStep('scan','🤗 HF model loading — ready in '+s+'s...',35);await new Promise(r=>setTimeout(r,1000));}
-          resp=await hfFetch(60000);
-        }
-        if(!resp.ok)throw new Error('HF HTTP '+resp.status);
-        const data=await resp.json();
-        return parseAiNames(data.choices?.[0]?.message?.content||'');
-      };
-      if(!skipGroq&&groqKey){
-        try{
-          ocrOverlayStep('upload','Groq Vision scanning (page '+pageNum+'/'+total+')...',50);
-          const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),45000);
-          const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({model:'qwen/qwen3.6-27b',reasoning_effort:'none',temperature:0.2,max_tokens:600,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+b64}},{type:'text',text:GROQ_OCR_PROMPT}]}]})});
-          clearTimeout(t);
-          if(resp.status===401||resp.status===403){ocrOverlayStep('error','⚠️ Groq key invalid',100);resolve([]);return;}
-          if(resp.ok){const data=await resp.json();const raw=(data.choices?.[0]?.message?.content||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();const names=parseAiNames(raw);if(names.length){ocrOverlayStep('done','✅ '+names.length+' names — Groq (page '+pageNum+')',100);resolve(names);return;}}
-        }catch(e){console.warn('School Groq p'+pageNum+':',e.message);}
+      try {
+      const imgData = await resizeImageForOCR(ev.target.result);
+      const b64    = imgData.split(',')[1];
+      let mime = file.type || '';
+      if (!mime || mime === 'application/octet-stream' || mime === 'application/unknown') {
+        mime = 'image/jpeg';
       }
-      try{
-        ocrOverlayStep('scan','🤗 '+(skipGroq?'HuggingFace scanning':'Trying HuggingFace')+' (page '+pageNum+'/'+total+')...',skipGroq?30:70);
-        const names=await callHF();
-        if(names.length){ocrOverlayStep('read','🤗 HF: '+names.length+' names (page '+pageNum+')',100);resolve(names);return;}
-      }catch(e){console.warn('School HF p'+pageNum+':',e.message);ocrOverlayStep('scan','🤗 HF done, trying OCR.space...',80);}
-      try{
-        ocrOverlayStep('upload','Uploading to OCR.space...',40);
-        const ocrParams=new URLSearchParams({base64image:resizedUrl,language:'eng',apikey:'helloworld',OCREngine:'2',scale:'true',detectOrientation:'true',filetype:'JPG'});
-        ocrOverlayStep('read','OCR.space reading...',60);
-        const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),30000);
-        const resp=await fetch('https://api.ocr.space/parse/image',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:ocrParams.toString(),signal:ctrl.signal});
-        clearTimeout(t);
-        if(!resp.ok)throw new Error('HTTP '+resp.status);
-        const result=await resp.json();
-        if(result.IsErroredOnProcessing)throw new Error((result.ErrorMessage||[]).join('; '));
-        const text=(result.ParsedResults||[]).map(r=>r.ParsedText||'').join('\n');
-        if(text.trim().length>2){
-          const names=(typeof extractNigerianNames==='function'?extractNigerianNames(text):extractStudentNames(text));
-          if(names.length){ocrOverlayStep('done','✅ '+names.length+' names — OCR.space (page '+pageNum+')',100);resolve(names.map(n=>{const p=n.split(/\s+/);return{surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n};}));return;}
+
+      ocrOverlayThumb(imgData);
+      ocrOverlayStep('load', skipGroq ? '🤗 Preparing HuggingFace (page ' + pageNum + ')...' : 'Image loaded — sending to Groq Vision...', 20);
+      ocrOverlayPages(pageNum, total);
+
+      const groqKey = getGroqKey();
+      if (!groqKey && !skipGroq) {
+        _lastOcrError = 'Groq API key not set — go to Settings and paste your key';
+        ocrOverlayStep('error', '⚠️ No Groq key — tap Settings → paste your key → Save', 100);
+        resolve([]); return;
+      }
+      if (!skipGroq || !getHFKey()) {
+        try {
+          ocrOverlayStep('upload', 'Groq Vision scanning (page ' + pageNum + '/' + total + ')...', 50);
+          const names = await groqVisionOCR(b64, mime);
+          if (names && names.length) {
+            ocrOverlayStep('done', '✅ ' + names.length + ' names found (page ' + pageNum + ')', 100);
+            resolve(names); return;
+          }
+          _lastOcrError = 'Groq returned 0 names';
+        } catch (e) {
+          _lastOcrError = e.message || 'Groq Vision failed';
+          console.error('Groq Vision error (page ' + pageNum + '):', _lastOcrError);
+          if (_lastOcrError.includes('invalid') || _lastOcrError.includes('401') || _lastOcrError.includes('auth')) {
+            ocrOverlayStep('error', '⚠️ Groq key invalid — go to Settings → re-enter key', 100);
+            resolve([]); return;
+          }
         }
-      }catch(e){console.warn('School OCR.space p'+pageNum+':',e.message);}
-      ocrOverlayStep('error','⚠️ Could not read page '+pageNum+' — try clearer photo',100);
+      }
+      try {
+        const hfLabel = skipGroq ? 'HuggingFace scanning' : 'Trying HuggingFace';
+        ocrOverlayStep('scan', '🤗 ' + hfLabel + ' (page ' + pageNum + '/' + total + ')...', skipGroq ? 30 : 70);
+        const hfResult = await hfVisionOCR(b64, mime);
+        if (hfResult && hfResult.length > 0) {
+          ocrOverlayStep('read', '🤗 HF: ' + hfResult.length + ' names (page ' + pageNum + ')', 100);
+          resolve(hfResult); return;
+        }
+      } catch (hfErr) {
+        const hfMsg = hfErr.message.includes('No HF API key')
+          ? '⚠️ No HF key in portal Settings — trying OCR.space'
+          : ('🤗 HF failed (' + hfErr.message.slice(0,40) + ') — trying OCR.space');
+        console.warn('HF fallback:', hfErr.message);
+        ocrOverlayStep('scan', hfMsg, 80);
+      }
+      try {
+        const ocrNames = await ocrSpaceOCR(b64, mime);
+        if (ocrNames && ocrNames.length > 0) {
+          const mapped = ocrNames.map(name => {
+            const parts = name.trim().toUpperCase().split(/\s+/);
+            return { surname: parts[0]||'', firstname: parts.slice(1).join(' ')||'', fullName: name.trim().toUpperCase() };
+          }).filter(s => s.fullName.length >= 3);
+          if (mapped.length > 0) {
+            ocrOverlayStep('read', '📄 OCR.space: ' + mapped.length + ' names (page ' + pageNum + ')', 100);
+            resolve(mapped); return;
+          }
+        }
+      } catch (ocrErr) {
+        console.warn('OCR.space fallback failed:', ocrErr.message);
+      }
+      ocrOverlayStep('error', '⚠️ All OCR failed: ' + _lastOcrError.slice(0, 60), 100);
+      resolve([]);
+      } catch(fatal) { console.error('_readOnePage fatal:', fatal.message||String(fatal)); resolve([]); }
+    };
+
+    reader.onerror = () => {
+      _lastOcrError = 'Could not read file';
+      ocrOverlayStep('error', '❌ Could not read file — use an image or PDF', 100);
       resolve([]);
     };
-    reader.onerror=()=>{ocrOverlayStep('error','❌ Could not read file',100);resolve([]);;};
-    ocrOverlayStep('load','Reading file...',10);
+
+    ocrOverlayStep('load', 'Reading file...', 10);
     reader.readAsDataURL(file);
   });
 }
@@ -351,7 +499,6 @@ function looksLikeValidName(str) {
   const t = (str || '').trim();
   if (!t || t.length < 2) return false;
   if (!/[a-zA-Z]/.test(t)) return false;
-  // Allow digits only if looks like a balance annotation — strip those first
   const noDigits = t.replace(/\d+/g, '').trim();
   if (noDigits.length < 2) return false;
   const low = t.toLowerCase();
@@ -360,9 +507,7 @@ function looksLikeValidName(str) {
   if (words.length > 6) return false;
   const alpha = t.replace(/[^a-zA-Z]/g, '');
   if (alpha.length < 3) return false;
-  // Nigerian names are ALL-CAPS from handwritten registers — normalise before checking
   const isAllCaps = alpha === alpha.toUpperCase();
-  // Allow up to 8 consonants in a row for Yoruba/Hausa/Igbo names (e.g. AKINWANDE, GBELEGKALE)
   const consonantRun = (t.match(/[^aeiouAEIOU\s.,'\'\-]{9,}/g) || []);
   if (consonantRun.length > 0) return false;
   const hasRealWord = words.some(w => {
@@ -371,15 +516,13 @@ function looksLikeValidName(str) {
   });
   if (!hasRealWord) return false;
   if (VALID_PREFIXES.test(t)) return true;
-  // Accept all-caps words of 3+ letters (Nigerian register format)
   if (isAllCaps && alpha.length >= 3) return true;
   const hasProperNoun = words.some(w => w.length >= 3 && /^[A-Z]/.test(w) && /[a-z]/.test(w));
   return hasProperNoun;
 }
 
-
 // ── Nigerian Name Extractor — handles ALL-CAPS handwritten registers ──────
-// Understands: numbered rows, two-column (surname + firstname), balance notes
+
 function extractNigerianNames(raw) {
   // ── Step 1: clean all lines ───────────────────────────────────────────
   const allLines = (raw || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -403,7 +546,8 @@ function extractNigerianNames(raw) {
          .replace(/\s+/g, ' ')
          .trim();
 
-    // ── Merge OCR column-split artifacts: "RASA Q" → "RASAQ"
+    // ── Merge OCR column-split artifacts: "RASA Q" → "RASAQ", "OGUND EI" → "OGUNDEI"
+    // When a word of 3+ letters is followed by 1-2 isolated letters, merge them
     c = c.replace(/\b([A-Z]{3,})\s+([A-Z]{1,2})\b(?!\s+[A-Z]{3,})/g, '$1$2');
 
     if (!c || c.length < 2) return null;
@@ -502,19 +646,26 @@ function extractStudentNames(raw) {
       if (col) candidates.push(col);
       return;
     }
-    const stripped = t.replace(/^\d+[.):\s]+/, '').replace(/^[-*•]\s*/, '').trim();
-    if (stripped) candidates.push(stripped);
+    const stripped = t.replace(/^\d+[.)\s]+/, '').replace(/^[-\u2022*]\s*/, '').trim();
+    if (!stripped || stripped.length < 2) return;
+    if (/^\d+$/.test(stripped.replace(/[,.\-]/g, ''))) return;
+    if (looksLikeValidName(stripped)) candidates.push(stripped);
   });
+  // Deduplicate
   const seen = new Set();
-  const result = [];
-  candidates.forEach(rawName => {
-    const n = rawName.replace(/\s+/g, ' ').trim();
+  return candidates.filter(n => {
     const key = n.toLowerCase().replace(/[^a-z]/g, '');
-    if (!key || seen.has(key)) return;
-    if (looksLikeValidName(n)) { seen.add(key); result.push(n); }
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-  return result;
 }
+
+// Alias used by hfVisionOCR / ocrSpaceOCR fallback text parsing
+function extractNamesFromText(raw) {
+  return extractNigerianNames(raw);
+}
+
 
 // ── State ──────────────────────────────────────────────────────────────────
 let schoolId = null, userRole = null, currentStaff = null;
@@ -996,6 +1147,8 @@ function startApp() {
   }
 
   SQ.ping();
+  // Pull Groq/HF OCR keys from admin_settings — survives browsing-data clears
+  _fetchGroqKeyFromFirestore();
   const firstTabs = { Principal: 'revenue', Bursar: 'revenue', 'Class Teacher': 'students', 'Subject Teacher': 'scorecard' };
   go(firstTabs[userRole] || 'revenue');
   setTimeout(() => SQ.flush(), 500);
@@ -1451,201 +1604,144 @@ function handleCSV(e) {
   }
 }
 
-// ── Gemini API key prompt — shown when OCR is attempted without a key ─────
-function showGeminiKeyPrompt(onProceed) {
-  const existing = document.getElementById('gemini-key-modal');
-  if (existing) existing.remove();
-
-  const modal = document.createElement('div');
-  modal.id = 'gemini-key-modal';
-  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);display:flex;align-items:flex-end;justify-content:center;';
-  modal.innerHTML = `
-    <div style="background:var(--bg);border-radius:20px 20px 0 0;padding:1.5rem 1.2rem 2rem;width:100%;max-width:520px;animation:slideup 0.25s ease;">
-      <div style="font-size:1.05rem;font-weight:800;margin-bottom:0.4rem;">🤖 Better OCR Available</div>
-      <p style="font-size:0.82rem;color:var(--sub);margin:0 0 1rem;line-height:1.6;">
-        Without a <strong>Gemini API key</strong>, OCR.space will be used — it struggles with <em>rotated handwritten Nigerian registers</em> and may produce 40–60% spelling errors.<br><br>
-        With Gemini, accuracy jumps to ~85–95% and it understands Nigerian names.
-      </p>
-      <div style="background:var(--s2);border-radius:12px;padding:0.9rem;margin-bottom:1rem;">
-        <div style="font-size:0.78rem;font-weight:700;color:var(--text);margin-bottom:0.5rem;">🔑 Enter Gemini API Key (free)</div>
-        <input id="gemini-key-input" type="password" placeholder="AIzaSy..."
-          style="width:100%;padding:0.6rem 0.75rem;border:1.5px solid var(--border);border-radius:9px;font-size:0.82rem;background:var(--bg);color:var(--text);font-family:inherit;box-sizing:border-box;">
-        <div style="font-size:0.72rem;color:var(--sub);margin-top:0.4rem;">
-          Get a free key at <strong>aistudio.google.com</strong> → Create API Key
-        </div>
-      </div>
-      <div style="display:flex;gap:0.6rem;">
-        <button onclick="saveGeminiKeyAndProceed()" 
-          class="btn-brand" style="flex:1;padding:0.75rem;font-size:0.88rem;">
-          ✅ Save Key & Scan
-        </button>
-        <button onclick="skipGeminiKey()" 
-          style="flex:1;padding:0.75rem;font-size:0.82rem;border:1.5px solid var(--border);border-radius:12px;background:var(--bg);color:var(--sub);cursor:pointer;">
-          ⚠️ Continue Without Key
-        </button>
-      </div>
-      <button onclick="document.getElementById('gemini-key-modal').remove()"
-        style="display:block;width:100%;text-align:center;margin-top:0.75rem;background:none;border:none;color:var(--sub);font-size:0.78rem;cursor:pointer;">Cancel</button>
-    </div>`;
-  document.body.appendChild(modal);
-
-  // Store callback for after key save
-  window._geminiKeyCallback = onProceed;
-}
-
-function saveGeminiKeyAndProceed() {
-  const inp = document.getElementById('gemini-key-input');
-  const key = (inp?.value || '').trim();
-  if (!key || !key.startsWith('AIza')) {
-    inp.style.borderColor = '#ef4444';
-    inp.placeholder = 'Must start with AIza... — check your key';
-    return;
-  }
-  // Save to localStorage for this session
-  localStorage.setItem('gemini_api_key', key);
-  // Inject into runtime — update the GEMINI_KEY variable equivalent
-  window.GEMINI_API_KEY = key;
-  // Also patch: reload won't be needed since geminiOCR reads GEMINI_KEY at call time
-  // We need to update the const — but since it's const we use a workaround via window
-  document.getElementById('gemini-key-modal').remove();
-  toast('✅ Gemini key saved — scanning with AI...');
-  // Small delay then run
-  setTimeout(() => {
-    if (window._geminiKeyCallback) { window._geminiKeyCallback(); window._geminiKeyCallback = null; }
-  }, 300);
-}
-
-function skipGeminiKey() {
-  document.getElementById('gemini-key-modal').remove();
-  toast('⚠️ Using OCR.space — results may need heavy editing');
-  if (window._geminiKeyCallback) { window._geminiKeyCallback(); window._geminiKeyCallback = null; }
-}
 
 let _ocrPending = [];
 
+// ── Sequential multi-image processor — identical page-looping/dedup logic
+// to the Bloom Agent OCR pipeline. Ends by opening the shared review modal
+// directly (no agent-specific commission/tier card here).
 async function processImagesSequentially(files) {
-  const fbEl=$('csv-fb');_ocrPending=[];
-  _ocrKeys=null; await _getOcrKeys();
-  if(files.length>0)ocrOverlayShow(files[0].name||'image');
-  const GROQ_DELAY=15;
-  for(let i=0;i<files.length;i++){
-    if(i>0){
-      for(let s=GROQ_DELAY;s>0;s--){ocrOverlayStep('scan','⏳ '+s+'s before page '+(i+1)+' of '+files.length+'...',10);await new Promise(r=>setTimeout(r,1000));}
-      const fn=document.getElementById('ocr-filename');if(fn)fn.textContent=files[i].name||'Image '+(i+1);
+  const fbEl = $('csv-fb');
+  const allNames = [];
+  const _seen = new Set();
+  const GROQ_DELAY_S = 15;
+  if (files.length > 0) ocrOverlayShow(files[0].name || 'image');
+  for (let i = 0; i < files.length; i++) {
+    if (i > 0 && files.length > 1) {
+      for (let s = GROQ_DELAY_S; s > 0; s--) {
+        if (fbEl) fbEl.textContent = '⏳ Cooling down (' + s + 's) before page ' + (i + 1) + ' of ' + files.length + '...';
+        const fn = document.getElementById('ocr-filename'); if (fn) fn.textContent = files[i].name || 'Image ' + (i + 1);
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
-    if(fbEl)fbEl.textContent='📸 Reading page '+(i+1)+' of '+files.length+'...';
-    const names=await _readOnePage(files[i],i+1,files.length,fbEl,false);
-    _ocrPending.push(...names);
+    if (fbEl) fbEl.textContent = '📸 Reading page ' + (i + 1) + ' of ' + files.length + '...';
+    const pageNames = await _readOnePage(files[i], i + 1, files.length, fbEl, false);
+    pageNames.forEach(n => {
+      const full = (n.fullName || (n.surname + ' ' + n.firstname)).trim().toUpperCase();
+      const key  = full.replace(/[^A-Z]/g, '');
+      if (full.length >= 2 && !_seen.has(key)) { _seen.add(key); allNames.push(full); }
+    });
   }
-  if(!_ocrPending.length){ocrOverlayHide(2000);if(fbEl)fbEl.textContent='❌ Could not read any names. Try clearer photo.';return;}
-  const existingKeys=new Set(SD.students.map(s=>s.name.toLowerCase().replace(/[^a-z]/g,'')));
-  _ocrPending=_ocrPending.filter(n=>{const k=(n.fullName||'').toLowerCase().replace(/[^a-z]/g,'');return k.length>1&&!existingKeys.has(k);});
-  const tot=_ocrPending.length;
-  if(fbEl)fbEl.textContent='✅ Found '+tot+' name'+(tot!==1?'s':'')+' — review below.';
-  ocrOverlayStep('done','✅ '+tot+' name'+(tot!==1?'s':'')+' ready to review',100);
-  setTimeout(()=>{ocrOverlayHide(0);ocrShowReview(_ocrPending);},900);
+  ocrOverlayHide(800);
+  if (!allNames.length) {
+    if (fbEl) fbEl.textContent = '❌ Could not read any names. Try clearer photo.';
+    const _ed = _lastOcrError ? ('\n\nError: ' + _lastOcrError.slice(0,150)) : '';
+    alert('No student names found in any image.' + _ed + '\n\nTips:\n• Hold phone directly above the register\n• Flatten the page fully\n• Use good lighting (avoid shadows)\n• Make sure all columns are visible');
+    return;
+  }
+  // Remove names that already exist in the roster
+  const existingKeys = new Set(SD.students.map(s => s.name.toLowerCase().replace(/[^a-z]/g, '')));
+  const fresh = allNames.filter(n => {
+    const k = n.toLowerCase().replace(/[^a-z]/g, '');
+    return k.length > 1 && !existingKeys.has(k);
+  });
+  if (fbEl) fbEl.textContent = '✅ Found ' + fresh.length + ' name' + (fresh.length !== 1 ? 's' : '') + ' — review below.';
+  setTimeout(() => { openOcrReviewModal(fresh); }, 250);
 }
 
+// ── OCR Review Modal — exact copy of the Bloom Agent review UI, including
+// the invisible-text fix (explicit colors) and the delete-button width fix
+// (global `button{width:100%}` was stretching the ✕ button over the name field).
+let _ocrReviewData = [];
 
-function ocrShowReview(names) {
-  const modal = $('ocr-review-modal');
-  const list  = $('ocr-review-list');
-  const info  = $('ocr-review-info');
-  if (!modal || !list) { console.error('OCR review modal not found in HTML'); return; }
-
-  // Pre-filter: remove entries that have no usable name content
-  const validNames = names.filter(n => {
-    const full = (n.fullName || n.surname || '').trim();
-    return full.length >= 2 && /[a-zA-Z]{2,}/.test(full);
-  });
-  if (info) info.textContent = `${validNames.length} name${validNames.length!==1?'s':''} found. ✏️ Edit wrong names, ✕ delete bad ones, then tap Add Students.`;
-
-  // DOM-based row building (createElement/appendChild) — same pattern as
-  // bloom-agent, avoids the innerHTML string-concat failure on Android/Brave.
-  while (list.firstChild) list.removeChild(list.firstChild);
-  validNames.forEach((n, i) => {
-    const sur = (n.surname  || '').trim().toUpperCase();
-    const fst = (n.firstname|| '').trim().toUpperCase();
-    const fullName = (n.fullName || (sur + ' ' + fst)).trim().replace(/\s+/g,' ');
-
-    const row = document.createElement('div');
-    row.className = 'ocr-row';
-    row.id = 'ocr-row-' + i;
-    row.style.cssText = 'display:flex;gap:4px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--border);';
-
-    const chk = document.createElement('input');
-    chk.type = 'checkbox'; chk.id = 'ocr-chk-' + i; chk.checked = true;
-    chk.style.cssText = 'width:18px !important;height:18px !important;padding:0 !important;margin:0 !important;flex-shrink:0;cursor:pointer;';
-    chk.onchange = ocrUpdateCount;
-
-    const ni = document.createElement('input');
-    ni.type = 'text'; ni.id = 'ocr-name-' + i; ni.value = fullName;
-    ni.style.cssText = 'flex:1 1 0%;width:auto !important;min-width:0 !important;margin:0 !important;padding:3px 6px !important;font-size:0.78rem;text-transform:uppercase;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box;';
-
-    const ci = document.createElement('input');
-    ci.type = 'text'; ci.id = 'ocr-cls-' + i; ci.placeholder = 'Class';
-    ci.style.cssText = 'width:64px !important;flex-shrink:0;margin:0 !important;padding:3px 5px !important;font-size:0.74rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box;';
-
-    const db = document.createElement('button');
-    db.textContent = '✕';
-    db.style.cssText = 'background:#fef2f2;border:1px solid #fecaca;border-radius:5px;padding:2px 7px;cursor:pointer;font-size:0.72rem;color:#dc2626;flex-shrink:0;';
-    db.onclick = () => { row.remove(); ocrUpdateCount(); };
-
-    row.appendChild(chk); row.appendChild(ni); row.appendChild(ci); row.appendChild(db);
-    list.appendChild(row);
-  });
-
-  ocrUpdateCount();
+function openOcrReviewModal(parsedNames) {
+  _ocrReviewData = (parsedNames || []).map(p => {
+    const nm = typeof p === 'string' ? p : (p.name || p.fullName || '');
+    return { name: nm.trim().toUpperCase(), cls: '', sel: true };
+  }).filter(r => r.name.length > 1);
+  _renderOcrReviewList();
   openM('ocr-review-modal');
 }
 
-function ocrUpdateCount() {
-  const checked = document.querySelectorAll('#ocr-review-list input[type=checkbox]:checked').length;
-  const total   = document.querySelectorAll('#ocr-review-list .ocr-row').length;
-  const btn = $('ocr-confirm-btn');
-  const info = $('ocr-review-info');
-  if (btn) btn.textContent = `✅ Add ${checked} Student${checked!==1?'s':''} →`;
-  if (info) info.textContent = `${checked} of ${total} selected — edit names, set class, then tap Add.`;
+function _renderOcrReviewList() {
+  const c = document.getElementById('ocr-review-list');
+  if (!c) { console.error('[OCR Review] #ocr-review-list not found in DOM'); return; }
+  while (c.firstChild) c.removeChild(c.firstChild);
+  for (let i = 0; i < _ocrReviewData.length; i++) {
+    const r = _ocrReviewData[i];
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--border);';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = !!r.sel;
+    cb.style.cssText = 'width:18px;height:18px;flex-shrink:0;cursor:pointer;';
+    (function(idx){ cb.onchange = function(){ _ocrReviewData[idx].sel = this.checked; _ocrUpdateCount(); }; })(i);
+    const ni = document.createElement('input');
+    ni.type = 'text'; ni.value = r.name || ''; ni.autocomplete = 'off'; ni.setAttribute('autocapitalize','off');
+    ni.style.cssText = 'flex:1;margin:0;padding:3px 6px;font-size:0.78rem;min-width:0;text-transform:uppercase;border:1px solid #2d4562;border-radius:6px;background:#0f1d2e !important;color:#f0f6ff !important;-webkit-text-fill-color:#f0f6ff;caret-color:#f0f6ff;';
+    (function(idx){ ni.onchange = function(){ _ocrReviewData[idx].name = this.value.trim().toUpperCase(); }; })(i);
+    const ci = document.createElement('input');
+    ci.type = 'text'; ci.value = r.cls || ''; ci.placeholder = 'Class'; ci.autocomplete = 'off';
+    ci.style.cssText = 'width:64px;flex-shrink:0;margin:0;padding:3px 5px;font-size:0.74rem;border:1px solid #2d4562;border-radius:6px;background:#0f1d2e !important;color:#f0f6ff !important;-webkit-text-fill-color:#f0f6ff;caret-color:#f0f6ff;';
+    (function(idx){ ci.onchange = function(){ _ocrReviewData[idx].cls = this.value.trim(); }; })(i);
+    const db = document.createElement('button');
+    db.textContent = '\u2715';
+    db.style.cssText = 'width:auto;display:inline-block;flex:0 0 auto;background:#fef2f2;border:1px solid #fecaca;border-radius:5px;padding:2px 7px;cursor:pointer;font-size:0.72rem;color:#dc2626;flex-shrink:0;';
+    (function(idx){ db.onclick = function(){ _ocrDelRow(idx); }; })(i);
+    row.appendChild(cb); row.appendChild(ni); row.appendChild(ci); row.appendChild(db);
+    c.appendChild(row);
+  }
+  _ocrUpdateCount();
 }
-function ocrSelectAll(val) {
-  document.querySelectorAll('#ocr-review-list input[type=checkbox]').forEach(c => c.checked = val);
-  ocrUpdateCount();
+
+function _ocrUpdateCount() {
+  const n = _ocrReviewData.filter(r => r.sel).length;
+  const tot = _ocrReviewData.length;
+  const btn  = document.getElementById('ocr-confirm-btn');
+  const info = document.getElementById('ocr-review-info');
+  if (btn)  btn.textContent  = '\u2705 Add ' + n + ' Student' + (n !== 1 ? 's' : '') + ' \u2192';
+  if (info) info.textContent = n + ' of ' + tot + ' selected \u2014 edit names, set class, then tap Add.';
 }
+
+function _ocrDelRow(i) {
+  _ocrReviewData.splice(i, 1);
+  _renderOcrReviewList();
+}
+
+function ocrSelectAll(checked) {
+  _ocrReviewData.forEach(r => r.sel = checked);
+  _renderOcrReviewList();
+}
+
 function ocrSetClassAll() {
-  const cls = ($('ocr-class-all')?.value || '').trim(); if (!cls) return;
-  document.querySelectorAll('[id^=ocr-cls-]').forEach(el => { el.value = cls; });
+  const cls = (document.getElementById('ocr-class-all')?.value || '').trim();
+  if (!cls) return;
+  _ocrReviewData.forEach(r => { if (r.sel) r.cls = cls; });
+  _renderOcrReviewList();
 }
+
+// ── Confirm import — School-specific data handoff (SD.students / SQ.push).
+// The extraction + review UI above is identical to Bloom Agent; only this
+// final step differs, since School Bloom writes straight into the roster.
 async function ocrConfirmImport() {
-  const rows = document.querySelectorAll('#ocr-review-list .ocr-row');
+  const sel = _ocrReviewData.filter(r => r.sel && r.name && r.name.length > 1);
+  if (!sel.length) { alert('Select at least one name.'); return; }
   const existingKeys = new Set(SD.students.map(s => s.name.toLowerCase().replace(/[^a-z]/g, '')));
-  let added = 0; const fee = SD.config?.fee || 50000;
-  rows.forEach(row => {
-    const chk = row.querySelector('input[type=checkbox]');
-    if (!chk || !chk.checked) return;
-    const inputs = row.querySelectorAll('input[type=text]');
-    let name, cls;
-    if (inputs.length >= 3) {
-      // New format: surname | firstname | class
-      const sur = (inputs[0]?.value || '').trim().toUpperCase();
-      const fst = (inputs[1]?.value || '').trim().toUpperCase();
-      cls  = (inputs[2]?.value || '').trim();
-      name = fst ? sur + ' ' + fst : sur;
-    } else {
-      name = (inputs[0]?.value || '').trim();
-      cls  = (inputs[1]?.value || '').trim();
-    }
-    if (!name) return;
-    const key = name.toLowerCase().replace(/[^a-z]/g, '');
+  const fee = SD.config?.fee || 50000;
+  let added = 0;
+  sel.forEach(r => {
+    const key = r.name.toLowerCase().replace(/[^a-z]/g, '');
     if (existingKeys.has(key)) return;
-    SD.students.push({ name, phone: '', class: cls, totalFee: fee, paid: 0, scores: {}, swot: {} });
+    SD.students.push({ name: r.name, phone: '', class: r.cls || '', totalFee: fee, paid: 0, scores: {}, swot: {} });
     existingKeys.add(key); added++;
   });
-  if (!added) { alert('No names selected.'); return; }
+  if (!added) { alert('No new names to add (all already exist).'); return; }
   await SQ.push('students', SD.students); checkTierStatus();
   closeM('ocr-review-modal');
   renderStudentList(); renderBanner(); renderRevenue();
   const fbEl = $('csv-fb'); if (fbEl) fbEl.textContent = `✅ ${added} student${added!==1?'s':''} added successfully.`;
 }
+
+
 
 function importStudentsFromText(f) {
   const tryRead = (encoding) => new Promise((resolve, reject) => {
@@ -3328,7 +3424,7 @@ function socrPickPhoto(){$('socr-img-input')?.click();}
 async function socrHandleImage(event){
   const file=event.target.files[0]; if(!file) return;
   const statusEl=$('socr-status');
-  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Reading score sheet with Gemini...</span>';
+  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Reading score sheet with Groq...</span>';
   const reader=new FileReader();
   reader.onload=async ev=>{
     const b64=ev.target.result.split(',')[1];
@@ -3338,21 +3434,24 @@ async function socrHandleImage(event){
     const classStudents=SD.students.filter(s=>s.class===cls);
     if(!classStudents.length){if(statusEl)statusEl.innerHTML='<span style="color:var(--danger);">No students in this class.</span>';return;}
     try {
-      // Use Gemini to extract names + scores from score sheet
-      const url=`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+      // Use Groq Vision to extract names + scores from score sheet
+      const groqKey = getGroqKey();
+      if (!groqKey) throw new Error('No Groq key configured');
       const prompt=`Extract student names and their scores from this Nigerian school score sheet for subject: ${sub}.
 Return ONLY valid JSON array:
 [{"name":"Adaeze Okonkwo","ca":25,"exam":58},...]
 CA is continuous assessment (0-30 or 0-40), exam is exam score (0-60 or 0-70).
 Match names exactly as written. If you cannot read a score, use 0.`;
-      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        contents:[{parts:[{inline_data:{mime_type:mime,data:b64}},{text:prompt}]}]
+      const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
+        model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:800,
+        messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
       })});
       const d=await r.json();
-      const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||'[]';
-      const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
+      let raw=(d.choices?.[0]?.message?.content||'[]').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+      const cb=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(cb) raw=cb[1].trim();
+      const parsed=JSON.parse(raw);
       if(parsed.length){
-        if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Gemini found ${parsed.length} entries. Review below:</span>`;
+        if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">\u2705 Groq found ${parsed.length} entries. Review below:</span>`;
         let pHTML=`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
           <table class="stbl" style="font-size:0.75rem;"><thead><tr><th>Student Name</th><th>CA</th><th>Exam</th></tr></thead><tbody>`;
         parsed.forEach(item=>{
@@ -3367,7 +3466,7 @@ Match names exactly as written. If you cannot read a score, use 0.`;
         const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
         return;
       }
-    } catch(e){console.warn('Gemini score OCR failed:',e);}
+    } catch(e){console.warn('Groq score OCR failed:',e);}
     // Fallback: show manual grid
     if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">Could not auto-read. Please enter scores manually below:</span>';
     let pHTML=`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
@@ -3422,31 +3521,34 @@ let _scannedQueue=[];
 async function handleScriptImage(event){
   const file=event.target.files[0]; if(!file) return;
   const statusEl=$('scan-status');
-  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Gemini is reading the marked script...</span>';
+  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Groq is reading the marked script...</span>';
   const reader=new FileReader();
   reader.onload=async ev=>{
     const b64=ev.target.result.split(',')[1];
     const mime=file.type||'image/jpeg';
     const sub=$('scan-subj')?.value||'';
     try {
-      const url=`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+      const groqKey = getGroqKey();
+      if (!groqKey) throw new Error('No Groq key configured');
       const prompt=`This is a Nigerian student examination script for subject: ${sub}.
 Read the student's name (usually written at the top) and their total score/marks.
 Return ONLY valid JSON: {"name":"Student Full Name","score":72}
 If you cannot read the name, use "Unknown". If you cannot read the score, use 0.`;
-      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        contents:[{parts:[{inline_data:{mime_type:mime,data:b64}},{text:prompt}]}]
+      const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
+        model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:300,
+        messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
       })});
       const d=await r.json();
-      const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||'{"name":"Unknown","score":0}';
-      const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
+      let raw=(d.choices?.[0]?.message?.content||'{"name":"Unknown","score":0}').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+      const cb=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(cb) raw=cb[1].trim();
+      const parsed=JSON.parse(raw);
       const term=SD.config.currentTerm||'Term 1';
       _scannedQueue.push({name:parsed.name,score:parsed.score||0,sub,term});
-      if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Read: <b>${esc(parsed.name)}</b> — Score: <b>${parsed.score}</b></span>`;
+      if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">\u2705 Read: <b>${esc(parsed.name)}</b> \u2014 Score: <b>${parsed.score}</b></span>`;
       const countEl=$('scan-queue-count'); if(countEl) countEl.textContent=`${_scannedQueue.length} script${_scannedQueue.length!==1?'s':''} scanned this session`;
       const resultEl=$('scan-result');
       if(resultEl) resultEl.innerHTML=`<div class="card" style="margin-top:0.5rem;padding:0.6rem;background:var(--s2);">
-        <div style="font-weight:700;font-size:0.85rem;color:var(--brand);">📄 Script Read</div>
+        <div style="font-weight:700;font-size:0.85rem;color:var(--brand);">\ud83d\udcc4 Script Read</div>
         <div style="font-size:0.8rem;margin:4px 0;"><b>Name:</b> ${esc(parsed.name)}</div>
         <div style="font-size:0.8rem;"><b>Score:</b> ${parsed.score} / 100</div></div>`;
     } catch(e){
@@ -3884,13 +3986,17 @@ async function askFinanceAI(){
   const exp=s.reduce((a,x)=>a+(x.totalFee||0),0),col=s.reduce((a,x)=>a+(x.paid||0),0);
   const expenses=(SD.expenses||[]).reduce((a,e)=>a+(e.amount||0),0);
   const context=`School: ${SD.config.schoolName||'School'}, Students: ${s.length}, Expected: ${fmt(exp)}, Collected: ${fmt(col)}, Expenses: ${fmt(expenses)}, Net: ${fmt(col-expenses)}, Term: ${SD.config.currentTerm||'Term 1'}`;
-  // Use Gemini for finance AI (no Anthropic key needed)
+  // Use Groq for finance AI (text-only chat completion — same key as OCR)
   try{
-    const url=`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+    const groqKey = getGroqKey();
+    if (!groqKey) throw new Error('No Groq key configured');
     const prompt=`You are EduBloom's Finance Advisor for Nigerian schools. School data: ${context}. Question: ${q}\n\nGive a direct, practical answer in 3-4 sentences. Use ₦ for amounts.`;
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})});
+    const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
+      model:'llama-3.3-70b-versatile', temperature:0.3, max_tokens:300,
+      messages:[{role:'user',content:prompt}]
+    })});
     const d=await r.json();
-    const reply=d.candidates?.[0]?.content?.parts?.[0]?.text||'Could not get a response.';
+    const reply=d.choices?.[0]?.message?.content||'Could not get a response.';
     if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> ${esc(reply)}`;chatArea.appendChild(bMsg);chatArea.scrollTop=chatArea.scrollHeight;}
   }catch(e){
     if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> Connection error. Please check your internet.`;chatArea.appendChild(bMsg);}
@@ -4031,14 +4137,17 @@ function loadBankDetails() {
   }
 }
 
+// Function names kept as loadGeminiKeySetting/saveGeminiKeySetting/clearGeminiKey
+// for HTML onclick compatibility — they now manage the Groq key (device override).
+// The primary key still auto-syncs from Firestore via _fetchGroqKeyFromFirestore().
 function loadGeminiKeySetting() {
-  const saved = localStorage.getItem('gemini_api_key') || window.GEMINI_API_KEY || '';
+  const saved = getGroqKey();
   const inp = $('set-gemini-key');
   const status = $('gemini-key-status');
   if (inp) inp.value = saved;
   if (status) {
     if (saved) {
-      status.innerHTML = '✅ <strong>AI OCR active</strong> — register scanning uses Gemini';
+      status.innerHTML = '✅ <strong>AI OCR active</strong> — register scanning uses Groq Vision';
       status.style.color = '#22c55e';
     } else {
       status.innerHTML = '⚠️ No key set — OCR.space will be used (lower accuracy for handwritten registers)';
@@ -4050,26 +4159,21 @@ function loadGeminiKeySetting() {
 function saveGeminiKeySetting() {
   const inp = $('set-gemini-key');
   const key = (inp?.value || '').trim();
-  if (key && !key.startsWith('AIza')) {
-    if (inp) inp.style.borderColor = '#ef4444';
-    toast('❌ Invalid key — must start with AIza...');
-    return;
-  }
   if (key) {
-    localStorage.setItem('gemini_api_key', key);
-    window.GEMINI_API_KEY = key;
-    toast('✅ Gemini AI key saved — register scanning now uses AI');
+    localStorage.setItem(GROQ_KEY_STORAGE, key);
+    window.GROQ_API_KEY = key;
+    toast('✅ Groq AI key saved — register scanning now uses AI');
   } else {
-    localStorage.removeItem('gemini_api_key');
-    window.GEMINI_API_KEY = '';
+    localStorage.removeItem(GROQ_KEY_STORAGE);
+    window.GROQ_API_KEY = '';
     toast('Key cleared');
   }
   loadGeminiKeySetting();
 }
 
 function clearGeminiKey() {
-  localStorage.removeItem('gemini_api_key');
-  window.GEMINI_API_KEY = '';
+  localStorage.removeItem(GROQ_KEY_STORAGE);
+  window.GROQ_API_KEY = '';
   const inp = $('set-gemini-key'); if (inp) inp.value = '';
   loadGeminiKeySetting();
   toast('🗑️ AI key cleared — OCR.space will be used');
@@ -4333,22 +4437,24 @@ async function runRCAgent() {
 }
 const BloomAgents = {
 
-  // ── Shared Gemini caller ─────────────────────────────────────────────────
+  // ── Shared AI text caller — now Groq (was Gemini). Same signature/contract
+  // so all callers below (_gemini(...)) keep working unchanged.
   async _gemini(prompt, maxTokens = 512) {
-    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    const key = getGroqKey();
     if (!key) return null;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
-    const r = await fetch(url, {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens }
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.4,
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: prompt }]
       })
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error.message);
-    return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return d.choices?.[0]?.message?.content || '';
   },
 
   _log(agentName, action, detail) {
@@ -4398,8 +4504,8 @@ const BloomAgents = {
         </div>`;
     }
 
-    // AI insight — only if Gemini key set
-    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    // AI insight — only if Groq key set
+    const key = getGroqKey();
     if (key && overdue.length > 0) {
       try {
         const insight = await BloomAgents._gemini(
@@ -4506,10 +4612,10 @@ In 2 short sentences (max 30 words each), give the principal ONE urgent action a
     return { absentStreaks, noScores };
   },
 
-  // Auto-draft teacher remarks for a student using Gemini
+  // Auto-draft teacher remarks for a student using Groq
   async draftRemark(studentName, scores, className) {
-    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
-    if (!key) { toast('⚠️ Add Gemini key in Settings for AI remarks.'); return; }
+    const key = getGroqKey();
+    if (!key) { toast('⚠️ Add Groq key in Settings for AI remarks.'); return; }
     const scoreStr = Object.entries(scores||{}).map(([k,v])=>`${k}: ${v}`).join(', ');
     try {
       const remark = await BloomAgents._gemini(
@@ -4565,7 +4671,7 @@ Write a single encouraging sentence (max 20 words) suitable for a Nigerian schoo
     }
 
     // AI weekly briefing
-    const key = window.GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '';
+    const key = getGroqKey();
     if (key) {
       try {
         const brief = await BloomAgents._gemini(
@@ -4609,16 +4715,16 @@ Use a respectful, professional tone suitable for a Nigerian school principal.`, 
   // ════════════════════════════════════════════════════════════════════════
   // AGENT 4 — REPORT CARD AGENT
   // End-of-term: auto-drafts teacher remarks + principal comments for all
-  // students using Gemini AI. Stores in SD.remarks for printReportCard to use.
+  // students using Groq AI. Stores in SD.remarks for printReportCard to use.
   // ════════════════════════════════════════════════════════════════════════
   async runReportCardAgent(term, onProgress) {
     const students = SD.students || [];
     const subs = SD.config && SD.config.subjects ? SD.config.subjects : ["English Language","Mathematics","Basic Science"];
     const schoolName = (SD.config && SD.config.schoolName) ? SD.config.schoolName : "Our School";
-    const key = (window.GEMINI_API_KEY || localStorage.getItem("gemini_api_key") || "").trim();
+    const key = getGroqKey();
 
     if (!key) {
-      toast("Add Gemini API key in Settings to generate AI remarks.");
+      toast("Add Groq API key in Settings to generate AI remarks.");
       return { done: 0, total: students.length };
     }
 
