@@ -51,11 +51,14 @@ function ocrOverlayShow(filename) {
   if (el) el.style.display = 'flex';
   const fn = document.getElementById('ocr-filename');
   if (fn) fn.textContent = filename || 'image';
+  const defaultText = { load: 'Loading image...', upload: 'Uploading to cloud OCR', read: 'Reading names from image', done: 'Done' };
   ['load','upload','read','done'].forEach(s => {
     const row = document.getElementById('ocr-step-' + s);
     const icon = document.getElementById('ocr-step-' + s + '-icon');
+    const text = document.getElementById('ocr-step-' + s + '-text');
     if (row) row.style.color = '#94a3b8';
     if (icon) icon.textContent = s === 'load' ? '⏳' : '🔍';
+    if (text) text.textContent = defaultText[s]; // clear stale text from a previous scan
   });
   const loadRow = document.getElementById('ocr-step-load');
   if (loadRow) loadRow.style.color = '#6366f1';
@@ -141,6 +144,7 @@ const GROQ_KEY_STORAGE = 'groq_api_key';
 let _lastOcrError = '';
 function getGroqKey() { return window.GROQ_API_KEY || localStorage.getItem(GROQ_KEY_STORAGE) || ''; }
 const GROQ_OCR_MODEL = 'qwen/qwen3.6-27b'; // llama-4-scout deprecated June 17 2026
+let _groqRateLimitedThisSession = false; // once Groq hits an org-wide rate limit, skip it for remaining pages this scan
 
 const GROQ_OCR_PROMPT = `You are reading a Nigerian school attendance/fee register photo.
 Columns: SERIAL NO | SURNAME | FIRST NAME | (other columns — ignore them).
@@ -344,6 +348,7 @@ async function groqVisionOCR(base64, mime, _retry) {
   if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
     if (_retry >= 2) {
       const errData = await resp.json().catch(() => ({}));
+      if (resp.status === 429) _groqRateLimitedThisSession = true; // stop hammering Groq for the rest of this scan
       throw new Error((errData.error && errData.error.message) || 'Groq unavailable — page skipped, try rescanning.');
     }
     const is429 = resp.status === 429;
@@ -1616,6 +1621,7 @@ async function processImagesSequentially(files) {
   const _seen = new Set();
   const GROQ_DELAY_S = 15;
   if (files.length > 0) ocrOverlayShow(files[0].name || 'image');
+  _groqRateLimitedThisSession = false; // fresh scan — give Groq another chance
   for (let i = 0; i < files.length; i++) {
     if (i > 0 && files.length > 1) {
       for (let s = GROQ_DELAY_S; s > 0; s--) {
@@ -1625,7 +1631,7 @@ async function processImagesSequentially(files) {
       }
     }
     if (fbEl) fbEl.textContent = '📸 Reading page ' + (i + 1) + ' of ' + files.length + '...';
-    const pageNames = await _readOnePage(files[i], i + 1, files.length, fbEl, false);
+    const pageNames = await _readOnePage(files[i], i + 1, files.length, fbEl, _groqRateLimitedThisSession);
     pageNames.forEach(n => {
       const full = (n.fullName || (n.surname + ' ' + n.firstname)).trim().toUpperCase();
       const key  = full.replace(/[^A-Z]/g, '');
