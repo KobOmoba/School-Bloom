@@ -4145,46 +4145,24 @@ function loadBankDetails() {
   }
 }
 
-// Function names kept as loadGeminiKeySetting/saveGeminiKeySetting/clearGeminiKey
-// for HTML onclick compatibility — they now manage the Groq key (device override).
-// The primary key still auto-syncs from Firestore via _fetchGroqKeyFromFirestore().
+// Function name kept as loadGeminiKeySetting for HTML/loadSettings() compatibility.
+// Manual key entry (saveGeminiKeySetting/clearGeminiKey) removed — key is fully
+// auto-loaded via the secure proxy (_fetchGroqKeyFromFirestore) on login.
+// If Groq is ever unreachable, the tiered pipeline auto-falls to HuggingFace Vision,
+// then OCR.space — no manual override needed.
 function loadGeminiKeySetting() {
-  const saved = getGroqKey();
-  const inp = $('set-gemini-key');
   const status = $('gemini-key-status');
-  if (inp) inp.value = saved;
-  if (status) {
-    if (saved) {
-      status.innerHTML = '✅ <strong>AI OCR active</strong> — register scanning uses Groq Vision';
-      status.style.color = '#22c55e';
-    } else {
-      status.innerHTML = '⚠️ No key set — OCR.space will be used (lower accuracy for handwritten registers)';
-      status.style.color = '#f59e0b';
-    }
-  }
-}
-
-function saveGeminiKeySetting() {
-  const inp = $('set-gemini-key');
-  const key = (inp?.value || '').trim();
-  if (key) {
-    localStorage.setItem(GROQ_KEY_STORAGE, key);
-    window.GROQ_API_KEY = key;
-    toast('✅ Groq AI key saved — register scanning now uses AI');
+  if (!status) return;
+  if (getGroqKey()) {
+    status.innerHTML = '✅ Scanner ready — Groq Vision active';
+    status.style.color = '#22c55e';
+  } else if (getHFKey()) {
+    status.innerHTML = '🤗 Groq not loaded — using HuggingFace Vision fallback';
+    status.style.color = '#f59e0b';
   } else {
-    localStorage.removeItem(GROQ_KEY_STORAGE);
-    window.GROQ_API_KEY = '';
-    toast('Key cleared');
+    status.innerHTML = '⚠️ Not loaded yet — will retry, or falls back to OCR.space';
+    status.style.color = '#f87171';
   }
-  loadGeminiKeySetting();
-}
-
-function clearGeminiKey() {
-  localStorage.removeItem(GROQ_KEY_STORAGE);
-  window.GROQ_API_KEY = '';
-  const inp = $('set-gemini-key'); if (inp) inp.value = '';
-  loadGeminiKeySetting();
-  toast('🗑️ AI key cleared — OCR.space will be used');
 }
 
 function renderSubjectChips() {
