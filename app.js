@@ -413,16 +413,21 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
       }
 
       ocrOverlayThumb(imgData);
-      ocrOverlayStep('load', skipGroq ? '🤗 Preparing HuggingFace (page ' + pageNum + ')...' : 'Image loaded — sending to Groq Vision...', 20);
       ocrOverlayPages(pageNum, total);
 
       const groqKey = getGroqKey();
-      if (!groqKey && !skipGroq) {
-        _lastOcrError = 'Groq API key not set — go to Settings and paste your key';
-        ocrOverlayStep('error', '⚠️ No Groq key — tap Settings → paste your key → Save', 100);
-        resolve([]); return;
+      const canTryGroq = !!groqKey && !skipGroq;
+
+      ocrOverlayStep('load', canTryGroq
+        ? 'Image loaded — sending to Groq Vision...'
+        : '🤗 Groq unavailable — preparing HuggingFace (page ' + pageNum + ')...', 20);
+
+      // Retry loading keys once if the proxy hadn't finished/succeeded yet (e.g. slow network on first login)
+      if (!groqKey && !getHFKey() && typeof _fetchGroqKeyFromFirestore === 'function') {
+        await _fetchGroqKeyFromFirestore().catch(() => {});
       }
-      if (!skipGroq || !getHFKey()) {
+
+      if (canTryGroq) {
         try {
           ocrOverlayStep('upload', 'Groq Vision scanning (page ' + pageNum + '/' + total + ')...', 50);
           const names = await groqVisionOCR(b64, mime);
@@ -434,15 +439,15 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
         } catch (e) {
           _lastOcrError = e.message || 'Groq Vision failed';
           console.error('Groq Vision error (page ' + pageNum + '):', _lastOcrError);
-          if (_lastOcrError.includes('invalid') || _lastOcrError.includes('401') || _lastOcrError.includes('auth')) {
-            ocrOverlayStep('error', '⚠️ Groq key invalid — go to Settings → re-enter key', 100);
-            resolve([]); return;
-          }
+          // No hard-stop here even on invalid/auth errors — always fall through to HF next.
         }
+      } else if (!groqKey) {
+        _lastOcrError = 'Groq key not loaded (proxy unavailable) — trying HuggingFace';
       }
+
       try {
-        const hfLabel = skipGroq ? 'HuggingFace scanning' : 'Trying HuggingFace';
-        ocrOverlayStep('scan', '🤗 ' + hfLabel + ' (page ' + pageNum + '/' + total + ')...', skipGroq ? 30 : 70);
+        const hfLabel = canTryGroq ? 'Trying HuggingFace' : 'HuggingFace scanning';
+        ocrOverlayStep('scan', '🤗 ' + hfLabel + ' (page ' + pageNum + '/' + total + ')...', canTryGroq ? 70 : 40);
         const hfResult = await hfVisionOCR(b64, mime);
         if (hfResult && hfResult.length > 0) {
           ocrOverlayStep('read', '🤗 HF: ' + hfResult.length + ' names (page ' + pageNum + ')', 100);
@@ -450,7 +455,7 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
         }
       } catch (hfErr) {
         const hfMsg = hfErr.message.includes('No HF API key')
-          ? '⚠️ No HF key in portal Settings — trying OCR.space'
+          ? '⚠️ HF not loaded (proxy unavailable) — trying OCR.space'
           : ('🤗 HF failed (' + hfErr.message.slice(0,40) + ') — trying OCR.space');
         console.warn('HF fallback:', hfErr.message);
         ocrOverlayStep('scan', hfMsg, 80);
