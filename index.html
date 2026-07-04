@@ -913,21 +913,13 @@ function toggleEye(inputId, btn) {
         <button class="btn-brand" onclick="saveSettings()">💾 Save Settings</button>
       </div>
 
-      <!-- AI OCR Key Card -->
+      <!-- AI OCR Status Card -->
       <div class="card" style="border-left:4px solid #818cf8;">
         <div class="ct">🤖 AI-Powered Register Scanning</div>
-        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.55;">
-          Register scanning uses <strong>Groq Vision</strong>, centrally managed for all schools — no key setup needed. Use this field only to override with your own key for this device.
+        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.5rem;line-height:1.55;">
+          Register scanning uses <strong>Groq Vision</strong>, centrally managed and auto-loaded for all schools — nothing to set up. If Groq is ever unavailable, HuggingFace Vision and then OCR.space kick in automatically.
         </p>
-        <label>Groq API Key <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(free at console.groq.com — optional override)</span></label>
-        <div class="pwd-wrap">
-          <input type="password" id="set-gemini-key" placeholder="gsk_..." autocomplete="off"
-            style="font-family:monospace;font-size:0.78rem;">
-          <button type="button" class="eye-btn" onclick="toggleEye('set-gemini-key',this)" tabindex="-1">👁️</button>
-        </div>
-        <div id="gemini-key-status" style="font-size:0.75rem;margin:0.4rem 0 0.75rem;color:var(--sub);"></div>
-        <button class="btn-brand btn-sm" onclick="saveGeminiKeySetting()">💾 Save AI Key</button>
-        <button class="btn-ghost btn-sm" onclick="clearGeminiKey()" style="margin-left:0.4rem;">🗑️ Clear Key</button>
+        <div id="gemini-key-status" style="font-size:0.8rem;font-weight:600;"></div>
       </div>
 
       <div class="card" style="border-left:4px solid var(--warn);">
