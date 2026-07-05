@@ -110,10 +110,115 @@ function ocrOverlayHide(delayMs) {
   }, delayMs || 0);
 }
 
-function resizeImageForOCR(dataURL) {
+// ── OpenCV.js loader (lazy-loaded on first OCR scan) ──────────────────────
+let _cvReady = false, _cvLoading = false;
+function loadOpenCV() {
   return new Promise(resolve => {
+    if (_cvReady) return resolve(true);
+    if (_cvLoading) { const wait = setInterval(() => { if (_cvReady) { clearInterval(wait); resolve(true); } }, 200); return; }
+    _cvLoading = true;
+    if (document.getElementById('opencv-js')) { // script tag exists but Module not ready
+      const wait = setInterval(() => {
+        if (window.cv && cv.Mat) { _cvReady = true; _cvLoading = false; clearInterval(wait); resolve(true); }
+      }, 200);
+      return;
+    }
+    const s = document.createElement('script');
+    s.id = 'opencv-js';
+    s.src = 'https://docs.opencv.org/4.x/opencv.js';
+    s.async = true;
+    s.onload = () => {
+      // OpenCV.js uses a Module init pattern
+      if (window.cv && cv.Mat) { _cvReady = true; _cvLoading = false; resolve(true); }
+      else if (window.cv) {
+        cv['onRuntimeInitialized'] = () => { _cvReady = true; _cvLoading = false; resolve(true); };
+      } else {
+        // Fallback: poll for readiness
+        const wait = setInterval(() => {
+          if (window.cv && cv.Mat) { _cvReady = true; _cvLoading = false; clearInterval(wait); resolve(true); }
+        }, 300);
+        setTimeout(() => { if (!_cvReady) { clearInterval(wait); _cvLoading = false; resolve(false); } }, 15000);
+      }
+    };
+    s.onerror = () => { _cvLoading = false; resolve(false); };
+    document.head.appendChild(s);
+  });
+}
+
+// ── OpenCV preprocessing: grayscale → denoise → adaptive threshold → deskew ──
+async function preprocessWithOpenCV(canvas) {
+  if (!_cvReady) return canvas;
+  try {
+    const src = cv.imread(canvas);
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+    // Denoise (removes shadows and phone-camera noise)
+    const denoised = new cv.Mat();
+    cv.fastNlMeansDenoising(gray, denoised, 10, 7, 21);
+
+    // Adaptive threshold (makes handwriting crisp black-on-white)
+    const binary = new cv.Mat();
+    cv.adaptiveThreshold(denoised, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 31, 10);
+
+    // Deskew: find the dominant text angle and rotate to straighten
+    const deskewed = _deskew(binary);
+
+    // Write back to canvas
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = deskewed.cols; outCanvas.height = deskewed.rows;
+    cv.imshow(outCanvas, deskewed);
+
+    src.delete(); gray.delete(); denoised.delete(); binary.delete(); deskewed.delete();
+    return outCanvas;
+  } catch (e) {
+    console.warn('[OpenCV] preprocessing failed, using raw image:', e.message);
+    return canvas;
+  }
+}
+
+function _deskew(binaryMat) {
+  try {
+    // Use Hough line transform to estimate skew angle
+    const edges = new cv.Mat();
+    cv.Canny(binaryMat, edges, 50, 150);
+    const lines = new cv.Mat();
+    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 80, 30, 10);
+
+    let angles = [];
+    for (let i = 0; i < Math.min(lines.rows, 30); i++) {
+      const x1 = lines.data32F[i * 4], y1 = lines.data32F[i * 4 + 1];
+      const x2 = lines.data32F[i * 4 + 2], y2 = lines.data32F[i * 4 + 3];
+      const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+      // Only accept near-horizontal lines (text lines are mostly horizontal)
+      if (Math.abs(angle) < 20) angles.push(angle);
+    }
+    edges.delete(); lines.delete();
+
+    if (angles.length < 3) return binaryMat.clone(); // not enough lines to estimate
+
+    // Median angle (robust against outliers)
+    angles.sort((a, b) => a - b);
+    const median = angles[Math.floor(angles.length / 2)];
+    if (Math.abs(median) < 0.5) return binaryMat.clone(); // already straight
+
+    // Rotate the image to correct the skew
+    const rows = binaryMat.rows, cols = binaryMat.cols;
+    const M = cv.getRotationMatrix2D(new cv.Point(cols / 2, rows / 2), median, 1);
+    const rotated = new cv.Mat();
+    cv.warpAffine(binaryMat, rotated, M, new cv.Size(cols, rows), cv.INTER_CUBIC, cv.BORDER_CONSTANT, new cv.Scalar(255));
+    M.delete();
+    return rotated;
+  } catch (e) {
+    console.warn('[OpenCV] deskew failed:', e.message);
+    return binaryMat.clone();
+  }
+}
+
+function resizeImageForOCR(dataURL) {
+  return new Promise(async resolve => {
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
       const MAX = 1000;
       let w = img.width, h = img.height;
       if (w > MAX || h > MAX) {
@@ -124,7 +229,20 @@ function resizeImageForOCR(dataURL) {
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL('image/jpeg', 0.85));
+
+      // OpenCV preprocessing (if available) — improves handwriting clarity
+      let finalCanvas = canvas;
+      try {
+        const cvReady = await loadOpenCV();
+        if (cvReady) {
+          finalCanvas = await preprocessWithOpenCV(canvas);
+        }
+      } catch (e) {
+        console.warn('[OCR] OpenCV preprocess skipped:', e.message);
+        finalCanvas = canvas;
+      }
+
+      resolve(finalCanvas.toDataURL('image/jpeg', 0.85));
     };
     img.onerror = () => resolve(dataURL);
     img.src = dataURL;
@@ -1408,20 +1526,117 @@ function sendAllReminders() {
 }
 
 // ── Students list / CRUD ──────────────────────────────────────────────────
+// ── OCR character-level correction rules ─────────────────────────────────
+const OCR_FIX_MAP = {
+  // Digit → letter confusion (very common in OCR of handwriting)
+  '0': 'O', '1': 'I', '5': 'S', '8': 'B',
+  // Common garble pairs in handwritten Nigerian registers
+  'rn': 'm', 'vv': 'w', 'vv': 'W', '|': 'I', 'l': 'I',
+  // Letter swaps from smudged handwriting
+  'ph': 'PH', 'ck': 'CK', 'ee': 'EE',
+};
+
+// Nigerian name fragments that help validate corrections
+const NIGERIAN_NAME_FRAGMENTS = [
+  'ADE', 'OLA', 'OYE', 'OGUN', 'AKIN', 'AYO', 'OLU', 'SAN', 'KASALI', 'OGUNLADE',
+  'ALAWODE', 'OYESANWO', 'OGUNDEYI', 'ALAO', 'AKINWANDE', 'OLAWALE', 'OBASA',
+  'OLATUNDE', 'ADENIYI', 'ADEOYE', 'LAWAL', 'AYOMIDE', 'RASAQ', 'GABRIEL',
+  'GODWIN', 'ENOCH', 'EMMANUEL', 'KOREDE', 'SUCCESS', 'EZEKIEL', 'ZAINAB',
+  'SALAM', 'WAJUD', 'MUEEZ', 'QUARDRI', 'BIGGOLD', 'ADEMIDE', 'ABIGEAL',
+  'MICHEAL', 'MICHAEL', 'CHRISTIANA', 'CHRISTIAN', 'MOHAMMED', 'MUHAMMED',
+  'IBRAHIM', 'ABDUL', 'ABDULLAH', 'YUSUF', 'YUSUFF', 'NUHU', 'MUSA', 'ISA',
+  'HASSAN', 'HUSSEIN', 'ALIYU', 'ALIU', 'USMAN', 'SULE', 'SULEIMAN', 'YAKUBU',
+  'GIDEON', 'DANIEL', 'SAMUEL', 'DAVID', 'JOHN', 'PAUL', 'PETER', 'JAMES',
+  'MARY', 'GRACE', 'FAITH', 'HOPE', 'CHARITY', 'JOY', 'PEACE', 'MERCY',
+  'PATIENCE', 'BLESSED', 'GIFT', 'PRECIOUS', 'VICTORY', 'GLORY', 'DIVINE',
+  'CHIDINMA', 'CHIAMAKA', 'NWAFOR', 'OKEKE', 'EZE', 'NWOSU', 'IGWE',
+  'OBI', 'OKORO', 'NNAMDI', 'CHUKWU', 'ANIEFIOK', 'EFFIONG', 'AKPAN',
+  'EDIDIONG', 'UDO', 'IME', 'NSIKAN', 'SAMUEL', 'TIEMI', 'INIABASI',
+  'GBOLAHAN', 'GBADEBO', 'GBELEKALE', 'SHONPE', 'OLIYIDE', 'KOLANOLE'
+];
+
+function _fixOcrChars(name) {
+  let fixed = name.toUpperCase().trim();
+
+  // Fix leading/trailing digits attached to names (e.g. "1OGUNLADE" → "OGUNLADE")
+  fixed = fixed.replace(/^\d+([A-Z])/, '$1');
+
+  // Fix trailing digits (e.g. "GABRIEL5" → "GABRIEL")
+  fixed = fixed.replace(/([A-Z])\d+$/, '$1');
+
+  // Fix embedded digits in names (e.g. "ADE0YE" → "ADEOYE", "GABR1EL" → "GABRIEL")
+  fixed = fixed.replace(/([A-Z])0([A-Z])/g, '$1O$2');
+  fixed = fixed.replace(/([A-Z])1([A-Z])/g, '$1I$2');
+  fixed = fixed.replace(/([A-Z])5([A-Z])/g, '$1S$2');
+  fixed = fixed.replace(/([A-Z])8([A-Z])/g, '$1B$2');
+
+  // Fix "rn" → "m" when not at start of a word (e.g. "GABRNEL" → "GABMEL"... actually better: "ARNU" → "AMU")
+  // Only fix if the result looks more like a Nigerian name
+  const rnFixed = fixed.replace(/RN/g, 'M');
+  if (_nameScore(rnFixed) > _nameScore(fixed)) fixed = rnFixed;
+
+  // Fix standalone "l" → "I" in all-caps context (e.g. "ALAO" where l is actually I → "AIAO"? no, skip if it makes it worse)
+  // Be conservative — only apply if score improves
+
+  // Remove stray non-alpha characters (except spaces and hyphens)
+  fixed = fixed.replace(/[^A-Z\s\-\']/g, '');
+
+  // Collapse multiple spaces
+  fixed = fixed.replace(/\s+/g, ' ').trim();
+
+  return fixed;
+}
+
+// Score how "Nigerian-name-like" a string is (higher = more likely correct)
+function _nameScore(name) {
+  let score = 0;
+  const upper = name.toUpperCase();
+  for (const frag of NIGERIAN_NAME_FRAGMENTS) {
+    if (upper.includes(frag)) score += frag.length;
+  }
+  // Penalize names with too many consonants in a row (likely garbled)
+  const consonantRuns = (upper.match(/[^AEIOU\s]{7,}/g) || []);
+  score -= consonantRuns.length * 3;
+  return score;
+}
+
 async function fixGarbledNames() {
   const before = SD.students.length;
+  let fixedCount = 0;
+
+  // Phase 1: OCR character correction
+  SD.students.forEach(s => {
+    const original = (s.name || '').trim();
+    const corrected = _fixOcrChars(original);
+    if (corrected !== original && corrected.length >= 3) {
+      // Only apply if the correction improves the name score
+      if (_nameScore(corrected) >= _nameScore(original)) {
+        s.name = corrected;
+        fixedCount++;
+      }
+    }
+  });
+
+  // Phase 2: Remove junk (invalid names)
   SD.students = SD.students.filter(s => looksLikeValidName((s.name || '').trim()));
+
+  // Phase 3: Remove duplicates
   const seen = new Set();
   SD.students = SD.students.filter(s => {
     const key = (s.name || '').toLowerCase().replace(/[^a-z]/g, '');
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });
+
   const removed = before - SD.students.length;
-  if (removed === 0) { alert('Nothing to clean — all names look valid and there are no duplicates! ✅'); return; }
+  const msg = (fixedCount > 0 ? `🔧 Fixed ${fixedCount} garbled name${fixedCount !== 1 ? 's' : ''} (digit→letter, OCR smudge corrections).\n` : '')
+            + (removed > 0 ? `🗑️ Removed ${removed} junk entr${removed !== 1 ? 'ies' : 'y'} (invalid + duplicates).` : '');
+
+  if (!msg) { alert('Nothing to fix — all names look clean and valid! ✅'); return; }
+
   await SQ.push('students', SD.students); checkTierStatus();
   renderStudentList(); renderBanner(); renderRevenue();
-  alert(`✅ Removed ${removed} entr${removed !== 1 ? 'ies' : 'y'} (junk + duplicates).\n\nIf any real student was removed, add them back manually with ➕ Add Student.`);
+  alert(msg + '\n\nIf any real student was removed or a name was over-corrected, fix it manually with ✏️ edit.');
 }
 
 
