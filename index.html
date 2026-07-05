@@ -1034,9 +1034,14 @@ function toggleEye(inputId, btn) {
 <div class="modal" id="student-modal">
   <div class="mbox">
     <div class="mhead">
-      <div class="prof-hdr" style="flex:1;margin-right:0.5rem;">
-        <div style="font-weight:800;font-size:1rem;" id="prof-name">Student</div>
-        <div style="font-size:0.75rem;opacity:0.85;" id="prof-meta">—</div>
+      <div class="prof-hdr" style="flex:1;margin-right:0.5rem;display:flex;align-items:center;gap:0.65rem;">
+        <div id="prof-photo-wrap" style="width:42px;height:42px;border-radius:50%;overflow:hidden;flex-shrink:0;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">
+          <span id="prof-photo-initial">?</span>
+        </div>
+        <div style="min-width:0;">
+          <div style="font-weight:800;font-size:1rem;" id="prof-name">Student</div>
+          <div style="font-size:0.75rem;opacity:0.85;" id="prof-meta">—</div>
+        </div>
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;">
         <button onclick="editStudent(activeIdx)" title="Edit student" style="background:none;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:0.82rem;color:inherit;">✏️</button>
@@ -1044,8 +1049,10 @@ function toggleEye(inputId, btn) {
         <button class="mclose" onclick="closeM('student-modal')">×</button>
       </div>
     </div>
+    <div style="font-size:0.72rem;color:var(--sub);padding:0.3rem 0;" id="prof-bday"></div>
     <div class="profile-tabs">
-      <button class="ptab on" data-pt="fees" onclick="setTab('fees')">💰 Fees</button>
+      <button class="ptab on" data-pt="profile" onclick="setTab('profile')">👤 Profile</button>
+      <button class="ptab" data-pt="fees" onclick="setTab('fees')">💰 Fees</button>
       <button class="ptab" data-pt="attendance" onclick="setTab('attendance')">📅 Attendance</button>
       <button class="ptab" data-pt="scores" onclick="setTab('scores')">📚 Scores</button>
       <button class="ptab" data-pt="report" onclick="setTab('report')">📋 Report Card</button>

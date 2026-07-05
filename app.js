@@ -1709,7 +1709,7 @@ function renderStudentList() {
     const feeBadge = canSeeFees() ? `<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}` : '';
     return `<div class="stu-row" style="display:flex;align-items:center;gap:0.4rem;">
       <div style="flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;cursor:pointer;" onclick="openProfile(${idx})">
-        <div class="stu-av">${s.name.charAt(0).toUpperCase()}</div>
+        <div class="stu-av" style="${s.photo?'background:none;padding:0;overflow:hidden;':''}">${s.photo?`<img src="${esc(s.photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`:s.name.charAt(0).toUpperCase()}</div>
         <div style="flex:1;min-width:0;">
           <div class="stu-name">${esc(s.name)}</div>
           <div class="stu-meta">${esc(s.class||'—')} · ${s.phone||'—'}</div>
@@ -1760,6 +1760,17 @@ function editStudent(idx) {
   const html = `
     <div style="display:flex;flex-direction:column;gap:0.45rem;">
       <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Student Profile</div>
+
+      <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;">
+        <div id="edit-photo-preview" style="width:56px;height:56px;border-radius:12px;overflow:hidden;flex-shrink:0;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;">
+          ${s.photo ? `<img src="${esc(s.photo)}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-size:1.4rem;color:var(--sub);">${esc(s.name.charAt(0).toUpperCase())}</span>`}
+        </div>
+        <div>
+          <button class="btn-brand btn-sm" style="font-size:0.72rem;" onclick="$('edit-photo-input').click()">📷 Take/Upload Photo</button>
+          ${s.photo ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem;margin-left:0.3rem;color:var(--danger);" onclick="removeStudentPhoto(${idx})">🗑️ Remove</button>` : ''}
+        </div>
+        <input type="file" id="edit-photo-input" accept="image/*" capture="environment" style="display:none;" onchange="handleEditPhoto(${idx},event)">
+      </div>
 
       <label>Full Name</label>
       <input id="edit-s-name" value="${esc(s.name)}">
@@ -1848,6 +1859,30 @@ async function saveEditStudent(idx) {
   closeM('edit-student-modal');
   renderStudentList(); renderBanner(); renderRevenue();
   toast('✅ Student updated!');
+}
+
+async function handleEditPhoto(idx, event) {
+  const file = (event.target.files||[])[0]; if (!file) return;
+  event.target.value = '';
+  try {
+    const dataUrl = await _compressImage(file, 400, 0.7);
+    SD.students[idx].photo = dataUrl;
+    await SQ.push('students', SD.students); saveLocal('students', SD.students);
+    const prev = $('edit-photo-preview');
+    if (prev) prev.innerHTML = `<img src="${esc(dataUrl)}" style="width:100%;height:100%;object-fit:cover;">`;
+    renderStudentList();
+    toast('✅ Photo saved!');
+  } catch(e) { alert('Could not process photo. Try another image.'); }
+}
+
+async function removeStudentPhoto(idx) {
+  if (!confirm('Remove student photo?')) return;
+  delete SD.students[idx].photo;
+  await SQ.push('students', SD.students); saveLocal('students', SD.students);
+  const prev = $('edit-photo-preview');
+  if (prev) prev.innerHTML = `<span style="font-size:1.4rem;color:var(--sub);">${esc(SD.students[idx].name.charAt(0).toUpperCase())}</span>`;
+  renderStudentList();
+  toast('🗑️ Photo removed.');
 }
 
 // ── Universal student import: CSV, TXT, JPG, PNG, JPEG, WEBP ─────────────
@@ -2102,7 +2137,7 @@ function importStudentsFromText(f) {
 // ═══════════════════════════════════════════════════════════════════════
 
 function openProfile(idx) {
-  activeIdx = idx; activeTab = 'fees';
+  activeIdx = idx; activeTab = 'profile';
   const s = SD.students[idx]; if (!s) return;
   $('prof-name').textContent = s.name;
   $('prof-meta').textContent = `${s.class||'—'} · ${s.phone||'—'}`;
@@ -2111,8 +2146,17 @@ function openProfile(idx) {
     if (s.dob) { bdayEl.style.display = 'block'; bdayEl.textContent = `🎂 DOB: ${s.dob}`; }
     else bdayEl.style.display = 'none';
   }
-  document.querySelectorAll('.ptab').forEach(t => t.classList.toggle('on', t.dataset.pt === 'fees'));
-  renderTab('fees'); openM('student-modal');
+  // Render photo or initial in header
+  const photoWrap = $('prof-photo-wrap');
+  if (photoWrap) {
+    if (s.photo) {
+      photoWrap.innerHTML = `<img src="${esc(s.photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    } else {
+      photoWrap.innerHTML = `<span style="font-size:1.2rem;font-weight:800;">${esc(s.name.charAt(0).toUpperCase())}</span>`;
+    }
+  }
+  document.querySelectorAll('.ptab').forEach(t => t.classList.toggle('on', t.dataset.pt === 'profile'));
+  renderTab('profile'); openM('student-modal');
 }
 
 function setTab(tab) {
@@ -2124,12 +2168,165 @@ function setTab(tab) {
 function renderTab(tab) {
   const s = SD.students[activeIdx]; if (!s) return;
   const c = $('profile-content'); if (!c) return;
-  if (tab === 'fees') c.innerHTML = buildFees(s, activeIdx);
+  if (tab === 'profile') c.innerHTML = buildProfile(s, activeIdx);
+  else if (tab === 'fees') c.innerHTML = buildFees(s, activeIdx);
   else if (tab === 'attendance') c.innerHTML = buildAttendance(s);
   else if (tab === 'scores') c.innerHTML = buildScores(s, activeIdx);
   else if (tab === 'report') c.innerHTML = buildReport(s);
   else if (tab === 'swot') c.innerHTML = buildSWOT(s, activeIdx);
   else if (tab === 'safety') c.innerHTML = buildSafety(s, activeIdx);
+}
+
+// ── PROFILE TAB ───────────────────────────────────────────────────────
+function buildProfile(s, idx) {
+  const safety = s.safety || {};
+  const ageStr = s.dob ? _calcAge(s.dob) : '—';
+  const feeOwe = (s.totalFee||0) - (s.paid||0);
+  const feePct = s.totalFee ? Math.round(((s.paid||0)/s.totalFee)*100) : 0;
+  // attendance summary
+  const att = SD.attendance || {};
+  let present=0, absent=0, late=0, totalDays=0;
+  Object.keys(att).forEach(d => { if (att[d][s.name]) { totalDays++; const st=att[d][s.name]; if(st==='Present')present++; else if(st==='Absent')absent++; else if(st==='Late')late++; } });
+  const attPct = totalDays>0 ? Math.round((present/totalDays)*100) : 0;
+  // scores summary
+  const term = SD.config.currentTerm || 'Term 1';
+  const sid = s.id || idx;
+  const termScores = (SD.scores?.[term]?.[sid]) || {};
+  const scoredSubs = Object.keys(termScores).filter(sub => { const v=termScores[sub]; return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0)>0; });
+  let totalScore=0; scoredSubs.forEach(sub => { const v=termScores[sub]; totalScore += (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0); });
+  const avg = scoredSubs.length>0 ? Math.round(totalScore/scoredSubs.length) : 0;
+
+  return `
+    <div class="card" style="margin-bottom:0.65rem;">
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+        <div style="width:72px;height:72px;border-radius:14px;overflow:hidden;flex-shrink:0;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;">
+          ${s.photo 
+            ? `<img src="${esc(s.photo)}" style="width:100%;height:100%;object-fit:cover;">` 
+            : `<div style="font-size:1.8rem;font-weight:800;color:var(--sub);">${esc(s.name.charAt(0).toUpperCase())}</div>`}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:800;font-size:1.05rem;color:var(--text);">${esc(s.name)}</div>
+          <div style="font-size:0.78rem;color:var(--sub);margin-top:2px;">${esc(s.class||'No class set')}</div>
+          <div style="display:flex;gap:0.4rem;margin-top:0.4rem;flex-wrap:wrap;">
+            <button class="btn-brand btn-sm" style="font-size:0.72rem;padding:0.3rem 0.55rem;" onclick="uploadStudentPhoto(${idx})">📷 Photo</button>
+            <button class="btn-ghost btn-sm" style="font-size:0.72rem;padding:0.3rem 0.55rem;" onclick="editStudent(${idx})">✏️ Edit</button>
+          </div>
+        </div>
+      </div>
+
+      <input type="file" id="student-photo-input" accept="image/*" capture="environment" style="display:none;" onchange="handleStudentPhoto(${idx},event)">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
+        <div style="background:var(--s2);padding:0.55rem;border-radius:8px;border:1px solid var(--border);">
+          <div style="font-size:0.63rem;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;">Gender</div>
+          <div style="font-size:0.82rem;font-weight:600;margin-top:2px;">${esc(s.gender||'—')}</div>
+        </div>
+        <div style="background:var(--s2);padding:0.55rem;border-radius:8px;border:1px solid var(--border);">
+          <div style="font-size:0.63rem;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;">Date of Birth</div>
+          <div style="font-size:0.82rem;font-weight:600;margin-top:2px;">${esc(s.dob||'—')}${ageStr!=='—'?' <span style=\'color:var(--sub);font-size:0.72rem;\'>('+ageStr+')</span>':''}</div>
+        </div>
+        <div style="background:var(--s2);padding:0.55rem;border-radius:8px;border:1px solid var(--border);">
+          <div style="font-size:0.63rem;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;">Admission No.</div>
+          <div style="font-size:0.82rem;font-weight:600;margin-top:2px;">${esc(s.admissionNo||'—')}</div>
+        </div>
+        <div style="background:var(--s2);padding:0.55rem;border-radius:8px;border:1px solid var(--border);">
+          <div style="font-size:0.63rem;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;">Parent Phone</div>
+          <div style="font-size:0.82rem;font-weight:600;margin-top:2px;">${s.phone?'<a href="https://wa.me/'+s.phone+'" style="color:var(--brand);text-decoration:none;">'+esc(s.phone)+'</a>':'—'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:0.65rem;">
+      <div class="ct">📊 Quick Stats</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;">
+        <div class="stat"><div class="sn" style="font-size:0.95rem;color:${attPct>=70?'var(--money)':'var(--warn)'};">${attPct}%</div><div class="sl">Attendance</div></div>
+        <div class="stat"><div class="sn" style="font-size:0.95rem;color:${avg>=50?'var(--money)':'var(--danger)'};">${avg||'—'}</div><div class="sl">Avg Score</div></div>
+        <div class="stat"><div class="sn" style="font-size:0.95rem;color:${feeOwe<=0?'var(--money)':'var(--danger)'};">${feeOwe<=0?'✅':'₦'+(feeOwe).toLocaleString()}</div><div class="sl">Fees</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:0.65rem;border-left:4px solid #8b5cf6;">
+      <div class="ct">🛡️ Safety & Guardian</div>
+      ${_profileRow('Guardian Name', safety.guardianName)}
+      ${_profileRow('Emergency Phone', safety.emergencyPhone, true)}
+      ${_profileRow('Authorised Collectors', safety.collectors)}
+      ${_profileRow('Medical Notes', safety.medical)}
+    </div>
+
+    <div class="card">
+      <div class="ct">📚 This Term (${esc(term)})</div>
+      <div style="font-size:0.78rem;color:var(--sub);line-height:1.7;">
+        <div>Subjects with scores: <b style="color:var(--text);">${scoredSubs.length}</b></div>
+        <div>Total marks: <b style="color:var(--text);">${totalScore}</b></div>
+        <div>Average: <b style="color:var(--text);">${avg||'—'}</b></div>
+        ${scoredSubs.length>0?`<button class="btn-ghost btn-sm" style="margin-top:0.5rem;font-size:0.72rem;" onclick="setTab('scores')">📚 View Full Scores →</button>`:''}
+      </div>
+    </div>
+  `;
+}
+
+function _profileRow(label, value, isPhone) {
+  if (!value) return `<div style="display:flex;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border);"><div style="font-size:0.72rem;color:var(--sub);min-width:110px;flex-shrink:0;">${label}</div><div style="font-size:0.78rem;color:var(--sub);">—</div></div>`;
+  return `<div style="display:flex;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border);">
+    <div style="font-size:0.72rem;color:var(--sub);min-width:110px;flex-shrink:0;">${label}</div>
+    <div style="font-size:0.78rem;font-weight:500;color:var(--text);">${isPhone?'<a href="https://wa.me/'+value.replace(/\D/g,'')+'" style="color:var(--brand);text-decoration:none;">'+esc(value)+'</a>':esc(value)}</div>
+  </div>`;
+}
+
+function _calcAge(dob) {
+  const d = new Date(dob); if (isNaN(d)) return '—';
+  const now = new Date(); let age = now.getFullYear()-d.getFullYear();
+  const m = now.getMonth()-d.getMonth(); if (m<0||(m===0&&now.getDate()<d.getDate())) age--;
+  return age>=0?age+' yrs':'—';
+}
+
+// ── Student Photo Upload ──────────────────────────────────────────────
+function uploadStudentPhoto(idx) {
+  const inp = $('student-photo-input'); if (!inp) return;
+  inp.click();
+}
+
+async function handleStudentPhoto(idx, event) {
+  const file = (event.target.files||[])[0]; if (!file) return;
+  event.target.value = '';
+  // Compress image to max 400px, JPEG quality 0.7
+  try {
+    const dataUrl = await _compressImage(file, 400, 0.7);
+    SD.students[idx].photo = dataUrl;
+    await SQ.push('students', SD.students); saveLocal('students', SD.students);
+    // Update header photo
+    const photoWrap = $('prof-photo-wrap');
+    if (photoWrap) photoWrap.innerHTML = `<img src="${esc(dataUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    renderTab('profile');
+    renderStudentList();
+    toast('✅ Photo saved!');
+  } catch(e) {
+    console.error('Photo upload error:', e);
+    alert('Could not process photo. Please try a different image.');
+  }
+}
+
+function _compressImage(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height) { if (width > maxDim) { height = Math.round(height*maxDim/width); width = maxDim; } }
+        else { if (height > maxDim) { width = Math.round(width*maxDim/height); height = maxDim; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── FEES TAB ──────────────────────────────────────────────────────────
