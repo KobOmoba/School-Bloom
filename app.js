@@ -1308,6 +1308,15 @@ function startApp() {
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────
+// Tap logo or school name anywhere → back to dashboard (revenue)
+function goDashboard() {
+  const nav = document.getElementById('mainNav');
+  const backdrop = document.getElementById('navBackdrop');
+  if (nav) nav.classList.remove('open');
+  if (backdrop) backdrop.classList.remove('on');
+  go('revenue');
+}
+
 function go(tab) {
   document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
   document.querySelectorAll('.nlink').forEach(b => b.classList.remove('on'));
