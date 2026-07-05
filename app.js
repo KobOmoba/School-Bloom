@@ -1325,6 +1325,24 @@ function go(tab) {
   if (fn[tab]) fn[tab]();
 }
 
+// ── Dashboard stat tiles → drill-down navigation ─────────────────────────
+function dashTileClick(which) {
+  if (which === 'students') {
+    if ($('stu-pay')) $('stu-pay').value = '';
+    go('students');
+  } else if (which === 'collected') {
+    if ($('stu-pay')) $('stu-pay').value = 'paid';
+    go('students');
+    if (typeof renderStudentList === 'function') renderStudentList();
+  } else if (which === 'outstanding') {
+    if ($('stu-pay')) $('stu-pay').value = 'owing';
+    go('students');
+    if (typeof renderStudentList === 'function') renderStudentList();
+  } else if (which === 'rate') {
+    go('analytics');
+  }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // SECTION 3 — Tier enforcement, Revenue, Students CRUD, Scores/Scorecard

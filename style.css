@@ -89,6 +89,9 @@ button{display:block;width:100%;padding:0.72rem;border:none;border-radius:10px;f
 /* STATS */
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-bottom:0.65rem;}
 .stat{background:white;border:1px solid var(--border);border-radius:11px;padding:0.8rem;text-align:center;box-shadow:var(--shadow);}
+.stat[onclick]{cursor:pointer;transition:transform .12s,box-shadow .12s;-webkit-tap-highlight-color:transparent;}
+.stat[onclick]:active{transform:scale(0.96);}
+@media(hover:hover){.stat[onclick]:hover{box-shadow:0 4px 14px rgba(0,0,0,0.1);transform:translateY(-1px);}}
 .sn{font-family:'DM Mono',monospace;font-size:1.25rem;font-weight:500;}
 .sl{font-size:0.63rem;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;margin-top:2px;}
 .stat-blue{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#bfdbfe;}

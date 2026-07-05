@@ -209,10 +209,10 @@ function toggleEye(inputId, btn) {
     <!-- 1. REVENUE -->
     <section id="sec-revenue" class="sec on">
       <div class="stats">
-        <div class="stat stat-blue"><div class="sn" id="d-students">0</div><div class="sl">Students</div></div>
-        <div class="stat stat-green"><div class="sn" id="d-collected" style="color:var(--money);font-size:1rem;">₦0</div><div class="sl">Collected</div></div>
-        <div class="stat stat-orange"><div class="sn" id="d-outstanding" style="color:var(--danger);font-size:1rem;">₦0</div><div class="sl">Outstanding</div></div>
-        <div class="stat stat-purple"><div class="sn" id="d-rate">0%</div><div class="sl">Collection Rate</div></div>
+        <div class="stat stat-blue" onclick="dashTileClick('students')"><div class="sn" id="d-students">0</div><div class="sl">Students</div></div>
+        <div class="stat stat-green" onclick="dashTileClick('collected')"><div class="sn" id="d-collected" style="color:var(--money);font-size:1rem;">₦0</div><div class="sl">Collected</div></div>
+        <div class="stat stat-orange" onclick="dashTileClick('outstanding')"><div class="sn" id="d-outstanding" style="color:var(--danger);font-size:1rem;">₦0</div><div class="sl">Outstanding</div></div>
+        <div class="stat stat-purple" onclick="dashTileClick('rate')"><div class="sn" id="d-rate">0%</div><div class="sl">Collection Rate</div></div>
       </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
