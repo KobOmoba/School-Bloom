@@ -7,7 +7,7 @@
   --sports:#11998e;--arts:#a18cd1;--music:#ff9a9e;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;padding-bottom:75px;min-height:100vh;}
+body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;padding-bottom:1.5rem;min-height:100vh;}
 
 /* LOGIN */
 .login{position:fixed;inset:0;background:linear-gradient(145deg,#f0f4ff,#faf8ff,#f0fdf4);display:flex;align-items:center;justify-content:center;padding:1.5rem;z-index:200;}
@@ -36,12 +36,24 @@ body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans
 .fh-primary{background:white;color:var(--brand);}
 .fh-ghost{background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.25);}
 
-/* NAV */
-.nav{background:white;border-top:1px solid var(--border);position:fixed;bottom:0;left:0;right:0;display:flex;overflow-x:auto;z-index:50;scrollbar-width:none;}
+/* NAV — slide-in drawer on mobile, permanent left rail on desktop */
+.hamburger{background:none;border:none;font-size:1.35rem;cursor:pointer;color:var(--text);padding:0.2rem 0.5rem 0.2rem 0;line-height:1;}
+.nav-backdrop{display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:59;}
+.nav-backdrop.on{display:block;}
+.nav{background:white;border-top:none;border-right:1px solid var(--border);position:fixed;top:0;bottom:0;left:0;width:250px;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;z-index:60;transform:translateX(-100%);transition:transform .25s ease;scrollbar-width:none;padding-bottom:1rem;}
 .nav::-webkit-scrollbar{display:none;}
-.nlink{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0.6rem 0.8rem;font-size:0.6rem;font-weight:600;color:var(--sub);cursor:pointer;border:none;background:none;transition:0.15s;font-family:'Plus Jakarta Sans',sans-serif;white-space:nowrap;}
-.nlink .ni{font-size:1.15rem;}
-.nlink.on{color:var(--brand);}
+.nav.open{transform:translateX(0);box-shadow:0 0 32px rgba(0,0,0,0.18);}
+.nav-brand{display:flex;align-items:center;gap:0.5rem;padding:1.1rem 1.1rem 0.9rem;font-weight:800;color:var(--brand);font-size:1rem;border-bottom:1px solid var(--border);margin-bottom:0.4rem;position:sticky;top:0;background:white;}
+.nlink{flex-shrink:0;display:flex;flex-direction:row;align-items:center;gap:0.7rem;padding:0.68rem 1.1rem;font-size:0.82rem;font-weight:600;color:var(--sub);cursor:pointer;border:none;background:none;transition:0.15s;font-family:'Plus Jakarta Sans',sans-serif;white-space:nowrap;text-align:left;width:100%;border-left:3px solid transparent;}
+.nlink .ni{font-size:1.2rem;width:1.4rem;text-align:center;flex-shrink:0;}
+.nlink.on{color:var(--brand);background:var(--s2);border-left-color:var(--brand);}
+.nlink:hover{background:var(--s2);}
+@media(min-width:980px){
+  .nav{transform:none !important;box-shadow:none !important;}
+  .nav-backdrop{display:none !important;}
+  .hamburger{display:none;}
+  .hdr,.fee-hero,.wrap{margin-left:250px;}
+}
 
 /* CONTAINER */
 .wrap{padding:0.85rem;max-width:600px;margin:0 auto;}
@@ -79,6 +91,10 @@ button{display:block;width:100%;padding:0.72rem;border:none;border-radius:10px;f
 .stat{background:white;border:1px solid var(--border);border-radius:11px;padding:0.8rem;text-align:center;box-shadow:var(--shadow);}
 .sn{font-family:'DM Mono',monospace;font-size:1.25rem;font-weight:500;}
 .sl{font-size:0.63rem;color:var(--sub);text-transform:uppercase;letter-spacing:0.04em;margin-top:2px;}
+.stat-blue{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#bfdbfe;}
+.stat-green{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0;}
+.stat-orange{background:linear-gradient(135deg,#fff7ed,#ffedd5);border-color:#fed7aa;}
+.stat-purple{background:linear-gradient(135deg,#faf5ff,#f3e8ff);border-color:#e9d5ff;}
 
 /* STUDENT LIST */
 .stu-row{display:flex;align-items:center;gap:0.7rem;padding:0.7rem;background:white;border:1px solid var(--border);border-radius:10px;margin-bottom:0.45rem;cursor:pointer;transition:0.15s;}

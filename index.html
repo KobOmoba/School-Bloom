@@ -190,9 +190,12 @@ function toggleEye(inputId, btn) {
   </div>
 
   <header class="hdr">
-    <div>
-      <div class="hdr-name" id="hdr-school">Loading...</div>
-      <div class="hdr-sub"><span id="hdr-role">—</span> · <span id="hdr-term">—</span></div>
+    <div style="display:flex;align-items:center;">
+      <button class="hamburger" id="hamburgerBtn" aria-label="Open menu">☰</button>
+      <div>
+        <div class="hdr-name" id="hdr-school">Loading...</div>
+        <div class="hdr-sub"><span id="hdr-role">—</span> · <span id="hdr-term">—</span></div>
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:7px;">
       <span id="planBadge" class="plan-badge plan-basic">Basic</span>
@@ -206,10 +209,10 @@ function toggleEye(inputId, btn) {
     <!-- 1. REVENUE -->
     <section id="sec-revenue" class="sec on">
       <div class="stats">
-        <div class="stat"><div class="sn" id="d-students">0</div><div class="sl">Students</div></div>
-        <div class="stat"><div class="sn" id="d-collected" style="color:var(--money);font-size:1rem;">₦0</div><div class="sl">Collected</div></div>
-        <div class="stat"><div class="sn" id="d-outstanding" style="color:var(--danger);font-size:1rem;">₦0</div><div class="sl">Outstanding</div></div>
-        <div class="stat"><div class="sn" id="d-rate">0%</div><div class="sl">Collection Rate</div></div>
+        <div class="stat stat-blue"><div class="sn" id="d-students">0</div><div class="sl">Students</div></div>
+        <div class="stat stat-green"><div class="sn" id="d-collected" style="color:var(--money);font-size:1rem;">₦0</div><div class="sl">Collected</div></div>
+        <div class="stat stat-orange"><div class="sn" id="d-outstanding" style="color:var(--danger);font-size:1rem;">₦0</div><div class="sl">Outstanding</div></div>
+        <div class="stat stat-purple"><div class="sn" id="d-rate">0%</div><div class="sl">Collection Rate</div></div>
       </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
@@ -1002,7 +1005,9 @@ function toggleEye(inputId, btn) {
   </main>
 
   <!-- BOTTOM NAV — all 16 sections -->
-  <nav class="nav">
+  <div class="nav-backdrop" id="navBackdrop"></div>
+  <nav class="nav" id="mainNav">
+    <div class="nav-brand">🌸 <span>Educational Bloom</span></div>
     <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue</button>
     <button class="nlink" data-t="students" onclick="go('students')"><span class="ni">🎓</span>Students</button>
     <button class="nlink" data-t="staff" onclick="go('staff')"><span class="ni">👥</span>Staff</button>
@@ -1508,5 +1513,22 @@ window.addEventListener('appinstalled', () => {
   </div>
 </div>
 
+
+<script>
+(function(){
+  var nav=document.getElementById('mainNav');
+  var backdrop=document.getElementById('navBackdrop');
+  var burger=document.getElementById('hamburgerBtn');
+  if(!nav||!backdrop||!burger) return;
+  function openNav(){nav.classList.add('open');backdrop.classList.add('on');}
+  function closeNav(){nav.classList.remove('open');backdrop.classList.remove('on');}
+  burger.addEventListener('click',function(){nav.classList.contains('open')?closeNav():openNav();});
+  backdrop.addEventListener('click',closeNav);
+  nav.addEventListener('click',function(e){
+    if(e.target.closest('.nlink') && window.innerWidth<980) closeNav();
+  });
+  window.addEventListener('resize',function(){ if(window.innerWidth>=980) closeNav(); });
+})();
+</script>
 </body>
 </html>
