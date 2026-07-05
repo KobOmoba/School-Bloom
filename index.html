@@ -190,8 +190,11 @@ function toggleEye(inputId, btn) {
   </div>
 
   <header class="hdr">
-    <div style="display:flex;align-items:center;">
+    <div style="display:flex;align-items:center;gap:0.55rem;">
       <button class="hamburger" id="hamburgerBtn" aria-label="Open menu">☰</button>
+      <div id="hdr-logo-badge" style="width:38px;height:38px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,var(--brand),#7c3aed);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:1rem;overflow:hidden;background-size:cover;background-position:center;">
+        <span id="hdr-logo-initial">S</span>
+      </div>
       <div>
         <div class="hdr-name" id="hdr-school">Loading...</div>
         <div class="hdr-sub"><span id="hdr-role">—</span> · <span id="hdr-term">—</span></div>
@@ -1007,7 +1010,12 @@ function toggleEye(inputId, btn) {
   <!-- BOTTOM NAV — all 16 sections -->
   <div class="nav-backdrop" id="navBackdrop"></div>
   <nav class="nav" id="mainNav">
-    <div class="nav-brand">🌸 <span>Educational Bloom</span></div>
+    <div class="nav-brand">
+      <div id="nav-logo-badge" style="width:28px;height:28px;border-radius:8px;flex-shrink:0;background:linear-gradient(135deg,var(--brand),#7c3aed);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:0.75rem;overflow:hidden;background-size:cover;background-position:center;">
+        <span id="nav-logo-initial">S</span>
+      </div>
+      <span id="nav-school-name">Educational Bloom</span>
+    </div>
     <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue</button>
     <button class="nlink" data-t="students" onclick="go('students')"><span class="ni">🎓</span>Students</button>
     <button class="nlink" data-t="staff" onclick="go('staff')"><span class="ni">👥</span>Staff</button>

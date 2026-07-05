@@ -4751,17 +4751,16 @@ function handleLogoBadgeTap() {
   else alert('Only the Principal can change the school logo.');
 }
 
-function handleLogoUpload(event) {
+async function handleLogoUpload(event) {
   const file = event.target.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const dUrl = e.target.result;
+  event.target.value = '';
+  try {
+    const dUrl = await _compressImage(file, 256, 0.8);
     SD.config.logo = dUrl;
     await SQ.push('config', SD.config); saveLocal('config', SD.config);
     updateLogoBadges(dUrl);
     toast('✅ School logo updated.');
-  };
-  reader.readAsDataURL(file);
+  } catch(e) { alert('Could not process logo. Try another image.'); }
 }
 
 function removeLogo() {
@@ -4779,14 +4778,21 @@ function updateLogoBadges(logoUrl) {
   const badge=$('school-logo-badge'), badgeText=$('school-logo-initial');
   const preview=$('settings-logo-preview'), previewText=$('settings-logo-initial');
   const nameEl=$('settings-logo-name');
+  const hdrBadge=$('hdr-logo-badge'), hdrInitial=$('hdr-logo-initial');
+  const navBadge=$('nav-logo-badge'), navInitial=$('nav-logo-initial'), navName=$('nav-school-name');
+  if (navName) navName.textContent = SD.config.schoolName || 'Educational Bloom';
   if (logoUrl) {
     if (badge)  { badge.style.backgroundImage=`url(${logoUrl})`; if(badgeText) badgeText.style.display='none'; }
     if (preview){ preview.style.backgroundImage=`url(${logoUrl})`; if(previewText) previewText.style.display='none'; }
     if (nameEl)  nameEl.textContent='School logo loaded';
+    if (hdrBadge)  { hdrBadge.style.backgroundImage=`url(${logoUrl})`; if(hdrInitial) hdrInitial.style.display='none'; }
+    if (navBadge)  { navBadge.style.backgroundImage=`url(${logoUrl})`; if(navInitial) navInitial.style.display='none'; }
   } else {
     if (badge)  { badge.style.backgroundImage='none'; if(badgeText){ badgeText.style.display='inline'; badgeText.textContent=initial; } }
     if (preview){ preview.style.backgroundImage='none'; if(previewText){ previewText.style.display='inline'; previewText.textContent=initial; } }
     if (nameEl)  nameEl.textContent='No logo uploaded';
+    if (hdrBadge)  { hdrBadge.style.backgroundImage='none'; if(hdrInitial){ hdrInitial.style.display='inline'; hdrInitial.textContent=initial; } }
+    if (navBadge)  { navBadge.style.backgroundImage='none'; if(navInitial){ navInitial.style.display='inline'; navInitial.textContent=initial; } }
   }
 }
 
