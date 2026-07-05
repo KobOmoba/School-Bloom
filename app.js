@@ -150,7 +150,8 @@ const GROQ_OCR_PROMPT = `You are reading a Nigerian school attendance/fee regist
 Columns: SERIAL NO | SURNAME | FIRST NAME | (other columns — ignore them).
 The image may be at any angle — read it correctly.
 
-TASK: Extract every student name visible. Combine as "SURNAME FIRSTNAME" (all caps).
+TASK 1: Extract every student name visible. Combine as "SURNAME FIRSTNAME" (all caps).
+TASK 2: Look for a class/form name written anywhere on the page — usually in a header, title, or top corner (e.g. "JSS 2A REGISTER", "PRIMARY 5 CLASS LIST", "SS1 GOLD", "NURSERY 2"). If found, return it as "detected_class" (all caps, e.g. "JSS 2A"). If no class name is visible anywhere, return "" — do NOT guess.
 
 Nigerian name examples — surnames: OGUNLADE, KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, SHONPE, GBELEKALE, OLIYIDE, KOLANOLE, ADEGUNLE, ADEOYE, LAWAL, AYOMIDE, OBASA, OLATUNDE, ADENIYI, OLOOETU
 Firstnames: GABRIEL, RASAQ, GODWIN, ENOCH, ABIGEAL, KOREDE, MICHEAL, ADEMIDE, SUCCESS, EZEKIEL, AWAL, EMMANUEL, BIGGOLD, QUARDRI, MUEEZ, ZAINAB, SALAM, WAJUD
@@ -161,7 +162,11 @@ Rules:
 3. Unclear handwriting — make your BEST guess at the Nigerian name
 4. Output ONLY the JSON below — no explanation, no markdown, no extra text
 
-{"names":["OGUNLADE GABRIEL","KASALI RASAQ","ALAWODE SUCCESS"]}`;
+{"names":["OGUNLADE GABRIEL","KASALI RASAQ","ALAWODE SUCCESS"],"detected_class":"JSS 2A"}`;
+
+// Set by groqVisionOCR/hfVisionOCR when the model spots a class/form header on the page.
+// Reset to '' at the start of each new multi-page scan (see processImagesSequentially).
+let _lastDetectedClass = '';
 
 const HF_OCR_MODEL = 'Qwen/Qwen2.5-VL-7B-Instruct';
 const HF_KEY_STORAGE = 'hf_api_key';
@@ -247,6 +252,14 @@ async function hfVisionOCR(base64, mime) {
   text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   let jsonStr = text.trim();
   const cb = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/); if (cb) jsonStr = cb[1].trim();
+  // Try to capture a detected_class before the array-only regexes below strip it out
+  try {
+    const rawParsed = JSON.parse(jsonStr);
+    if (rawParsed && !Array.isArray(rawParsed) && rawParsed.detected_class) {
+      const dc = String(rawParsed.detected_class).trim().toUpperCase();
+      if (dc) _lastDetectedClass = dc;
+    }
+  } catch(_) {}
   const ow = jsonStr.match(/\{[\s\S]*"students"\s*:\s*(\[[\s\S]*\])\s*\}/); if (ow) jsonStr = ow[1].trim();
   const am = jsonStr.match(/(\[[\s\S]*\])/); if (am) jsonStr = am[1].trim();
   let students;
@@ -385,6 +398,10 @@ async function groqVisionOCR(base64, mime, _retry) {
   catch(_) {
     const fallbackNames = (typeof extractNamesFromText === 'function') ? extractNamesFromText(text) : [];
     return fallbackNames.map(n => { const p=n.trim().toUpperCase().split(/\s+/); return {surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n.trim().toUpperCase()}; }).filter(s=>s.fullName.length>=3);
+  }
+  if (parsed && !Array.isArray(parsed) && parsed.detected_class) {
+    const dc = String(parsed.detected_class).trim().toUpperCase();
+    if (dc) _lastDetectedClass = dc;
   }
   const names = Array.isArray(parsed) ? parsed : (parsed.names || parsed.students || []);
   if (!Array.isArray(names) || !names.length) throw new Error('Groq returned 0 names');
@@ -1629,6 +1646,7 @@ async function processImagesSequentially(files) {
   const GROQ_DELAY_S = 15;
   if (files.length > 0) ocrOverlayShow(files[0].name || 'image');
   _groqRateLimitedThisSession = false; // fresh scan — give Groq another chance
+  _lastDetectedClass = ''; // fresh scan — clear any class detected during a previous scan
   for (let i = 0; i < files.length; i++) {
     if (i > 0 && files.length > 1) {
       for (let s = GROQ_DELAY_S; s > 0; s--) {
@@ -1659,7 +1677,7 @@ async function processImagesSequentially(files) {
     return k.length > 1 && !existingKeys.has(k);
   });
   if (fbEl) fbEl.textContent = '✅ Found ' + fresh.length + ' name' + (fresh.length !== 1 ? 's' : '') + ' — review below.';
-  setTimeout(() => { openOcrReviewModal(fresh); }, 250);
+  setTimeout(() => { openOcrReviewModal(fresh, _lastDetectedClass); }, 250);
 }
 
 // ── OCR Review Modal — exact copy of the Bloom Agent review UI, including
@@ -1667,13 +1685,61 @@ async function processImagesSequentially(files) {
 // (global `button{width:100%}` was stretching the ✕ button over the name field).
 let _ocrReviewData = [];
 
-function openOcrReviewModal(parsedNames) {
+// ── Known classes for the dropdowns — merges classes already used in the
+// roster with a standard Nigerian curriculum list, so the dropdown is useful
+// even for a brand-new school with zero students so far.
+function getKnownClasses() {
+  const existing = [...new Set((SD.students || []).map(s => (s.class || '').trim().toUpperCase()).filter(Boolean))];
+  const defaults = ['NURSERY 1','NURSERY 2','KG 1','KG 2','PRIMARY 1','PRIMARY 2','PRIMARY 3','PRIMARY 4','PRIMARY 5','PRIMARY 6','JSS 1','JSS 2','JSS 3','SS 1','SS 2','SS 3'];
+  return [...new Set([...existing, ...defaults])].sort();
+}
+
+// Fills a <select> with known classes + a "New class…" option, preserving `current`.
+function populateClassSelect(sel, current) {
+  const cur = (current || sel.value || '').trim().toUpperCase();
+  let classes = getKnownClasses();
+  if (cur && !classes.includes(cur)) classes = [...classes, cur].sort();
+  let html = '<option value="">— Select —</option>';
+  html += classes.map(c => `<option value="${esc(c)}" ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  html += '<option value="__new__">➕ New class…</option>';
+  sel.innerHTML = html;
+}
+
+// Handles the "➕ New class…" option on any class <select> — prompts once, adds
+// the custom value as a real option, and selects it. Resets to blank if cancelled.
+function handleClassSelectChange(sel) {
+  if (sel.value !== '__new__') return;
+  const v = (prompt('Enter class name (e.g. JSS 2A):') || '').trim().toUpperCase();
+  if (v) {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v; opt.selected = true;
+    sel.insertBefore(opt, sel.lastElementChild);
+  } else {
+    sel.value = '';
+  }
+}
+
+// Bulk "apply to all selected" dropdown at the top of the review modal —
+// picking a class auto-applies it immediately (Set → button still works too).
+function bulkClassChanged(sel) {
+  handleClassSelectChange(sel);
+  if (sel.value && sel.value !== '__new__') ocrSetClassAll();
+}
+
+function openOcrReviewModal(parsedNames, detectedClass) {
+  const dc = (detectedClass || '').trim().toUpperCase();
   _ocrReviewData = (parsedNames || []).map(p => {
     const nm = typeof p === 'string' ? p : (p.name || p.fullName || '');
-    return { name: nm.trim().toUpperCase(), cls: '', sel: true };
+    return { name: nm.trim().toUpperCase(), cls: dc, sel: true };
   }).filter(r => r.name.length > 1);
   _renderOcrReviewList();
   openM('ocr-review-modal');
+  setTimeout(() => {
+    const bulkSel = document.getElementById('ocr-class-all');
+    if (bulkSel) populateClassSelect(bulkSel, dc);
+    const info = document.getElementById('ocr-review-info');
+    if (info && dc) info.textContent = '🤖 Detected class from the page header: ' + dc + ' — auto-filled below, edit if wrong, then tap Add.';
+  }, 30);
 }
 
 function _renderOcrReviewList() {
@@ -1692,10 +1758,10 @@ function _renderOcrReviewList() {
     ni.type = 'text'; ni.value = r.name || ''; ni.autocomplete = 'off'; ni.setAttribute('autocapitalize','off');
     ni.style.cssText = 'flex:1;margin:0;padding:3px 6px;font-size:0.78rem;min-width:0;text-transform:uppercase;border:1px solid #2d4562;border-radius:6px;background:#0f1d2e !important;color:#f0f6ff !important;-webkit-text-fill-color:#f0f6ff;caret-color:#f0f6ff;';
     (function(idx){ ni.onchange = function(){ _ocrReviewData[idx].name = this.value.trim().toUpperCase(); }; })(i);
-    const ci = document.createElement('input');
-    ci.type = 'text'; ci.value = r.cls || ''; ci.placeholder = 'Class'; ci.autocomplete = 'off';
-    ci.style.cssText = 'width:64px;flex-shrink:0;margin:0;padding:3px 5px;font-size:0.74rem;border:1px solid #2d4562;border-radius:6px;background:#0f1d2e !important;color:#f0f6ff !important;-webkit-text-fill-color:#f0f6ff;caret-color:#f0f6ff;';
-    (function(idx){ ci.onchange = function(){ _ocrReviewData[idx].cls = this.value.trim(); }; })(i);
+    const ci = document.createElement('select');
+    ci.style.cssText = 'width:82px;flex-shrink:0;margin:0;padding:3px 2px;font-size:0.7rem;border:1px solid #2d4562;border-radius:6px;background:#0f1d2e !important;color:#f0f6ff !important;';
+    populateClassSelect(ci, r.cls);
+    (function(idx){ ci.onchange = function(){ handleClassSelectChange(this); _ocrReviewData[idx].cls = this.value === '__new__' ? '' : this.value; }; })(i);
     const db = document.createElement('button');
     db.textContent = '\u2715';
     db.style.cssText = 'width:auto;display:inline-block;flex:0 0 auto;background:#fef2f2;border:1px solid #fecaca;border-radius:5px;padding:2px 7px;cursor:pointer;font-size:0.72rem;color:#dc2626;flex-shrink:0;';
@@ -1727,7 +1793,7 @@ function ocrSelectAll(checked) {
 
 function ocrSetClassAll() {
   const cls = (document.getElementById('ocr-class-all')?.value || '').trim();
-  if (!cls) return;
+  if (!cls || cls === '__new__') return;
   _ocrReviewData.forEach(r => { if (r.sel) r.cls = cls; });
   _renderOcrReviewList();
 }
