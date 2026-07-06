@@ -3955,13 +3955,14 @@ function populateScoreOCRSelectors(){
 }
 function socrPickPhoto(){$('socr-img-input')?.click();}
 
-function _buildScoreOcrPrompt(sub, termLabel){
-  return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}, ${termLabel}.
-The sheet may show MULTIPLE terms side by side as separate column blocks (e.g. "1ST TERM", "2ND TERM", "3RD TERM"). ONLY read the columns under the "${termLabel}" block — ignore other terms' columns entirely.
-Within that term's block, the columns are typically: 1st CA | 2nd CA | 3rd CA | Total | Exam | Total | Position — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
-Read every student row. If a CA or exam cell is blank/illegible, use 0.
-Return ONLY valid JSON, no markdown, no explanation:
-[{"name":"SURNAME FIRSTNAME","ca1":8,"ca2":9,"ca3":7,"exam":58},...]
+function _buildScoreOcrPrompt(sub){
+  return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}.
+The sheet typically shows THREE terms side by side as separate column blocks: "1ST TERM", "2ND TERM", "3RD TERM".
+Within EACH term's block, the columns are: 1st CA | 2nd CA | 3rd CA | Exam — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
+Read EVERY student row and ALL THREE terms. If a cell is blank/illegible, use 0.
+If the sheet only has one or two terms, fill the missing terms with zeros.
+Return ONLY valid JSON, no markdown, no explanation — an array where each entry has the student name plus t1, t2, t3 objects:
+[{"name":"SURNAME FIRSTNAME","t1":{"ca1":8,"ca2":9,"ca3":7,"exam":58},"t2":{"ca1":7,"ca2":8,"ca3":9,"exam":62},"t3":{"ca1":0,"ca2":0,"ca3":0,"exam":0}},...]
 Match names exactly as written (all caps).`;
 }
 
@@ -3975,11 +3976,11 @@ function _parseScoreOcrJson(raw){
 async function _groqScoreOCR(b64, mime, prompt){
   const groqKey=getGroqKey();
   if(!groqKey) throw new Error('No Groq key configured');
-  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),45000);
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),60000);
   let r;
   try {
     r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:1200,
+      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:4000,
       messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
     })});
   } finally { clearTimeout(timer); }
@@ -3998,7 +3999,7 @@ async function _hfScoreOCR(b64, mime, prompt){
   let r;
   try {
     r=await fetch('https://api-inference.huggingface.co/models/'+HF_OCR_MODEL+'/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Authorization':'Bearer '+hfKey,'Content-Type':'application/json'},body:JSON.stringify({
-      model: HF_OCR_MODEL, temperature:0.2, max_tokens:1200,
+      model: HF_OCR_MODEL, temperature:0.2, max_tokens:4000,
       messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
     })});
   } finally { clearTimeout(timer); }
@@ -4012,42 +4013,112 @@ async function _hfScoreOCR(b64, mime, prompt){
 
 function _renderScoreOcrPreview(rows, classStudents){
   const statusEl=$('socr-status');
-  if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Found ${rows.length} entries. Review before saving:</span>`;
+  if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Found ${rows.length} entries — all 3 terms. Review before saving:</span>`;
   const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
-  let pHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
-    <table class="stbl" style="font-size:0.72rem;"><thead><tr><th>Student Name</th><th>1CA/10</th><th>2CA/10</th><th>3CA/10</th><th>Exam/70</th></tr></thead><tbody>`;
-  rows.forEach(item=>{
-    pHTML+=`<tr class="socr-preview-row" data-name="${esc(item.name||'')}">
-      <td><b>${esc(item.name||'')}</b></td>
-      <td><input type="number" min="0" max="10" class="socr-ca1-val" value="${item.ca1||0}" style="width:42px;padding:3px;margin:0;"></td>
-      <td><input type="number" min="0" max="10" class="socr-ca2-val" value="${item.ca2||0}" style="width:42px;padding:3px;margin:0;"></td>
-      <td><input type="number" min="0" max="10" class="socr-ca3-val" value="${item.ca3||0}" style="width:42px;padding:3px;margin:0;"></td>
-      <td><input type="number" min="0" max="70" class="socr-exam-val" value="${item.exam||0}" style="width:48px;padding:3px;margin:0;"></td>
-    </tr>`;
+
+  // Build a 3-term tabbed preview. Each row has t1/t2/t3 objects.
+  // Normalize: if rows have flat ca1/ca2/ca3/exam (Tesseract fallback), wrap into t1.
+  const normalized = rows.map(r => {
+    if (r.t1) return r;
+    return { name: r.name, t1: { ca1:r.ca1||0, ca2:r.ca2||0, ca3:r.ca3||0, exam:r.exam||0 }, t2:{ca1:0,ca2:0,ca3:0,exam:0}, t3:{ca1:0,ca2:0,ca3:0,exam:0} };
   });
-  pHTML+=`</tbody></table></div>`;
+
+  // Term tabs
+  let pHTML = `<div style="margin-top:0.5rem;">
+    <div style="display:flex;gap:0.3rem;margin-bottom:0.4rem;">
+      <button id="socr-tab-t1" class="socr-term-tab" onclick="socrSwitchTermTab(1)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--brand);background:var(--brand);color:#fff;font-size:0.75rem;font-weight:700;cursor:pointer;">Term 1</button>
+      <button id="socr-tab-t2" class="socr-term-tab" onclick="socrSwitchTermTab(2)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:0.75rem;font-weight:700;cursor:pointer;">Term 2</button>
+      <button id="socr-tab-t3" class="socr-term-tab" onclick="socrSwitchTermTab(3)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:0.75rem;font-weight:700;cursor:pointer;">Term 3</button>
+    </div>`;
+
+  // Render all 3 term tables, only show the active one
+  for (let t = 1; t <= 3; t++) {
+    const tKey = 't' + t;
+    pHTML += `<div id="socr-term-${t}-panel" style="display:${t===1?'block':'none'};">
+      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.3rem;">
+        <table class="stbl" style="font-size:0.72rem;width:100%;">
+          <thead><tr>
+            <th style="text-align:left;">Student Name</th>
+            <th>1CA</th><th>2CA</th><th>3CA</th><th>Exam</th><th></th>
+          </tr></thead><tbody>`;
+    normalized.forEach((item, idx) => {
+      const td = item[tKey] || { ca1:0, ca2:0, ca3:0, exam:0 };
+      pHTML += `<tr class="socr-preview-row socr-row-${idx}" data-name="${esc(item.name||'')}" data-row-idx="${idx}">
+        <td style="text-align:left;"><b>${esc(item.name||'')}</b></td>
+        <td><input type="number" min="0" max="10" class="socr-t${t}-ca1" data-term="${t}" data-field="ca1" value="${td.ca1||0}" style="width:36px;padding:2px;margin:0;font-size:0.7rem;"></td>
+        <td><input type="number" min="0" max="10" class="socr-t${t}-ca2" data-term="${t}" data-field="ca2" value="${td.ca2||0}" style="width:36px;padding:2px;margin:0;font-size:0.7rem;"></td>
+        <td><input type="number" min="0" max="10" class="socr-t${t}-ca3" data-term="${t}" data-field="ca3" value="${td.ca3||0}" style="width:36px;padding:2px;margin:0;font-size:0.7rem;"></td>
+        <td><input type="number" min="0" max="70" class="socr-t${t}-exam" data-term="${t}" data-field="exam" value="${td.exam||0}" style="width:42px;padding:2px;margin:0;font-size:0.7rem;"></td>
+        <td><button onclick="socrSwapRow(${idx})" style="font-size:0.6rem;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:transparent;cursor:pointer;" title="Swap with next row">⇅</button></td>
+      </tr>`;
+    });
+    pHTML += `</tbody></table></div></div>`;
+  }
+
+  pHTML += `</div>`;
+
   const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
   const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
+
+  // Store normalized data for save + swap
+  window._socrPreviewData = normalized;
+}
+
+// ── Term tab switcher ──
+function socrSwitchTermTab(t) {
+  for (let i = 1; i <= 3; i++) {
+    const panel = $('socr-term-' + i + '-panel');
+    const tab = $('socr-tab-t' + i);
+    if (panel) panel.style.display = (i === t) ? 'block' : 'none';
+    if (tab) {
+      if (i === t) { tab.style.background = 'var(--brand)'; tab.style.color = '#fff'; tab.style.borderColor = 'var(--brand)'; }
+      else { tab.style.background = 'transparent'; tab.style.color = 'var(--text)'; tab.style.borderColor = 'var(--border)'; }
+    }
+  }
+}
+
+// ── Swap two adjacent rows (fixes Tesseract positional mismatches) ──
+function socrSwapRow(idx) {
+  const data = window._socrPreviewData;
+  if (!data || idx >= data.length - 1) return;
+  // Swap in data array
+  [data[idx], data[idx + 1]] = [data[idx + 1], data[idx]];
+  // Re-render with current input values preserved
+  // First, capture current input values from all 3 term panels
+  const captured = data.map((item, i) => {
+    const row = document.querySelector('.socr-row-' + i);
+    if (!row) return item;
+    const updated = { name: item.name, t1: {...item.t1}, t2: {...item.t2}, t3: {...item.t3} };
+    for (let t = 1; t <= 3; t++) {
+      ['ca1','ca2','ca3','exam'].forEach(f => {
+        const inp = row.querySelector('.socr-t' + t + '-' + f);
+        if (inp) updated['t' + t][f] = parseInt(inp.value) || 0;
+      });
+    }
+    return updated;
+  });
+  // Swap in captured too
+  [captured[idx], captured[idx + 1]] = [captured[idx + 1], captured[idx]];
+  window._socrPreviewData = captured;
+  // Re-render
+  _renderScoreOcrPreview(captured, SD.students.filter(s => s.class === $('socr-class')?.value));
 }
 
 function _renderScoreOcrManualGrid(classStudents){
   const statusEl=$('socr-status');
   if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">⚠️ Could not auto-read this photo. Enter scores manually below, or tap Rescan to try a clearer photo:</span>';
   const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
-  let pHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
-    <table class="stbl" style="font-size:0.72rem;"><thead><tr><th>Student Name</th><th>1CA/10</th><th>2CA/10</th><th>3CA/10</th><th>Exam/70</th></tr></thead><tbody>`;
-  classStudents.forEach(s=>{
-    pHTML+=`<tr class="socr-preview-row" data-name="${esc(s.name)}">
-      <td><b>${esc(s.name)}</b></td>
-      <td><input type="number" min="0" max="10" class="socr-ca1-val" value="" style="width:42px;padding:3px;margin:0;" placeholder="0"></td>
-      <td><input type="number" min="0" max="10" class="socr-ca2-val" value="" style="width:42px;padding:3px;margin:0;" placeholder="0"></td>
-      <td><input type="number" min="0" max="10" class="socr-ca3-val" value="" style="width:42px;padding:3px;margin:0;" placeholder="0"></td>
-      <td><input type="number" min="0" max="70" class="socr-exam-val" value="" style="width:48px;padding:3px;margin:0;" placeholder="0"></td>
-    </tr>`;
-  });
-  pHTML+=`</tbody></table></div>`;
-  const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
-  const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
+
+  // Build manual grid with all 3 terms, same tabbed layout
+  const manualRows = classStudents.map(s => ({
+    name: s.name.toUpperCase(),
+    t1: { ca1:0, ca2:0, ca3:0, exam:0 },
+    t2: { ca1:0, ca2:0, ca3:0, exam:0 },
+    t3: { ca1:0, ca2:0, ca3:0, exam:0 }
+  }));
+  _renderScoreOcrPreview(manualRows, classStudents);
+  // Override the status message for manual mode
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not auto-read. Enter scores manually — switch between Term 1/2/3 tabs:</span>';
 }
 
 function socrRescan(){
@@ -4065,8 +4136,6 @@ async function socrHandleImage(event){
   const actionRow = $('socr-action-row'); if (actionRow) actionRow.style.display = 'none';
   const cls = $('socr-class')?.value;
   const sub = $('socr-subj')?.value;
-  const termMap = {'1':'Term 1','2':'Term 2','3':'Term 3'};
-  const termLabel = termMap[$('socr-term')?.value] || 'Term 1';
   const classStudents = SD.students.filter(s => s.class === cls);
   if (!classStudents.length) { if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">No students in this class.</span>'; return; }
 
@@ -4077,20 +4146,20 @@ async function socrHandleImage(event){
   });
   const ocrFiles = files.filter(f => !csvOnly.includes(f));
 
-  // Handle CSV/TXT files — parse names + scores directly
+  // Handle CSV/TXT files — parse names + scores directly (all 3 terms)
   csvOnly.forEach(f => {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">📄 Reading CSV/text file...</span>';
-    socrHandleCSVFile(f, classStudents, sub, termLabel, statusEl);
+    socrHandleCSVFile(f, classStudents, sub, statusEl);
   });
 
-  // Handle image/PDF files — full OCR pipeline
+  // Handle image/PDF files — full OCR pipeline (reads all 3 terms at once)
   if (ocrFiles.length) {
-    await socrHandleImageFiles(ocrFiles, classStudents, sub, termLabel, statusEl);
+    await socrHandleImageFiles(ocrFiles, classStudents, sub, statusEl);
   }
 }
 
-// ── CSV/TXT handler for score sheets ──
-function socrHandleCSVFile(file, classStudents, sub, termLabel, statusEl) {
+// ── CSV/TXT handler for score sheets (supports all 3 terms) ──
+function socrHandleCSVFile(file, classStudents, sub, statusEl) {
   const reader = new FileReader();
   reader.onload = ev => {
     try {
@@ -4101,8 +4170,7 @@ function socrHandleCSVFile(file, classStudents, sub, termLabel, statusEl) {
         return;
       }
 
-      // Try to detect header row
-      const hasHeader = /name|student|ca|exam|score|total/i.test(lines[0]);
+      const hasHeader = /name|student|ca|exam|score|total|term/i.test(lines[0]);
       const dataLines = hasHeader ? lines.slice(1) : lines;
       const rows = [];
 
@@ -4115,22 +4183,37 @@ function socrHandleCSVFile(file, classStudents, sub, termLabel, statusEl) {
         if (!name || name.length < 2) return;
         if (/^(s\/n|serial|no\.?|total|class|#)/i.test(name)) return;
 
-        // Parse scores: ca1, ca2, ca3, exam (flexible positions)
+        // Parse all numbers after the name
+        // Expected formats:
+        //   Name, T1CA1, T1CA2, T1CA3, T1Exam, T2CA1, T2CA2, T2CA3, T2Exam, T3CA1, T3CA2, T3CA3, T3Exam
+        //   OR: Name, CA1, CA2, CA3, Exam  (single term — fill t2/t3 with zeros)
         const nums = parts.slice(1).map(p => parseFloat(p) || 0);
-        rows.push({
-          name: name.toUpperCase(),
-          ca1: Math.min(nums[0] || 0, 10),
-          ca2: Math.min(nums[1] || 0, 10),
-          ca3: Math.min(nums[2] || 0, 10),
-          exam: Math.min(nums[3] || 0, 70)
-        });
+        const row = { name: name.toUpperCase() };
+
+        if (nums.length >= 12) {
+          // All 3 terms present
+          row.t1 = { ca1: Math.min(nums[0],10), ca2: Math.min(nums[1],10), ca3: Math.min(nums[2],10), exam: Math.min(nums[3],70) };
+          row.t2 = { ca1: Math.min(nums[4],10), ca2: Math.min(nums[5],10), ca3: Math.min(nums[6],10), exam: Math.min(nums[7],70) };
+          row.t3 = { ca1: Math.min(nums[8],10), ca2: Math.min(nums[9],10), ca3: Math.min(nums[10],10), exam: Math.min(nums[11],70) };
+        } else if (nums.length >= 8) {
+          // 2 terms
+          row.t1 = { ca1: Math.min(nums[0],10), ca2: Math.min(nums[1],10), ca3: Math.min(nums[2],10), exam: Math.min(nums[3],70) };
+          row.t2 = { ca1: Math.min(nums[4],10), ca2: Math.min(nums[5],10), ca3: Math.min(nums[6],10), exam: Math.min(nums[7],70) };
+          row.t3 = { ca1:0, ca2:0, ca3:0, exam:0 };
+        } else {
+          // Single term (legacy CSV)
+          row.t1 = { ca1: Math.min(nums[0]||0,10), ca2: Math.min(nums[1]||0,10), ca3: Math.min(nums[2]||0,10), exam: Math.min(nums[3]||0,70) };
+          row.t2 = { ca1:0, ca2:0, ca3:0, exam:0 };
+          row.t3 = { ca1:0, ca2:0, ca3:0, exam:0 };
+        }
+        rows.push(row);
       });
 
       if (rows.length) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--money);">✅ Read ${rows.length} entries from CSV.</span>`;
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--money);">✅ Read ${rows.length} entries (all 3 terms) from CSV.</span>`;
         _renderScoreOcrPreview(rows, classStudents);
       } else {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">No score data found in CSV. Expected: Name, CA1, CA2, CA3, Exam</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">No score data found in CSV.</span>';
         _renderScoreOcrManualGrid(classStudents);
       }
     } catch (err) {
@@ -4147,8 +4230,8 @@ function socrHandleCSVFile(file, classStudents, sub, termLabel, statusEl) {
 }
 
 // ── Image/PDF handler — full OpenCV + Groq → HF → Tesseract pipeline ──
-async function socrHandleImageFiles(files, classStudents, sub, termLabel, statusEl) {
-  const prompt = _buildScoreOcrPrompt(sub, termLabel);
+async function socrHandleImageFiles(files, classStudents, sub, statusEl) {
+  const prompt = _buildScoreOcrPrompt(sub);
   const allRows = [];
   let usedTesseractFallback = false;
 
@@ -4284,6 +4367,9 @@ function loadTesseract() {
 // This guarantees the names shown are always correct, real student names —
 // only the numbers came from OCR, and the user reviews/edits them anyway.
 async function socrTesseractOCR(dataURL, classStudents) {
+  // Tesseract can't reliably distinguish 3 term column blocks, so we only
+  // try to read Term 1 numbers positionally. t2/t3 stay as zeros — the user
+  // can fill them in the review table or re-scan for AI vision to pick up.
   const ready = await loadTesseract();
   if (!ready) throw new Error('Tesseract.js not loaded');
 
@@ -4394,26 +4480,51 @@ async function socrRenderPDFToImages(file, statusEl) {
 
 async function socrSaveScores(){
   const cls=$('socr-class')?.value,sub=$('socr-subj')?.value;
-  const termMap={'1':'Term 1','2':'Term 2','3':'Term 3'};
-  const term=termMap[$('socr-term')?.value]||'Term 1';
-  if(!SD.scores[term]) SD.scores[term]={};
-  document.querySelectorAll('.socr-preview-row').forEach(row=>{
-    const name=row.getAttribute('data-name');
-    const ca1=parseInt(row.querySelector('.socr-ca1-val')?.value)||0;
-    const ca2=parseInt(row.querySelector('.socr-ca2-val')?.value)||0;
-    const ca3=parseInt(row.querySelector('.socr-ca3-val')?.value)||0;
-    const exam=parseInt(row.querySelector('.socr-exam-val')?.value)||0;
-    // Find student by name
-    const s=SD.students.find(st=>st.name===name||esc(st.name)===name);
-    if(!s) return;
-    const sid=s.id||SD.students.indexOf(s);
-    if(!SD.scores[term][sid]) SD.scores[term][sid]={};
-    // 3 CAs @10% each (30% total) + Exam @70% — matches the school's real grading structure
-    SD.scores[term][sid][sub]={ca1,ca2,ca3,exam};
+  const termNames={'1':'Term 1','2':'Term 2','3':'Term 3'};
+  const data = window._socrPreviewData;
+  if (!data || !data.length) { toast('No data to save.'); return; }
+
+  // Capture latest input values from the DOM (user may have edited)
+  const finalRows = data.map((item, i) => {
+    const row = document.querySelector('.socr-row-' + i);
+    const updated = { name: item.name, t1: {...(item.t1||{})}, t2: {...(item.t2||{})}, t3: {...(item.t3||{})} };
+    if (row) {
+      for (let t = 1; t <= 3; t++) {
+        ['ca1','ca2','ca3','exam'].forEach(f => {
+          const inp = row.querySelector('.socr-t' + t + '-' + f);
+          if (inp) updated['t' + t][f] = parseInt(inp.value) || 0;
+        });
+      }
+    }
+    return updated;
   });
-  await SQ.push('scores',SD.scores); saveLocal('scores',SD.scores);
-  toast('✅ Scores saved.'); closeM('score-ocr-modal');
-  if(typeof renderScorecard==='function') renderScorecard();
+
+  let saved = 0;
+  finalRows.forEach(item => {
+    const s = SD.students.find(st => st.name === item.name || esc(st.name) === item.name || st.name.toUpperCase() === item.name.toUpperCase());
+    if (!s) return;
+    const sid = s.id || SD.students.indexOf(s);
+
+    for (let t = 1; t <= 3; t++) {
+      const termName = termNames[String(t)];
+      const td = item['t' + t];
+      if (!td) continue;
+      if (!SD.scores[termName]) SD.scores[termName] = {};
+      if (!SD.scores[termName][sid]) SD.scores[termName][sid] = {};
+      SD.scores[termName][sid][sub] = {
+        ca1: td.ca1 || 0,
+        ca2: td.ca2 || 0,
+        ca3: td.ca3 || 0,
+        exam: td.exam || 0
+      };
+    }
+    saved++;
+  });
+
+  await SQ.push('scores', SD.scores); saveLocal('scores', SD.scores);
+  toast(`✅ Saved ${saved} students × 3 terms for ${sub}.`);
+  closeM('score-ocr-modal');
+  if (typeof renderScorecard === 'function') renderScorecard();
 }
 
 // ── Script Scan Modal ─────────────────────────────────────────────────────

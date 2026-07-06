@@ -1321,19 +1321,15 @@ function toggleEye(inputId, btn) {
   <div class="mbox" style="max-height:94vh;overflow-y:auto;">
     <div class="mhdr">📸 Scan Score Sheet</div>
     <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.75rem;">
-      Photograph a class score sheet. The app reads the names and scores and fills them in automatically.
+      Photograph a class broadsheet. The app reads all 3 terms — names, CAs, and exam scores — and fills them in automatically.
     </p>
 
-    <!-- Step 1: Pick class + subject + term -->
+    <!-- Step 1: Pick class + subject (all 3 terms are read in one scan) -->
     <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem;flex-wrap:wrap;">
       <select id="socr-class" style="flex:1;min-width:120px;margin:0;font-size:0.82rem;"></select>
       <select id="socr-subj" style="flex:2;min-width:140px;margin:0;font-size:0.82rem;"></select>
-      <select id="socr-term" style="flex:0 0 90px;margin:0;font-size:0.82rem;">
-        <option value="1">Term 1</option>
-        <option value="2">Term 2</option>
-        <option value="3">Term 3</option>
-      </select>
     </div>
+    <p style="font-size:0.7rem;color:var(--sub);margin-bottom:0.5rem;">📖 Reads all 3 terms (Term 1, 2 & 3) from the broadsheet in one scan</p>
 
     <!-- Step 2: Photo button — accepts ALL file types like the Agent app -->
     <input type="file" id="socr-img-input" accept="image/*,application/pdf,.csv,.txt,.doc,.docx,.xls,.xlsx,.webp,.heic,.heif,*/*"
