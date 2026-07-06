@@ -1742,6 +1742,12 @@ function populateClassFilter() {
   sel.innerHTML = '<option value="">All Classes</option>' + classes.map(c => `<option value="${esc(c)}" ${c===cur?'selected':''}>${esc(c)}</option>`).join('');
 }
 
+function openAddStudentModal() {
+  const sel = $('ns-class');
+  if (sel) populateClassSelect(sel, '');
+  openM('add-student-modal');
+}
+
 async function addStudent() {
   const name = $('ns-name').value.trim(), phone = $('ns-phone').value.trim().replace(/\D/g, '');
   const cls = $('ns-class').value.trim(), fee = parseFloat($('ns-fee').value) || SD.config.fee || 50000;
@@ -1788,7 +1794,7 @@ function editStudent(idx) {
       <input id="edit-s-phone" value="${esc(s.phone||'')}" placeholder="+2348012345678">
 
       <label>Class</label>
-      <input id="edit-s-class" value="${esc(s.class||'')}">
+      <select id="edit-s-class" onchange="handleClassSelectChange(this)"></select>
 
       <label>Gender</label>
       <select id="edit-s-gender" style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.6rem;">
@@ -1836,6 +1842,7 @@ function editStudent(idx) {
   }
   $('edit-student-modal-body').innerHTML = html;
   openM('edit-student-modal');
+  setTimeout(() => { const sel = $('edit-s-class'); if (sel) populateClassSelect(sel, s.class || ''); }, 20);
 }
 
 async function saveEditStudent(idx) {
@@ -3430,7 +3437,7 @@ function editStaff(idx) {
       <label>Email</label><input id="est-email" value="${esc(s.email||'')}">
       <label>Role</label>
       <select id="est-role">${['Class Teacher','Subject Teacher','Bursar','Principal'].map(r=>`<option value="${r}" ${s.role===r?'selected':''}>${r}</option>`).join('')}</select>
-      <label>Assigned Class</label><input id="est-class" value="${esc(s.assignedClass||'')}" placeholder="e.g. JSS 1A">
+      <label>Assigned Class</label><select id="est-class" onchange="handleClassSelectChange(this)"></select>
       <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
         <button class="btn-brand" style="flex:1;" onclick="saveEditStaff(${idx})">💾 Save</button>
         <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-staff-modal')">Cancel</button>
@@ -3444,6 +3451,7 @@ function editStaff(idx) {
   }
   $('edit-staff-modal-body').innerHTML = html;
   openM('edit-staff-modal');
+  setTimeout(() => { const sel = $('est-class'); if (sel) populateClassSelect(sel, s.assignedClass || ''); }, 20);
 }
 
 async function saveEditStaff(idx) {

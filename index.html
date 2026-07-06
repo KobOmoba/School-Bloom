@@ -253,7 +253,7 @@ function toggleEye(inputId, btn) {
         </select>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.6rem;">
-        <button class="btn-brand btn-sm" onclick="openM('add-student-modal')">➕ Add Student</button>
+        <button class="btn-brand btn-sm" onclick="openAddStudentModal()">➕ Add Student</button>
         <button class="btn-brand btn-sm" style="background:var(--money);" onclick="openClassAttendance()">📅 Attendance</button>
         <button class="btn-brand btn-sm" style="background:#7c3aed;" onclick="openSubjectScores()">📚 Scores</button>
         <button class="btn-brand btn-sm" style="background:#0891b2;" onclick="openScoreOCR()">📸 Scan Scores</button>
@@ -1078,7 +1078,7 @@ function toggleEye(inputId, btn) {
     <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Student</h3><button class="mclose" onclick="closeM('add-student-modal')">×</button></div>
     <label>Full Name</label><input type="text" id="ns-name" placeholder="e.g. Adebayo Okonkwo">
     <label>Parent's WhatsApp</label><input type="tel" id="ns-phone" placeholder="2348012345678">
-    <label>Class</label><input type="text" id="ns-class" placeholder="e.g. JSS 2, Primary 4, SSS 1">
+    <label>Class</label><select id="ns-class" onchange="handleClassSelectChange(this)"></select>
     <label>Termly Fee (₦) — blank uses default</label><input type="number" id="ns-fee" placeholder="Leave blank for default">
     <button class="btn-brand" onclick="addStudent()">✅ Add Student</button>
   </div>
