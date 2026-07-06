@@ -3886,17 +3886,21 @@ function renderSubjectScoreList(){
   const term=SD.config.currentTerm||'Term 1';
   const termScores=SD.scores[term]||{};
   listEl.innerHTML=`<div class="ss-row" style="font-weight:700;border-bottom:2px solid var(--border);">
-    <div>Student Name</div><div style="text-align:center;">CA/30</div><div style="text-align:center;">Exam/70</div><div style="text-align:center;">Total</div></div>`
+    <div>Student Name</div><div style="text-align:center;">1CA/10</div><div style="text-align:center;">2CA/10</div><div style="text-align:center;">3CA/10</div><div style="text-align:center;">Exam/70</div><div style="text-align:center;">Total</div></div>`
     +classStudents.map(s=>{
       const sid=s.id||SD.students.indexOf(s);
       const scoreRecord=termScores[sid]?.[sub]||{};
-      // Support both term-based (ca1+ca2+ca3) and any imported flat ca field
-      const caVal=scoreRecord.ca!==undefined?scoreRecord.ca:((scoreRecord.ca1||0)+(scoreRecord.ca2||0)+(scoreRecord.ca3||0))||'';
+      // Support legacy flat "ca" field (older single-CA records) by seeding ca1 with it
+      const ca1Val=scoreRecord.ca1!==undefined?scoreRecord.ca1:(scoreRecord.ca!==undefined?scoreRecord.ca:'');
+      const ca2Val=scoreRecord.ca2!==undefined?scoreRecord.ca2:'';
+      const ca3Val=scoreRecord.ca3!==undefined?scoreRecord.ca3:'';
       const examVal=scoreRecord.exam!==undefined?scoreRecord.exam:'';
-      const tot=(parseInt(caVal)||0)+(parseInt(examVal)||0);
+      const tot=(parseInt(ca1Val)||0)+(parseInt(ca2Val)||0)+(parseInt(ca3Val)||0)+(parseInt(examVal)||0);
       return `<div class="ss-row" data-sid="${sid}">
         <div style="font-weight:600;font-size:0.8rem;">${esc(s.name)}</div>
-        <div><input type="number" min="0" max="30" class="ss-inp ca-input" value="${caVal}" placeholder="0" oninput="recalcSSTotal(this)"></div>
+        <div><input type="number" min="0" max="10" class="ss-inp ca1-input" value="${ca1Val}" placeholder="0" oninput="recalcSSTotal(this)"></div>
+        <div><input type="number" min="0" max="10" class="ss-inp ca2-input" value="${ca2Val}" placeholder="0" oninput="recalcSSTotal(this)"></div>
+        <div><input type="number" min="0" max="10" class="ss-inp ca3-input" value="${ca3Val}" placeholder="0" oninput="recalcSSTotal(this)"></div>
         <div><input type="number" min="0" max="70" class="ss-inp exam-input" value="${examVal}" placeholder="0" oninput="recalcSSTotal(this)"></div>
         <div class="ss-tot">${tot||'–'}</div></div>`;
     }).join('');
@@ -3904,9 +3908,11 @@ function renderSubjectScoreList(){
 
 function recalcSSTotal(inputEl){
   const row=inputEl.closest('.ss-row'); if(!row) return;
-  const ca=parseInt(row.querySelector('.ca-input').value)||0;
+  const ca1=parseInt(row.querySelector('.ca1-input').value)||0;
+  const ca2=parseInt(row.querySelector('.ca2-input').value)||0;
+  const ca3=parseInt(row.querySelector('.ca3-input').value)||0;
   const exam=parseInt(row.querySelector('.exam-input').value)||0;
-  row.querySelector('.ss-tot').textContent=(ca+exam)||'–';
+  row.querySelector('.ss-tot').textContent=(ca1+ca2+ca3+exam)||'–';
 }
 
 async function saveSubjectScores(){
@@ -3916,11 +3922,13 @@ async function saveSubjectScores(){
   if(!SD.scores[term]) SD.scores[term]={};
   listEl.querySelectorAll('.ss-row[data-sid]').forEach(row=>{
     const sid=row.getAttribute('data-sid');
-    const ca=parseInt(row.querySelector('.ca-input').value)||0;
+    const ca1=parseInt(row.querySelector('.ca1-input').value)||0;
+    const ca2=parseInt(row.querySelector('.ca2-input').value)||0;
+    const ca3=parseInt(row.querySelector('.ca3-input').value)||0;
     const exam=parseInt(row.querySelector('.exam-input').value)||0;
     if(!SD.scores[term][sid]) SD.scores[term][sid]={};
-    // Store as ca1 so canonical model stays consistent; ca2/ca3 remain 0 for manual entry
-    SD.scores[term][sid][sub]={ca1:ca,ca2:0,ca3:0,exam};
+    // 3 CAs @10% each (30% total) + Exam @70% — matches the school's real grading structure
+    SD.scores[term][sid][sub]={ca1,ca2,ca3,exam};
   });
   await SQ.push('scores',SD.scores); saveLocal('scores',SD.scores);
   toast('✅ Scores Saved.'); closeM('subj-scores-modal');
@@ -3939,66 +3947,131 @@ function populateScoreOCRSelectors(){
 }
 function socrPickPhoto(){$('socr-img-input')?.click();}
 
+function _buildScoreOcrPrompt(sub, termLabel){
+  return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}, ${termLabel}.
+The sheet may show MULTIPLE terms side by side as separate column blocks (e.g. "1ST TERM", "2ND TERM", "3RD TERM"). ONLY read the columns under the "${termLabel}" block — ignore other terms' columns entirely.
+Within that term's block, the columns are typically: 1st CA | 2nd CA | 3rd CA | Total | Exam | Total | Position — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
+Read every student row. If a CA or exam cell is blank/illegible, use 0.
+Return ONLY valid JSON, no markdown, no explanation:
+[{"name":"SURNAME FIRSTNAME","ca1":8,"ca2":9,"ca3":7,"exam":58},...]
+Match names exactly as written (all caps).`;
+}
+
+function _parseScoreOcrJson(raw){
+  let text=(raw||'[]').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+  const cb=text.match(/```(?:json)?\s*([\s\S]*?)```/); if(cb) text=cb[1].trim();
+  const am=text.match(/(\[[\s\S]*\])/); if(am) text=am[1].trim();
+  return JSON.parse(text);
+}
+
+async function _groqScoreOCR(b64, mime, prompt){
+  const groqKey=getGroqKey();
+  if(!groqKey) throw new Error('No Groq key configured');
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),45000);
+  let r;
+  try {
+    r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
+      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:1200,
+      messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
+    })});
+  } finally { clearTimeout(timer); }
+  if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('Groq '+r.status+': '+(ed.error?.message||r.statusText)); }
+  const d=await r.json();
+  const raw=d.choices?.[0]?.message?.content||'[]';
+  const parsed=_parseScoreOcrJson(raw);
+  if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries');
+  return parsed;
+}
+
+async function _hfScoreOCR(b64, mime, prompt){
+  const hfKey=getHFKey();
+  if(!hfKey) throw new Error('No HF key configured');
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),45000);
+  let r;
+  try {
+    r=await fetch('https://api-inference.huggingface.co/models/'+HF_OCR_MODEL+'/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Authorization':'Bearer '+hfKey,'Content-Type':'application/json'},body:JSON.stringify({
+      model: HF_OCR_MODEL, temperature:0.2, max_tokens:1200,
+      messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
+    })});
+  } finally { clearTimeout(timer); }
+  if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('HF '+r.status+': '+(ed.error?.message||r.statusText)); }
+  const d=await r.json();
+  const raw=d.choices?.[0]?.message?.content||'[]';
+  const parsed=_parseScoreOcrJson(raw);
+  if(!Array.isArray(parsed)||!parsed.length) throw new Error('HF returned 0 score entries');
+  return parsed;
+}
+
+function _renderScoreOcrPreview(rows, classStudents){
+  const statusEl=$('socr-status');
+  if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Found ${rows.length} entries. Review before saving:</span>`;
+  let pHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
+    <table class="stbl" style="font-size:0.72rem;"><thead><tr><th>Student Name</th><th>1CA/10</th><th>2CA/10</th><th>3CA/10</th><th>Exam/70</th></tr></thead><tbody>`;
+  rows.forEach(item=>{
+    pHTML+=`<tr class="socr-preview-row" data-name="${esc(item.name||'')}">
+      <td><b>${esc(item.name||'')}</b></td>
+      <td><input type="number" min="0" max="10" class="socr-ca1-val" value="${item.ca1||0}" style="width:42px;padding:3px;margin:0;"></td>
+      <td><input type="number" min="0" max="10" class="socr-ca2-val" value="${item.ca2||0}" style="width:42px;padding:3px;margin:0;"></td>
+      <td><input type="number" min="0" max="10" class="socr-ca3-val" value="${item.ca3||0}" style="width:42px;padding:3px;margin:0;"></td>
+      <td><input type="number" min="0" max="70" class="socr-exam-val" value="${item.exam||0}" style="width:48px;padding:3px;margin:0;"></td>
+    </tr>`;
+  });
+  pHTML+=`</tbody></table></div>`;
+  const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
+  const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
+}
+
+function _renderScoreOcrManualGrid(classStudents){
+  const statusEl=$('socr-status');
+  if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">Could not auto-read. Please enter scores manually below:</span>';
+  let pHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
+    <table class="stbl" style="font-size:0.72rem;"><thead><tr><th>Student Name</th><th>1CA/10</th><th>2CA/10</th><th>3CA/10</th><th>Exam/70</th></tr></thead><tbody>`;
+  classStudents.forEach(s=>{
+    pHTML+=`<tr class="socr-preview-row" data-name="${esc(s.name)}">
+      <td><b>${esc(s.name)}</b></td>
+      <td><input type="number" min="0" max="10" class="socr-ca1-val" value="" style="width:42px;padding:3px;margin:0;" placeholder="0"></td>
+      <td><input type="number" min="0" max="10" class="socr-ca2-val" value="" style="width:42px;padding:3px;margin:0;" placeholder="0"></td>
+      <td><input type="number" min="0" max="10" class="socr-ca3-val" value="" style="width:42px;padding:3px;margin:0;" placeholder="0"></td>
+      <td><input type="number" min="0" max="70" class="socr-exam-val" value="" style="width:48px;padding:3px;margin:0;" placeholder="0"></td>
+    </tr>`;
+  });
+  pHTML+=`</tbody></table></div>`;
+  const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
+  const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
+}
+
 async function socrHandleImage(event){
   const file=event.target.files[0]; if(!file) return;
   const statusEl=$('socr-status');
+  const cls=$('socr-class')?.value;
+  const sub=$('socr-subj')?.value;
+  const termMap={'1':'Term 1','2':'Term 2','3':'Term 3'};
+  const termLabel=termMap[$('socr-term')?.value]||'Term 1';
+  const classStudents=SD.students.filter(s=>s.class===cls);
+  if(!classStudents.length){if(statusEl)statusEl.innerHTML='<span style="color:var(--danger);">No students in this class.</span>';return;}
   if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Reading score sheet with Groq...</span>';
   const reader=new FileReader();
   reader.onload=async ev=>{
     const b64=ev.target.result.split(',')[1];
     const mime=file.type||'image/jpeg';
-    const cls=$('socr-class')?.value;
-    const sub=$('socr-subj')?.value;
-    const classStudents=SD.students.filter(s=>s.class===cls);
-    if(!classStudents.length){if(statusEl)statusEl.innerHTML='<span style="color:var(--danger);">No students in this class.</span>';return;}
+    const prompt=_buildScoreOcrPrompt(sub, termLabel);
     try {
-      // Use Groq Vision to extract names + scores from score sheet
-      const groqKey = getGroqKey();
-      if (!groqKey) throw new Error('No Groq key configured');
-      const prompt=`Extract student names and their scores from this Nigerian school score sheet for subject: ${sub}.
-Return ONLY valid JSON array:
-[{"name":"Adaeze Okonkwo","ca":25,"exam":58},...]
-CA is continuous assessment (0-30 or 0-40), exam is exam score (0-60 or 0-70).
-Match names exactly as written. If you cannot read a score, use 0.`;
-      const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-        model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:800,
-        messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
-      })});
-      const d=await r.json();
-      let raw=(d.choices?.[0]?.message?.content||'[]').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
-      const cb=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(cb) raw=cb[1].trim();
-      const parsed=JSON.parse(raw);
-      if(parsed.length){
-        if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">\u2705 Groq found ${parsed.length} entries. Review below:</span>`;
-        let pHTML=`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
-          <table class="stbl" style="font-size:0.75rem;"><thead><tr><th>Student Name</th><th>CA</th><th>Exam</th></tr></thead><tbody>`;
-        parsed.forEach(item=>{
-          pHTML+=`<tr class="socr-preview-row" data-name="${esc(item.name)}">
-            <td><b>${esc(item.name)}</b></td>
-            <td><input type="number" class="socr-ca-val" value="${item.ca||0}" style="width:50px;padding:3px;margin:0;"></td>
-            <td><input type="number" class="socr-exam-val" value="${item.exam||0}" style="width:50px;padding:3px;margin:0;"></td>
-          </tr>`;
-        });
-        pHTML+=`</tbody></table></div>`;
-        const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
-        const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
-        return;
-      }
-    } catch(e){console.warn('Groq score OCR failed:',e);}
-    // Fallback: show manual grid
-    if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">Could not auto-read. Please enter scores manually below:</span>';
-    let pHTML=`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
-      <table class="stbl" style="font-size:0.75rem;"><thead><tr><th>Student Name</th><th>CA/30</th><th>Exam/70</th></tr></thead><tbody>`;
-    classStudents.forEach(s=>{
-      pHTML+=`<tr class="socr-preview-row" data-name="${esc(s.name)}">
-        <td><b>${esc(s.name)}</b></td>
-        <td><input type="number" class="socr-ca-val" value="" style="width:50px;padding:3px;margin:0;" placeholder="0"></td>
-        <td><input type="number" class="socr-exam-val" value="" style="width:50px;padding:3px;margin:0;" placeholder="0"></td>
-      </tr>`;
-    });
-    pHTML+=`</tbody></table></div>`;
-    const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
-    const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
+      const rows=await _groqScoreOCR(b64, mime, prompt);
+      _renderScoreOcrPreview(rows, classStudents);
+      return;
+    } catch(e1){
+      console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
+    }
+    if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Retrying with HuggingFace Vision...</span>';
+    try {
+      const rows=await _hfScoreOCR(b64, mime, prompt);
+      _renderScoreOcrPreview(rows, classStudents);
+      return;
+    } catch(e2){
+      console.warn('HF score OCR failed:', e2.message);
+    }
+    // Both engines failed — fall back to manual grid, pre-populated with student names
+    _renderScoreOcrManualGrid(classStudents);
   };
   reader.readAsDataURL(file);
 }
@@ -4010,14 +4083,17 @@ async function socrSaveScores(){
   if(!SD.scores[term]) SD.scores[term]={};
   document.querySelectorAll('.socr-preview-row').forEach(row=>{
     const name=row.getAttribute('data-name');
-    const ca=parseInt(row.querySelector('.socr-ca-val')?.value)||0;
+    const ca1=parseInt(row.querySelector('.socr-ca1-val')?.value)||0;
+    const ca2=parseInt(row.querySelector('.socr-ca2-val')?.value)||0;
+    const ca3=parseInt(row.querySelector('.socr-ca3-val')?.value)||0;
     const exam=parseInt(row.querySelector('.socr-exam-val')?.value)||0;
     // Find student by name
     const s=SD.students.find(st=>st.name===name||esc(st.name)===name);
     if(!s) return;
     const sid=s.id||SD.students.indexOf(s);
     if(!SD.scores[term][sid]) SD.scores[term][sid]={};
-    SD.scores[term][sid][sub]={ca1:ca,ca2:0,ca3:0,exam};
+    // 3 CAs @10% each (30% total) + Exam @70% — matches the school's real grading structure
+    SD.scores[term][sid][sub]={ca1,ca2,ca3,exam};
   });
   await SQ.push('scores',SD.scores); saveLocal('scores',SD.scores);
   toast('✅ Scores saved.'); closeM('score-ocr-modal');
