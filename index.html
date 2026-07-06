@@ -1348,10 +1348,15 @@ function toggleEye(inputId, btn) {
     <!-- Preview table — editable before saving -->
     <div id="socr-preview"></div>
 
-    <!-- Save button (hidden until results ready) -->
-    <button id="socr-save-btn" class="btn-money" style="display:none;margin-top:0.75rem;" onclick="socrSaveScores()">
-      💾 Save These Scores
-    </button>
+    <!-- Save + Rescan buttons (hidden until results/manual grid ready) -->
+    <div id="socr-action-row" style="display:none;gap:0.5rem;margin-top:0.75rem;">
+      <button id="socr-save-btn" class="btn-money" style="flex:2;display:none;" onclick="socrSaveScores()">
+        💾 Save These Scores
+      </button>
+      <button class="btn-ghost" style="flex:1;" onclick="socrRescan()">
+        🔄 Rescan
+      </button>
+    </div>
     <button class="btn-ghost btn-sm" style="margin-top:0.4rem;" onclick="closeM('score-ocr-modal')">Cancel</button>
   </div>
 </div>

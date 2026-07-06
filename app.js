@@ -4013,6 +4013,7 @@ async function _hfScoreOCR(b64, mime, prompt){
 function _renderScoreOcrPreview(rows, classStudents){
   const statusEl=$('socr-status');
   if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Found ${rows.length} entries. Review before saving:</span>`;
+  const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
   let pHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
     <table class="stbl" style="font-size:0.72rem;"><thead><tr><th>Student Name</th><th>1CA/10</th><th>2CA/10</th><th>3CA/10</th><th>Exam/70</th></tr></thead><tbody>`;
   rows.forEach(item=>{
@@ -4031,7 +4032,8 @@ function _renderScoreOcrPreview(rows, classStudents){
 
 function _renderScoreOcrManualGrid(classStudents){
   const statusEl=$('socr-status');
-  if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">Could not auto-read. Please enter scores manually below:</span>';
+  if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">⚠️ Could not auto-read this photo. Enter scores manually below, or tap Rescan to try a clearer photo:</span>';
+  const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
   let pHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:0.5rem;padding:0.5rem;">
     <table class="stbl" style="font-size:0.72rem;"><thead><tr><th>Student Name</th><th>1CA/10</th><th>2CA/10</th><th>3CA/10</th><th>Exam/70</th></tr></thead><tbody>`;
   classStudents.forEach(s=>{
@@ -4048,31 +4050,46 @@ function _renderScoreOcrManualGrid(classStudents){
   const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
 }
 
+function socrRescan(){
+  // Reset the modal back to Step 2 (photo taking) so the agent can try a clearer/better-lit shot.
+  const statusEl=$('socr-status'); if(statusEl) statusEl.innerHTML='';
+  const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML='';
+  const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='none';
+  const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='none';
+  const imgInput=$('socr-img-input'); if(imgInput) imgInput.value='';
+}
+
 async function socrHandleImage(event){
   const file=event.target.files[0]; if(!file) return;
   const statusEl=$('socr-status');
+  const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='none';
   const cls=$('socr-class')?.value;
   const sub=$('socr-subj')?.value;
   const termMap={'1':'Term 1','2':'Term 2','3':'Term 3'};
   const termLabel=termMap[$('socr-term')?.value]||'Term 1';
   const classStudents=SD.students.filter(s=>s.class===cls);
   if(!classStudents.length){if(statusEl)statusEl.innerHTML='<span style="color:var(--danger);">No students in this class.</span>';return;}
-  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Reading score sheet with Groq...</span>';
+  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Loading photo...</span>';
   const reader=new FileReader();
   reader.onload=async ev=>{
     const b64=ev.target.result.split(',')[1];
     const mime=file.type||'image/jpeg';
     const prompt=_buildScoreOcrPrompt(sub, termLabel);
     try {
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Uploading...</span>';
+      await new Promise(r=>setTimeout(r,150));
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Reading with Groq...</span>';
       const rows=await _groqScoreOCR(b64, mime, prompt);
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">\u2705 Done!</span>';
       _renderScoreOcrPreview(rows, classStudents);
       return;
     } catch(e1){
       console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
     }
-    if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Retrying with HuggingFace Vision...</span>';
     try {
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Retrying with HuggingFace Vision...</span>';
       const rows=await _hfScoreOCR(b64, mime, prompt);
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">\u2705 Done!</span>';
       _renderScoreOcrPreview(rows, classStudents);
       return;
     } catch(e2){
@@ -4081,6 +4098,7 @@ async function socrHandleImage(event){
     // Both engines failed — fall back to manual grid, pre-populated with student names
     _renderScoreOcrManualGrid(classStudents);
   };
+  reader.onerror=()=>{ if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Could not read photo. Tap Rescan to try again.</span>'; _renderScoreOcrManualGrid(classStudents); };
   reader.readAsDataURL(file);
 }
 
