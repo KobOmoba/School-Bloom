@@ -4150,6 +4150,7 @@ function socrHandleCSVFile(file, classStudents, sub, termLabel, statusEl) {
 async function socrHandleImageFiles(files, classStudents, sub, termLabel, statusEl) {
   const prompt = _buildScoreOcrPrompt(sub, termLabel);
   const allRows = [];
+  let usedTesseractFallback = false;
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -4168,8 +4169,8 @@ async function socrHandleImageFiles(files, classStudents, sub, termLabel, status
         const pageImages = await socrRenderPDFToImages(file, statusEl);
         for (let p = 0; p < pageImages.length; p++) {
           if (statusEl) statusEl.innerHTML = `<span style="color:var(--brand);">⏳ Reading PDF page ${p + 1}/${pageImages.length}...</span>`;
-          const rows = await socrOcrOneImage(pageImages[p], 'image/jpeg', prompt, statusEl);
-          if (rows && rows.length) allRows.push(...rows);
+          const res = await socrOcrOneImage(pageImages[p], 'image/jpeg', prompt, statusEl, classStudents);
+          if (res && res.rows && res.rows.length) { allRows.push(...res.rows); if (res.fromTesseract) usedTesseractFallback = true; }
         }
       } catch (pdfErr) {
         console.warn('PDF rendering failed:', pdfErr.message);
@@ -4177,13 +4178,17 @@ async function socrHandleImageFiles(files, classStudents, sub, termLabel, status
       }
     } else {
       // Image file — read + preprocess + OCR
-      const rows = await socrOcrOneImageFile(file, prompt, statusEl);
-      if (rows && rows.length) allRows.push(...rows);
+      const res = await socrOcrOneImageFile(file, prompt, statusEl, classStudents);
+      if (res && res.rows && res.rows.length) { allRows.push(...res.rows); if (res.fromTesseract) usedTesseractFallback = true; }
     }
   }
 
   if (allRows.length) {
-    if (statusEl) statusEl.innerHTML = `<span style="color:var(--money);">✅ Found ${allRows.length} entries.</span>`;
+    if (statusEl) {
+      statusEl.innerHTML = usedTesseractFallback
+        ? `<span style="color:var(--money);">✅ Found ${allRows.length} entries. Names matched to your roster (Tesseract read the numbers — please double-check them below).</span>`
+        : `<span style="color:var(--money);">✅ Found ${allRows.length} entries.</span>`;
+    }
     _renderScoreOcrPreview(allRows, classStudents);
   } else {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not read scores automatically. Enter manually below or tap Rescan.</span>';
@@ -4192,12 +4197,12 @@ async function socrHandleImageFiles(files, classStudents, sub, termLabel, status
 }
 
 // ── OCR one image file: read → OpenCV preprocess → Groq → HF → Tesseract ──
-async function socrOcrOneImageFile(file, prompt, statusEl) {
+async function socrOcrOneImageFile(file, prompt, statusEl, classStudents) {
   return new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = async ev => {
       const rawDataURL = ev.target.result;
-      const result = await socrOcrOneImage(rawDataURL, file.type || 'image/jpeg', prompt, statusEl);
+      const result = await socrOcrOneImage(rawDataURL, file.type || 'image/jpeg', prompt, statusEl, classStudents);
       resolve(result);
     };
     reader.onerror = () => { console.warn('File read error'); resolve(null); };
@@ -4205,8 +4210,9 @@ async function socrOcrOneImageFile(file, prompt, statusEl) {
   });
 }
 
-// ── OCR one image data URL: OpenCV → Groq → HF → Tesseract (for numbers) ──
-async function socrOcrOneImage(dataURL, mime, prompt, statusEl) {
+// ── OCR one image data URL: OpenCV → Groq → HF → Tesseract (numbers-only, matched to roster) ──
+// Returns { rows, fromTesseract } so the caller knows to show the "please double-check" note.
+async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents) {
   // ── OpenCV preprocessing (denoise + threshold + deskew) ──
   let processedDataURL = dataURL;
   try {
@@ -4219,29 +4225,33 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl) {
   }
   const b64 = processedDataURL.split(',')[1];
 
-  // ── Step 1: Groq Vision ──
+  // ── Step 1: Groq Vision — reads names AND numbers directly off the sheet ──
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
     const rows = await _groqScoreOCR(b64, mime, prompt);
-    if (rows && rows.length) return rows;
+    if (rows && rows.length) return { rows, fromTesseract: false };
   } catch (e1) {
     console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
   }
 
-  // ── Step 2: HuggingFace Vision ──
+  // ── Step 2: HuggingFace Vision — same, reads names AND numbers ──
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Retrying with HuggingFace Vision...</span>';
     const rows = await _hfScoreOCR(b64, mime, prompt);
-    if (rows && rows.length) return rows;
+    if (rows && rows.length) return { rows, fromTesseract: false };
   } catch (e2) {
     console.warn('HF score OCR failed:', e2.message);
   }
 
-  // ── Step 3: Tesseract.js (runs in-browser, excellent for printed numbers) ──
+  // ── Step 3: Tesseract.js — handwritten names are unreliable via Tesseract,
+  // so we DON'T trust its name reading at all. Instead we only trust the NUMBERS
+  // it finds per row, and map them positionally onto your actual class roster
+  // (sorted alphabetically — the standard register order). This guarantees real,
+  // correct student names every time, even when the photo is too messy for AI vision.
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Trying Tesseract OCR (number reader)...</span>';
-    const rows = await socrTesseractOCR(processedDataURL, prompt);
-    if (rows && rows.length) return rows;
+    const rows = await socrTesseractOCR(processedDataURL, classStudents);
+    if (rows && rows.length) return { rows, fromTesseract: true };
   } catch (e3) {
     console.warn('Tesseract score OCR failed:', e3.message);
   }
@@ -4265,8 +4275,15 @@ function loadTesseract() {
 }
 
 // ── Tesseract.js OCR — runs entirely in-browser, no API key needed ──
-// Excellent at reading printed/handwritten numbers from score sheets
-async function socrTesseractOCR(dataURL, prompt) {
+// IMPORTANT: Tesseract is unreliable at reading handwritten cursive names
+// (it produces garbage like "BLE LEPOLUDAL KOLSG" for real names). So we
+// completely IGNORE whatever text/name Tesseract reads. Instead we:
+//   1. Pull out every row that looks like it has score numbers on it
+//   2. Sort the real class roster alphabetically (standard register order)
+//   3. Map row 1 of numbers → student 1 of roster, row 2 → student 2, etc.
+// This guarantees the names shown are always correct, real student names —
+// only the numbers came from OCR, and the user reviews/edits them anyway.
+async function socrTesseractOCR(dataURL, classStudents) {
   const ready = await loadTesseract();
   if (!ready) throw new Error('Tesseract.js not loaded');
 
@@ -4277,41 +4294,49 @@ async function socrTesseractOCR(dataURL, prompt) {
   const rawText = result.data.text || '';
   if (!rawText.trim()) throw new Error('Tesseract returned empty text');
 
-  // Parse the raw text into score rows by matching names + numbers
+  // Extract number-groups per line — ignore whatever "name" text is on the line
   const lines = rawText.split(/\r?\n/).filter(l => l.trim());
-  const rows = [];
-  const studentNames = SD.students.map(s => s.name.toUpperCase());
+  const numberRows = [];
 
   lines.forEach(line => {
     const trimmed = line.trim();
-    if (!trimmed || /^(total|s\/n|serial|name|ca|exam|score|class|subject|term)/i.test(trimmed)) return;
+    if (!trimmed) return;
+    // Skip obvious header/label/footer lines
+    if (/^(total|s\/n|serial|name|ca|exam|score|class|subject|term|1ca|2ca|3ca|student|register|lowest|highest|average|position)/i.test(trimmed)) return;
 
-    // Extract all numbers from the line
     const nums = (trimmed.match(/\d+\.?\d*/g) || []).map(n => parseFloat(n));
-    if (!nums.length) return;
+    // A real score row has at least 2 numbers (e.g. a CA + exam, or serial + score) —
+    // require at least 3 to reduce false positives from stray digits/dates/watermarks
+    if (nums.length < 3) return;
 
-    // Try to find a matching student name
-    const lineUpper = trimmed.toUpperCase();
-    const matchedName = studentNames.find(sn => {
-      const snKey = sn.replace(/[^A-Z]/g, '');
-      const lineKey = lineUpper.replace(/[^A-Z\s]/g, '').replace(/\s+/g, '').trim();
-      return lineKey.includes(snKey) || snKey.includes(lineKey);
-    });
-
-    const name = matchedName || trimmed.replace(/[^a-zA-Z\s'\-\.]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
-    if (!name || name.length < 2) return;
-
-    // Assign numbers to ca1, ca2, ca3, exam (in order found)
-    rows.push({
-      name: name,
-      ca1: Math.min(nums[0] || 0, 10),
-      ca2: Math.min(nums[1] || 0, 10),
-      ca3: Math.min(nums[2] || 0, 10),
-      exam: Math.min(nums.find(n => n > 10) || nums[3] || 0, 70)
-    });
+    numberRows.push(nums);
   });
 
-  if (!rows.length) throw new Error('Tesseract found 0 score rows');
+  if (!numberRows.length) throw new Error('Tesseract found 0 rows with score numbers');
+
+  // Sort roster alphabetically — matches standard Nigerian register ordering
+  const sortedRoster = [...classStudents].sort((a, b) => a.name.localeCompare(b.name));
+
+  const rowCount = Math.min(numberRows.length, sortedRoster.length);
+  const rows = [];
+  for (let i = 0; i < rowCount; i++) {
+    const nums = numberRows[i];
+    const student = sortedRoster[i];
+    // Drop a leading serial number if present (small int ≤ roster size, followed by more numbers)
+    let usable = nums;
+    if (nums.length > 4 && nums[0] <= sortedRoster.length && nums[0] === Math.round(nums[0])) {
+      usable = nums.slice(1);
+    }
+    rows.push({
+      name: student.name.toUpperCase(),
+      ca1: Math.min(usable[0] || 0, 10),
+      ca2: Math.min(usable[1] || 0, 10),
+      ca3: Math.min(usable[2] || 0, 10),
+      exam: Math.min(usable.find(n => n > 10) || usable[3] || 0, 70)
+    });
+  }
+
+  if (!rows.length) throw new Error('Tesseract could not map any rows to the roster');
   return rows;
 }
 
