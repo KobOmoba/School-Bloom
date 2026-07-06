@@ -1335,12 +1335,13 @@ function toggleEye(inputId, btn) {
       </select>
     </div>
 
-    <!-- Step 2: Photo button -->
-    <input type="file" id="socr-img-input" accept="image/*,application/pdf,.heic,.heif,*/*"
-      style="display:none;" onchange="socrHandleImage(event)">
+    <!-- Step 2: Photo button — accepts ALL file types like the Agent app -->
+    <input type="file" id="socr-img-input" accept="image/*,application/pdf,.csv,.txt,.doc,.docx,.xls,.xlsx,.webp,.heic,.heif,*/*"
+      style="display:none;" onchange="socrHandleImage(event)" multiple capture="environment">
     <button class="btn-brand" onclick="socrPickPhoto()" style="margin-bottom:0.5rem;">
-      📷 Take Photo / Choose Image
+      📷 Take Photo / Choose File
     </button>
+    <p style="font-size:0.7rem;color:var(--sub);text-align:center;margin-top:0.3rem;">Also accepts: CSV, PDF, Excel, typed list</p>
 
     <!-- Status + progress -->
     <div id="socr-status" style="font-size:0.8rem;margin-bottom:0.5rem;min-height:1.2rem;"></div>

@@ -4060,54 +4060,311 @@ function socrRescan(){
 }
 
 async function socrHandleImage(event){
-  const file=event.target.files[0]; if(!file) return;
-  const statusEl=$('socr-status');
-  const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='none';
-  const cls=$('socr-class')?.value;
-  const sub=$('socr-subj')?.value;
-  const termMap={'1':'Term 1','2':'Term 2','3':'Term 3'};
-  const termLabel=termMap[$('socr-term')?.value]||'Term 1';
-  const classStudents=SD.students.filter(s=>s.class===cls);
-  if(!classStudents.length){if(statusEl)statusEl.innerHTML='<span style="color:var(--danger);">No students in this class.</span>';return;}
-  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Loading photo...</span>';
-  const reader=new FileReader();
-  reader.onload=async ev=>{
-    const rawDataURL=ev.target.result;
-    const prompt=_buildScoreOcrPrompt(sub, termLabel);
-    // ── OpenCV preprocessing (same pipeline as register scanner) ──
-    let processedDataURL=rawDataURL;
-    let mime=file.type||'image/jpeg';
+  const files = Array.from(event.target.files || []); if (!files.length) return;
+  const statusEl = $('socr-status');
+  const actionRow = $('socr-action-row'); if (actionRow) actionRow.style.display = 'none';
+  const cls = $('socr-class')?.value;
+  const sub = $('socr-subj')?.value;
+  const termMap = {'1':'Term 1','2':'Term 2','3':'Term 3'};
+  const termLabel = termMap[$('socr-term')?.value] || 'Term 1';
+  const classStudents = SD.students.filter(s => s.class === cls);
+  if (!classStudents.length) { if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">No students in this class.</span>'; return; }
+
+  // ── Route files by type (same logic as Agent app) ──
+  const csvOnly = files.filter(f => {
+    const n = (f.name || '').toLowerCase(), t = (f.type || '').toLowerCase();
+    return t === 'text/csv' || t === 'text/plain' || /\.(csv|txt)$/.test(n);
+  });
+  const ocrFiles = files.filter(f => !csvOnly.includes(f));
+
+  // Handle CSV/TXT files — parse names + scores directly
+  csvOnly.forEach(f => {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">📄 Reading CSV/text file...</span>';
+    socrHandleCSVFile(f, classStudents, sub, termLabel, statusEl);
+  });
+
+  // Handle image/PDF files — full OCR pipeline
+  if (ocrFiles.length) {
+    await socrHandleImageFiles(ocrFiles, classStudents, sub, termLabel, statusEl);
+  }
+}
+
+// ── CSV/TXT handler for score sheets ──
+function socrHandleCSVFile(file, classStudents, sub, termLabel, statusEl) {
+  const reader = new FileReader();
+  reader.onload = ev => {
     try {
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Enhancing image (OpenCV)...</span>';
-      processedDataURL=await resizeImageForOCR(rawDataURL);
-      mime='image/jpeg';
-    } catch(preErr){
-      console.warn('[Score OCR] OpenCV preprocess failed, using raw:', preErr.message);
-      processedDataURL=rawDataURL;
+      const text = ev.target.result;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (!lines.length) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">Empty file.</span>';
+        return;
+      }
+
+      // Try to detect header row
+      const hasHeader = /name|student|ca|exam|score|total/i.test(lines[0]);
+      const dataLines = hasHeader ? lines.slice(1) : lines;
+      const rows = [];
+
+      dataLines.forEach(line => {
+        const parts = line.includes(',') ? line.split(',').map(p => p.trim().replace(/"/g, ''))
+                    : line.split(/\s{2,}|\t/).map(p => p.trim());
+        if (!parts.length) return;
+
+        const name = parts[0] || '';
+        if (!name || name.length < 2) return;
+        if (/^(s\/n|serial|no\.?|total|class|#)/i.test(name)) return;
+
+        // Parse scores: ca1, ca2, ca3, exam (flexible positions)
+        const nums = parts.slice(1).map(p => parseFloat(p) || 0);
+        rows.push({
+          name: name.toUpperCase(),
+          ca1: Math.min(nums[0] || 0, 10),
+          ca2: Math.min(nums[1] || 0, 10),
+          ca3: Math.min(nums[2] || 0, 10),
+          exam: Math.min(nums[3] || 0, 70)
+        });
+      });
+
+      if (rows.length) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--money);">✅ Read ${rows.length} entries from CSV.</span>`;
+        _renderScoreOcrPreview(rows, classStudents);
+      } else {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">No score data found in CSV. Expected: Name, CA1, CA2, CA3, Exam</span>';
+        _renderScoreOcrManualGrid(classStudents);
+      }
+    } catch (err) {
+      console.warn('CSV parse error:', err.message);
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">Could not read CSV file.</span>';
+      _renderScoreOcrManualGrid(classStudents);
     }
-    const b64=processedDataURL.split(',')[1];
-    try {
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
-      const rows=await _groqScoreOCR(b64, mime, prompt);
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">✅ Done!</span>';
-      _renderScoreOcrPreview(rows, classStudents);
-      return;
-    } catch(e1){
-      console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
-    }
-    try {
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Retrying with HuggingFace Vision...</span>';
-      const rows=await _hfScoreOCR(b64, mime, prompt);
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">✅ Done!</span>';
-      _renderScoreOcrPreview(rows, classStudents);
-      return;
-    } catch(e2){
-      console.warn('HF score OCR failed:', e2.message);
-    }
+  };
+  reader.onerror = () => {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">Could not read file.</span>';
     _renderScoreOcrManualGrid(classStudents);
   };
-  reader.onerror=()=>{ if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Could not read photo. Tap Rescan to try again.</span>'; _renderScoreOcrManualGrid(classStudents); };
-  reader.readAsDataURL(file);
+  reader.readAsText(file);
+}
+
+// ── Image/PDF handler — full OpenCV + Groq → HF → Tesseract pipeline ──
+async function socrHandleImageFiles(files, classStudents, sub, termLabel, statusEl) {
+  const prompt = _buildScoreOcrPrompt(sub, termLabel);
+  const allRows = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const fileName = (file.name || '').toLowerCase();
+    const isPDF = file.type === 'application/pdf' || fileName.endsWith('.pdf');
+
+    if (i > 1 && files.length > 1) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--brand);">⏳ Page ${i + 1} of ${files.length}...</span>`;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (isPDF) {
+      // PDF → render pages to images → OCR each page
+      try {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Loading PDF...</span>';
+        const pageImages = await socrRenderPDFToImages(file, statusEl);
+        for (let p = 0; p < pageImages.length; p++) {
+          if (statusEl) statusEl.innerHTML = `<span style="color:var(--brand);">⏳ Reading PDF page ${p + 1}/${pageImages.length}...</span>`;
+          const rows = await socrOcrOneImage(pageImages[p], 'image/jpeg', prompt, statusEl);
+          if (rows && rows.length) allRows.push(...rows);
+        }
+      } catch (pdfErr) {
+        console.warn('PDF rendering failed:', pdfErr.message);
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not read PDF. Try taking a photo instead.</span>';
+      }
+    } else {
+      // Image file — read + preprocess + OCR
+      const rows = await socrOcrOneImageFile(file, prompt, statusEl);
+      if (rows && rows.length) allRows.push(...rows);
+    }
+  }
+
+  if (allRows.length) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--money);">✅ Found ${allRows.length} entries.</span>`;
+    _renderScoreOcrPreview(allRows, classStudents);
+  } else {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not read scores automatically. Enter manually below or tap Rescan.</span>';
+    _renderScoreOcrManualGrid(classStudents);
+  }
+}
+
+// ── OCR one image file: read → OpenCV preprocess → Groq → HF → Tesseract ──
+async function socrOcrOneImageFile(file, prompt, statusEl) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const rawDataURL = ev.target.result;
+      const result = await socrOcrOneImage(rawDataURL, file.type || 'image/jpeg', prompt, statusEl);
+      resolve(result);
+    };
+    reader.onerror = () => { console.warn('File read error'); resolve(null); };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── OCR one image data URL: OpenCV → Groq → HF → Tesseract (for numbers) ──
+async function socrOcrOneImage(dataURL, mime, prompt, statusEl) {
+  // ── OpenCV preprocessing (denoise + threshold + deskew) ──
+  let processedDataURL = dataURL;
+  try {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Enhancing image (OpenCV)...</span>';
+    processedDataURL = await resizeImageForOCR(dataURL);
+    mime = 'image/jpeg';
+  } catch (preErr) {
+    console.warn('[Score OCR] OpenCV preprocess failed, using raw:', preErr.message);
+    processedDataURL = dataURL;
+  }
+  const b64 = processedDataURL.split(',')[1];
+
+  // ── Step 1: Groq Vision ──
+  try {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
+    const rows = await _groqScoreOCR(b64, mime, prompt);
+    if (rows && rows.length) return rows;
+  } catch (e1) {
+    console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
+  }
+
+  // ── Step 2: HuggingFace Vision ──
+  try {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Retrying with HuggingFace Vision...</span>';
+    const rows = await _hfScoreOCR(b64, mime, prompt);
+    if (rows && rows.length) return rows;
+  } catch (e2) {
+    console.warn('HF score OCR failed:', e2.message);
+  }
+
+  // ── Step 3: Tesseract.js (runs in-browser, excellent for printed numbers) ──
+  try {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Trying Tesseract OCR (number reader)...</span>';
+    const rows = await socrTesseractOCR(processedDataURL, prompt);
+    if (rows && rows.length) return rows;
+  } catch (e3) {
+    console.warn('Tesseract score OCR failed:', e3.message);
+  }
+
+  return null;
+}
+
+// ── Tesseract.js loader (lazy-loaded on first use) ──
+let _tesseractLoading = null;
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(true);
+  if (_tesseractLoading) return _tesseractLoading;
+  _tesseractLoading = new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = () => resolve(true);
+    s.onerror = () => { console.warn('Tesseract.js failed to load'); resolve(false); };
+    document.head.appendChild(s);
+  });
+  return _tesseractLoading;
+}
+
+// ── Tesseract.js OCR — runs entirely in-browser, no API key needed ──
+// Excellent at reading printed/handwritten numbers from score sheets
+async function socrTesseractOCR(dataURL, prompt) {
+  const ready = await loadTesseract();
+  if (!ready) throw new Error('Tesseract.js not loaded');
+
+  const result = await Tesseract.recognize(dataURL, 'eng', {
+    logger: m => { if (m.status === 'recognizing text') console.log('[Tesseract]', Math.round(m.progress * 100) + '%'); }
+  });
+
+  const rawText = result.data.text || '';
+  if (!rawText.trim()) throw new Error('Tesseract returned empty text');
+
+  // Parse the raw text into score rows by matching names + numbers
+  const lines = rawText.split(/\r?\n/).filter(l => l.trim());
+  const rows = [];
+  const studentNames = SD.students.map(s => s.name.toUpperCase());
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || /^(total|s\/n|serial|name|ca|exam|score|class|subject|term)/i.test(trimmed)) return;
+
+    // Extract all numbers from the line
+    const nums = (trimmed.match(/\d+\.?\d*/g) || []).map(n => parseFloat(n));
+    if (!nums.length) return;
+
+    // Try to find a matching student name
+    const lineUpper = trimmed.toUpperCase();
+    const matchedName = studentNames.find(sn => {
+      const snKey = sn.replace(/[^A-Z]/g, '');
+      const lineKey = lineUpper.replace(/[^A-Z\s]/g, '').replace(/\s+/g, '').trim();
+      return lineKey.includes(snKey) || snKey.includes(lineKey);
+    });
+
+    const name = matchedName || trimmed.replace(/[^a-zA-Z\s'\-\.]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (!name || name.length < 2) return;
+
+    // Assign numbers to ca1, ca2, ca3, exam (in order found)
+    rows.push({
+      name: name,
+      ca1: Math.min(nums[0] || 0, 10),
+      ca2: Math.min(nums[1] || 0, 10),
+      ca3: Math.min(nums[2] || 0, 10),
+      exam: Math.min(nums.find(n => n > 10) || nums[3] || 0, 70)
+    });
+  });
+
+  if (!rows.length) throw new Error('Tesseract found 0 score rows');
+  return rows;
+}
+
+// ── PDF.js loader (lazy-loaded on first PDF scan) ──
+let _pdfjsLoading = null;
+function loadPDFJS() {
+  if (window.pdfjsLib) return Promise.resolve(true);
+  if (_pdfjsLoading) return _pdfjsLoading;
+  _pdfjsLoading = new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload = () => {
+      if (window.pdfjsLib) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      }
+      resolve(!!window.pdfjsLib);
+    };
+    s.onerror = () => { console.warn('PDF.js failed to load'); resolve(false); };
+    document.head.appendChild(s);
+  });
+  return _pdfjsLoading;
+}
+
+// ── Render PDF pages to image data URLs ──
+async function socrRenderPDFToImages(file, statusEl) {
+  const ready = await loadPDFJS();
+  if (!ready) throw new Error('PDF.js not loaded');
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const images = [];
+  const maxPages = Math.min(pdf.numPages, 10); // safety cap
+
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 }); // high-res for OCR
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+    // Run through OpenCV preprocessing
+    let outputCanvas = canvas;
+    try {
+      const cvReady = await loadOpenCV();
+      if (cvReady) outputCanvas = await preprocessWithOpenCV(canvas);
+    } catch (e) { console.warn('[PDF] OpenCV preprocess skipped:', e.message); }
+
+    images.push(outputCanvas.toDataURL('image/jpeg', 0.85));
+  }
+
+  return images;
 }
 
 async function socrSaveScores(){
