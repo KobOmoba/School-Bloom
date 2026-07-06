@@ -269,7 +269,7 @@ Columns: SERIAL NO | SURNAME | FIRST NAME | (other columns — ignore them).
 The image may be at any angle — read it correctly.
 
 TASK 1: Extract every student name visible. Combine as "SURNAME FIRSTNAME" (all caps).
-TASK 2: Look for a class/form name written anywhere on the page — usually in a header, title, or top corner (e.g. "JSS 2A REGISTER", "PRIMARY 5 CLASS LIST", "SS1 GOLD", "NURSERY 2"). If found, return it as "detected_class" (all caps, e.g. "JSS 2A"). If no class name is visible anywhere, return "" — do NOT guess.
+TASK 2: Look for a class/form name written anywhere on the page — usually in a header, title, or top corner (e.g. "JSS 2A REGISTER", "BASIC 5 CLASS LIST", "SS1 GOLD", "NURSERY 2"). If found, return it as "detected_class" (all caps, e.g. "JSS 2A"). If no class name is visible anywhere, return "" — do NOT guess.
 
 Nigerian name examples — surnames: OGUNLADE, KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, SHONPE, GBELEKALE, OLIYIDE, KOLANOLE, ADEGUNLE, ADEOYE, LAWAL, AYOMIDE, OBASA, OLATUNDE, ADENIYI, OLOOETU
 Firstnames: GABRIEL, RASAQ, GODWIN, ENOCH, ABIGEAL, KOREDE, MICHEAL, ADEMIDE, SUCCESS, EZEKIEL, AWAL, EMMANUEL, BIGGOLD, QUARDRI, MUEEZ, ZAINAB, SALAM, WAJUD
@@ -680,7 +680,7 @@ function extractNigerianNames(raw) {
     if (/^(class|serial|no\b|names?|balance|term|from|date|\bsn\b|s\/n)/i.test(line)) return null;
 
     // ── Reject lines that are entirely class/grade names ──────────────────
-    if (/^\s*(BASIC\s+(ONE|TWO|THREE|FOUR|FIVE|SIX|\d+)|NURSERY(\s*\d|\s*1\s*[&AND]+\s*2)?|PRE.?NURSERY|JSS\s*[1-3]|SS[S]?\s*[1-3]|PRIMARY\s*[1-6]|KG\s*[12]?|UNKNOWN|RECEPTION)\s*$/i.test(line)) return null;
+    if (/^\s*(BASIC\s+(ONE|TWO|THREE|FOUR|FIVE|SIX|\d+)|NURSERY(\s*\d|\s*1\s*[&AND]+\s*2)?|PRE.?NURSERY|JSS\s*[1-3]|SS[S]?\s*[1-3]|(BASIC|PRIMARY)\s*[1-6]|KG\s*[12]?|UNKNOWN|RECEPTION)\s*$/i.test(line)) return null;
 
     // Strip ALL leading non-letter chars — handles X14, V17, ✓14, •3, "- 2" etc.
     let c = line.replace(/^[^a-zA-Z]+/, '').trim();
