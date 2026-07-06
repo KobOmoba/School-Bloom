@@ -1974,7 +1974,7 @@ let _ocrReviewData = [];
 // even for a brand-new school with zero students so far.
 function getKnownClasses() {
   const existing = [...new Set((SD.students || []).map(s => (s.class || '').trim().toUpperCase()).filter(Boolean))];
-  const defaults = ['DAYCARE','PLAYGROUP','PRE-NURSERY','NURSERY 1','NURSERY 2','KG 1','KG 2','PRIMARY 1','PRIMARY 2','PRIMARY 3','PRIMARY 4','PRIMARY 5','PRIMARY 6','JSS 1','JSS 2','JSS 3','SS 1','SS 2','SS 3'];
+  const defaults = ['DAYCARE','PLAYGROUP','PRE-NURSERY','NURSERY 1','NURSERY 2','KG 1','KG 2','BASIC 1','BASIC 2','BASIC 3','BASIC 4','BASIC 5','BASIC 6','JSS 1','JSS 2','JSS 3','SS 1','SS 2','SS 3'];
   return [...new Set([...existing, ...defaults])].sort();
 }
 
