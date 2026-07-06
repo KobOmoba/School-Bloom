@@ -3955,8 +3955,10 @@ function populateScoreOCRSelectors(){
 }
 function socrPickPhoto(){$('socr-img-input')?.click();}
 
-function _buildScoreOcrPrompt(sub){
-  return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}.
+function _buildScoreOcrPrompt(sub, termMode){
+  // termMode: 'all' = read all 3 terms, '1'/'2'/'3' = read only that term
+  if (termMode === 'all') {
+    return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}.
 The sheet typically shows THREE terms side by side as separate column blocks: "1ST TERM", "2ND TERM", "3RD TERM".
 Within EACH term's block, the columns are: 1st CA | 2nd CA | 3rd CA | Exam — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
 Read EVERY student row and ALL THREE terms. If a cell is blank/illegible, use 0.
@@ -3964,6 +3966,18 @@ If the sheet only has one or two terms, fill the missing terms with zeros.
 Return ONLY valid JSON, no markdown, no explanation — an array where each entry has the student name plus t1, t2, t3 objects:
 [{"name":"SURNAME FIRSTNAME","t1":{"ca1":8,"ca2":9,"ca3":7,"exam":58},"t2":{"ca1":7,"ca2":8,"ca3":9,"exam":62},"t3":{"ca1":0,"ca2":0,"ca3":0,"exam":0}},...]
 Match names exactly as written (all caps).`;
+  } else {
+    const termNum = termMode;
+    const termLabel = termNum === '1' ? '1ST TERM' : termNum === '2' ? '2ND TERM' : '3RD TERM';
+    return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}.
+The sheet may show MULTIPLE terms side by side as separate column blocks (e.g. "1ST TERM", "2ND TERM", "3RD TERM").
+ONLY read the columns under the "${termLabel}" block — ignore other terms' columns entirely.
+Within that term's block, the columns are: 1st CA | 2nd CA | 3rd CA | Exam — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
+Read every student row. If a CA or exam cell is blank/illegible, use 0.
+Return ONLY valid JSON, no markdown, no explanation:
+[{"name":"SURNAME FIRSTNAME","ca1":8,"ca2":9,"ca3":7,"exam":58},...]
+Match names exactly as written (all caps).`;
+  }
 }
 
 function _parseScoreOcrJson(raw){
@@ -4011,7 +4025,7 @@ async function _hfScoreOCR(b64, mime, prompt){
   return parsed;
 }
 
-function _renderScoreOcrPreview(rows, classStudents){
+function _renderScoreOcrPreview(rows, classStudents, termMode){
   const statusEl=$('socr-status');
   if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Found ${rows.length} entries — all 3 terms. Review before saving:</span>`;
   const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
@@ -4031,11 +4045,16 @@ function _renderScoreOcrPreview(rows, classStudents){
       <button id="socr-tab-t3" class="socr-term-tab" onclick="socrSwitchTermTab(3)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:0.75rem;font-weight:700;cursor:pointer;">Term 3</button>
     </div>`;
 
-  // Render all 3 term tables, only show the active one
-  for (let t = 1; t <= 3; t++) {
+  // Render term tables — in single-term mode, only render the selected term
+  const termsToShow = isAllTerms ? [1, 2, 3] : [parseInt(termNum)];
+  for (const t of termsToShow) {
     const tKey = 't' + t;
-    pHTML += `<div id="socr-term-${t}-panel" style="display:${t===1?'block':'none'};">
-      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.3rem;">
+    pHTML += `<div id="socr-term-${t}-panel" style="display:block;">`;
+    if (!isAllTerms) {
+      const tLabel = t === 1 ? 'Term 1' : t === 2 ? 'Term 2' : 'Term 3';
+      pHTML += `<p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;font-weight:600;">${tLabel}</p>`;
+    }
+    pHTML += `<div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.3rem;">
         <table class="stbl" style="font-size:0.72rem;width:100%;">
           <thead><tr>
             <th style="text-align:left;">Student Name</th>
@@ -4060,8 +4079,9 @@ function _renderScoreOcrPreview(rows, classStudents){
   const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
   const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
 
-  // Store normalized data for save + swap
+  // Store normalized data + term mode for save + swap
   window._socrPreviewData = normalized;
+  window._socrTermMode = isAllTerms ? 'all' : termMode;
 }
 
 // ── Term tab switcher ──
@@ -4101,10 +4121,10 @@ function socrSwapRow(idx) {
   [captured[idx], captured[idx + 1]] = [captured[idx + 1], captured[idx]];
   window._socrPreviewData = captured;
   // Re-render
-  _renderScoreOcrPreview(captured, SD.students.filter(s => s.class === $('socr-class')?.value));
+  _renderScoreOcrPreview(captured, SD.students.filter(s => s.class === $('socr-class')?.value), window._socrTermMode || 'all');
 }
 
-function _renderScoreOcrManualGrid(classStudents){
+function _renderScoreOcrManualGrid(classStudents, termMode){
   const statusEl=$('socr-status');
   if(statusEl) statusEl.innerHTML='<span style="color:var(--warn);">⚠️ Could not auto-read this photo. Enter scores manually below, or tap Rescan to try a clearer photo:</span>';
   const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
@@ -4116,7 +4136,7 @@ function _renderScoreOcrManualGrid(classStudents){
     t2: { ca1:0, ca2:0, ca3:0, exam:0 },
     t3: { ca1:0, ca2:0, ca3:0, exam:0 }
   }));
-  _renderScoreOcrPreview(manualRows, classStudents);
+  _renderScoreOcrPreview(manualRows, classStudents, termMode || 'all');
   // Override the status message for manual mode
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not auto-read. Enter scores manually — switch between Term 1/2/3 tabs:</span>';
 }
@@ -4136,6 +4156,7 @@ async function socrHandleImage(event){
   const actionRow = $('socr-action-row'); if (actionRow) actionRow.style.display = 'none';
   const cls = $('socr-class')?.value;
   const sub = $('socr-subj')?.value;
+  const termMode = $('socr-term')?.value || 'all'; // 'all', '1', '2', or '3'
   const classStudents = SD.students.filter(s => s.class === cls);
   if (!classStudents.length) { if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">No students in this class.</span>'; return; }
 
@@ -4146,20 +4167,20 @@ async function socrHandleImage(event){
   });
   const ocrFiles = files.filter(f => !csvOnly.includes(f));
 
-  // Handle CSV/TXT files — parse names + scores directly (all 3 terms)
+  // Handle CSV/TXT files — parse names + scores directly
   csvOnly.forEach(f => {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">📄 Reading CSV/text file...</span>';
-    socrHandleCSVFile(f, classStudents, sub, statusEl);
+    socrHandleCSVFile(f, classStudents, sub, termMode, statusEl);
   });
 
-  // Handle image/PDF files — full OCR pipeline (reads all 3 terms at once)
+  // Handle image/PDF files — full OCR pipeline
   if (ocrFiles.length) {
-    await socrHandleImageFiles(ocrFiles, classStudents, sub, statusEl);
+    await socrHandleImageFiles(ocrFiles, classStudents, sub, termMode, statusEl);
   }
 }
 
 // ── CSV/TXT handler for score sheets (supports all 3 terms) ──
-function socrHandleCSVFile(file, classStudents, sub, statusEl) {
+function socrHandleCSVFile(file, classStudents, sub, termMode, statusEl) {
   const reader = new FileReader();
   reader.onload = ev => {
     try {
@@ -4173,6 +4194,8 @@ function socrHandleCSVFile(file, classStudents, sub, statusEl) {
       const hasHeader = /name|student|ca|exam|score|total|term/i.test(lines[0]);
       const dataLines = hasHeader ? lines.slice(1) : lines;
       const rows = [];
+      const isAllTerms = (termMode === 'all' || !termMode);
+      const termNum = isAllTerms ? '1' : (termMode || '1');
 
       dataLines.forEach(line => {
         const parts = line.includes(',') ? line.split(',').map(p => p.trim().replace(/"/g, ''))
@@ -4183,55 +4206,54 @@ function socrHandleCSVFile(file, classStudents, sub, statusEl) {
         if (!name || name.length < 2) return;
         if (/^(s\/n|serial|no\.?|total|class|#)/i.test(name)) return;
 
-        // Parse all numbers after the name
-        // Expected formats:
-        //   Name, T1CA1, T1CA2, T1CA3, T1Exam, T2CA1, T2CA2, T2CA3, T2Exam, T3CA1, T3CA2, T3CA3, T3Exam
-        //   OR: Name, CA1, CA2, CA3, Exam  (single term — fill t2/t3 with zeros)
         const nums = parts.slice(1).map(p => parseFloat(p) || 0);
         const row = { name: name.toUpperCase() };
 
-        if (nums.length >= 12) {
-          // All 3 terms present
+        if (isAllTerms && nums.length >= 12) {
+          // All 3 terms present in CSV
           row.t1 = { ca1: Math.min(nums[0],10), ca2: Math.min(nums[1],10), ca3: Math.min(nums[2],10), exam: Math.min(nums[3],70) };
           row.t2 = { ca1: Math.min(nums[4],10), ca2: Math.min(nums[5],10), ca3: Math.min(nums[6],10), exam: Math.min(nums[7],70) };
           row.t3 = { ca1: Math.min(nums[8],10), ca2: Math.min(nums[9],10), ca3: Math.min(nums[10],10), exam: Math.min(nums[11],70) };
-        } else if (nums.length >= 8) {
-          // 2 terms
+        } else if (isAllTerms && nums.length >= 8) {
+          // 2 terms in CSV
           row.t1 = { ca1: Math.min(nums[0],10), ca2: Math.min(nums[1],10), ca3: Math.min(nums[2],10), exam: Math.min(nums[3],70) };
           row.t2 = { ca1: Math.min(nums[4],10), ca2: Math.min(nums[5],10), ca3: Math.min(nums[6],10), exam: Math.min(nums[7],70) };
           row.t3 = { ca1:0, ca2:0, ca3:0, exam:0 };
         } else {
-          // Single term (legacy CSV)
-          row.t1 = { ca1: Math.min(nums[0]||0,10), ca2: Math.min(nums[1]||0,10), ca3: Math.min(nums[2]||0,10), exam: Math.min(nums[3]||0,70) };
-          row.t2 = { ca1:0, ca2:0, ca3:0, exam:0 };
-          row.t3 = { ca1:0, ca2:0, ca3:0, exam:0 };
+          // Single term — flat row, renderer will wrap into the correct term slot
+          row.ca1 = Math.min(nums[0]||0,10);
+          row.ca2 = Math.min(nums[1]||0,10);
+          row.ca3 = Math.min(nums[2]||0,10);
+          row.exam = Math.min(nums[3]||0,70);
         }
         rows.push(row);
       });
 
       if (rows.length) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--money);">✅ Read ${rows.length} entries (all 3 terms) from CSV.</span>`;
-        _renderScoreOcrPreview(rows, classStudents);
+        if (statusEl) statusEl.innerHTML = isAllTerms
+          ? `<span style="color:var(--money);">✅ Read ${rows.length} entries (all 3 terms) from CSV.</span>`
+          : `<span style="color:var(--money);">✅ Read ${rows.length} entries from CSV.</span>`;
+        _renderScoreOcrPreview(rows, classStudents, termMode);
       } else {
         if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">No score data found in CSV.</span>';
-        _renderScoreOcrManualGrid(classStudents);
+        _renderScoreOcrManualGrid(classStudents, termMode);
       }
     } catch (err) {
       console.warn('CSV parse error:', err.message);
       if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">Could not read CSV file.</span>';
-      _renderScoreOcrManualGrid(classStudents);
+      _renderScoreOcrManualGrid(classStudents, termMode);
     }
   };
   reader.onerror = () => {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">Could not read file.</span>';
-    _renderScoreOcrManualGrid(classStudents);
+    _renderScoreOcrManualGrid(classStudents, termMode);
   };
   reader.readAsText(file);
 }
 
 // ── Image/PDF handler — full OpenCV + Groq → HF → Tesseract pipeline ──
-async function socrHandleImageFiles(files, classStudents, sub, statusEl) {
-  const prompt = _buildScoreOcrPrompt(sub);
+async function socrHandleImageFiles(files, classStudents, sub, termMode, statusEl) {
+  const prompt = _buildScoreOcrPrompt(sub, termMode);
   const allRows = [];
   let usedTesseractFallback = false;
 
@@ -4252,7 +4274,7 @@ async function socrHandleImageFiles(files, classStudents, sub, statusEl) {
         const pageImages = await socrRenderPDFToImages(file, statusEl);
         for (let p = 0; p < pageImages.length; p++) {
           if (statusEl) statusEl.innerHTML = `<span style="color:var(--brand);">⏳ Reading PDF page ${p + 1}/${pageImages.length}...</span>`;
-          const res = await socrOcrOneImage(pageImages[p], 'image/jpeg', prompt, statusEl, classStudents);
+          const res = await socrOcrOneImage(pageImages[p], 'image/jpeg', prompt, statusEl, classStudents, termMode);
           if (res && res.rows && res.rows.length) { allRows.push(...res.rows); if (res.fromTesseract) usedTesseractFallback = true; }
         }
       } catch (pdfErr) {
@@ -4261,7 +4283,7 @@ async function socrHandleImageFiles(files, classStudents, sub, statusEl) {
       }
     } else {
       // Image file — read + preprocess + OCR
-      const res = await socrOcrOneImageFile(file, prompt, statusEl, classStudents);
+      const res = await socrOcrOneImageFile(file, prompt, statusEl, classStudents, termMode);
       if (res && res.rows && res.rows.length) { allRows.push(...res.rows); if (res.fromTesseract) usedTesseractFallback = true; }
     }
   }
@@ -4272,20 +4294,20 @@ async function socrHandleImageFiles(files, classStudents, sub, statusEl) {
         ? `<span style="color:var(--money);">✅ Found ${allRows.length} entries. Names matched to your roster (Tesseract read the numbers — please double-check them below).</span>`
         : `<span style="color:var(--money);">✅ Found ${allRows.length} entries.</span>`;
     }
-    _renderScoreOcrPreview(allRows, classStudents);
+    _renderScoreOcrPreview(allRows, classStudents, termMode);
   } else {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not read scores automatically. Enter manually below or tap Rescan.</span>';
-    _renderScoreOcrManualGrid(classStudents);
+    _renderScoreOcrManualGrid(classStudents, termMode);
   }
 }
 
 // ── OCR one image file: read → OpenCV preprocess → Groq → HF → Tesseract ──
-async function socrOcrOneImageFile(file, prompt, statusEl, classStudents) {
+async function socrOcrOneImageFile(file, prompt, statusEl, classStudents, termMode) {
   return new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = async ev => {
       const rawDataURL = ev.target.result;
-      const result = await socrOcrOneImage(rawDataURL, file.type || 'image/jpeg', prompt, statusEl, classStudents);
+      const result = await socrOcrOneImage(rawDataURL, file.type || 'image/jpeg', prompt, statusEl, classStudents, termMode);
       resolve(result);
     };
     reader.onerror = () => { console.warn('File read error'); resolve(null); };
@@ -4295,7 +4317,7 @@ async function socrOcrOneImageFile(file, prompt, statusEl, classStudents) {
 
 // ── OCR one image data URL: OpenCV → Groq → HF → Tesseract (numbers-only, matched to roster) ──
 // Returns { rows, fromTesseract } so the caller knows to show the "please double-check" note.
-async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents) {
+async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, termMode) {
   // ── OpenCV preprocessing (denoise + threshold + deskew) ──
   let processedDataURL = dataURL;
   try {
@@ -4480,7 +4502,9 @@ async function socrRenderPDFToImages(file, statusEl) {
 
 async function socrSaveScores(){
   const cls=$('socr-class')?.value,sub=$('socr-subj')?.value;
+  const termMode = window._socrTermMode || 'all';
   const termNames={'1':'Term 1','2':'Term 2','3':'Term 3'};
+  const isAllTerms = (termMode === 'all');
   const data = window._socrPreviewData;
   if (!data || !data.length) { toast('No data to save.'); return; }
 
@@ -4500,15 +4524,19 @@ async function socrSaveScores(){
   });
 
   let saved = 0;
+  // In single-term mode, only save to the selected term.
+  // In all-terms mode, save to all 3.
+  const termsToSave = isAllTerms ? [1, 2, 3] : [parseInt(termMode)];
+
   finalRows.forEach(item => {
     const s = SD.students.find(st => st.name === item.name || esc(st.name) === item.name || st.name.toUpperCase() === item.name.toUpperCase());
     if (!s) return;
     const sid = s.id || SD.students.indexOf(s);
 
-    for (let t = 1; t <= 3; t++) {
+    termsToSave.forEach(t => {
       const termName = termNames[String(t)];
       const td = item['t' + t];
-      if (!td) continue;
+      if (!td) return;
       if (!SD.scores[termName]) SD.scores[termName] = {};
       if (!SD.scores[termName][sid]) SD.scores[termName][sid] = {};
       SD.scores[termName][sid][sub] = {
@@ -4517,12 +4545,13 @@ async function socrSaveScores(){
         ca3: td.ca3 || 0,
         exam: td.exam || 0
       };
-    }
+    });
     saved++;
   });
 
   await SQ.push('scores', SD.scores); saveLocal('scores', SD.scores);
-  toast(`✅ Saved ${saved} students × 3 terms for ${sub}.`);
+  const termLabel = isAllTerms ? 'all 3 terms' : termNames[termMode];
+  toast(`✅ Saved ${saved} students (${termLabel}) for ${sub}.`);
   closeM('score-ocr-modal');
   if (typeof renderScorecard === 'function') renderScorecard();
 }
