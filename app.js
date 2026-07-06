@@ -4072,30 +4072,38 @@ async function socrHandleImage(event){
   if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Loading photo...</span>';
   const reader=new FileReader();
   reader.onload=async ev=>{
-    const b64=ev.target.result.split(',')[1];
-    const mime=file.type||'image/jpeg';
+    const rawDataURL=ev.target.result;
     const prompt=_buildScoreOcrPrompt(sub, termLabel);
+    // ── OpenCV preprocessing (same pipeline as register scanner) ──
+    let processedDataURL=rawDataURL;
+    let mime=file.type||'image/jpeg';
     try {
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Uploading...</span>';
-      await new Promise(r=>setTimeout(r,150));
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Reading with Groq...</span>';
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Enhancing image (OpenCV)...</span>';
+      processedDataURL=await resizeImageForOCR(rawDataURL);
+      mime='image/jpeg';
+    } catch(preErr){
+      console.warn('[Score OCR] OpenCV preprocess failed, using raw:', preErr.message);
+      processedDataURL=rawDataURL;
+    }
+    const b64=processedDataURL.split(',')[1];
+    try {
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
       const rows=await _groqScoreOCR(b64, mime, prompt);
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">\u2705 Done!</span>';
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">✅ Done!</span>';
       _renderScoreOcrPreview(rows, classStudents);
       return;
     } catch(e1){
       console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
     }
     try {
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">\u23f3 Retrying with HuggingFace Vision...</span>';
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">⏳ Retrying with HuggingFace Vision...</span>';
       const rows=await _hfScoreOCR(b64, mime, prompt);
-      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">\u2705 Done!</span>';
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--money);">✅ Done!</span>';
       _renderScoreOcrPreview(rows, classStudents);
       return;
     } catch(e2){
       console.warn('HF score OCR failed:', e2.message);
     }
-    // Both engines failed — fall back to manual grid, pre-populated with student names
     _renderScoreOcrManualGrid(classStudents);
   };
   reader.onerror=()=>{ if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Could not read photo. Tap Rescan to try again.</span>'; _renderScoreOcrManualGrid(classStudents); };
