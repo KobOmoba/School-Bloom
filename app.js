@@ -4064,10 +4064,10 @@ function _renderScoreOcrPreview(rows, classStudents, termMode){
       const td = item[tKey] || { ca1:0, ca2:0, ca3:0, exam:0 };
       pHTML += `<tr class="socr-preview-row socr-row-${idx}" data-name="${esc(item.name||'')}" data-row-idx="${idx}">
         <td style="text-align:left;"><b>${esc(item.name||'')}</b></td>
-        <td><input type="number" min="0" max="10" class="socr-t${t}-ca1" data-term="${t}" data-field="ca1" value="${td.ca1||0}" style="width:36px;padding:2px;margin:0;font-size:0.7rem;"></td>
-        <td><input type="number" min="0" max="10" class="socr-t${t}-ca2" data-term="${t}" data-field="ca2" value="${td.ca2||0}" style="width:36px;padding:2px;margin:0;font-size:0.7rem;"></td>
-        <td><input type="number" min="0" max="10" class="socr-t${t}-ca3" data-term="${t}" data-field="ca3" value="${td.ca3||0}" style="width:36px;padding:2px;margin:0;font-size:0.7rem;"></td>
-        <td><input type="number" min="0" max="70" class="socr-t${t}-exam" data-term="${t}" data-field="exam" value="${td.exam||0}" style="width:42px;padding:2px;margin:0;font-size:0.7rem;"></td>
+        <td>${_buildCaDropdown(td.ca1||0, t, 'ca1', idx)}</td>
+        <td>${_buildCaDropdown(td.ca2||0, t, 'ca2', idx)}</td>
+        <td>${_buildCaDropdown(td.ca3||0, t, 'ca3', idx)}</td>
+        <td>${_buildExamDropdown(td.exam||0, t, idx)}</td>
         <td><button onclick="socrSwapRow(${idx})" style="font-size:0.6rem;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:transparent;cursor:pointer;" title="Swap with next row">⇅</button></td>
       </tr>`;
     });
@@ -4111,7 +4111,7 @@ function socrSwapRow(idx) {
     const updated = { name: item.name, t1: {...item.t1}, t2: {...item.t2}, t3: {...item.t3} };
     for (let t = 1; t <= 3; t++) {
       ['ca1','ca2','ca3','exam'].forEach(f => {
-        const inp = row.querySelector('.socr-t' + t + '-' + f);
+        const inp = row.querySelector('input.socr-t' + t + '-' + f) || row.querySelector('select.socr-t' + t + '-' + f);
         if (inp) updated['t' + t][f] = parseInt(inp.value) || 0;
       });
     }
@@ -4139,6 +4139,99 @@ function _renderScoreOcrManualGrid(classStudents, termMode){
   _renderScoreOcrPreview(manualRows, classStudents, termMode || 'all');
   // Override the status message for manual mode
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Could not auto-read. Enter scores manually — switch between Term 1/2/3 tabs:</span>';
+}
+
+// ── Manual mode toggle — skip scanning, go straight to dropdown entry ──
+function socrToggleManualMode(){
+  const cls=$('socr-class')?.value;
+  const sub=$('socr-subj')?.value;
+  const termMode=$('socr-term')?.value || 'all';
+  if(!cls){ $('socr-status').innerHTML='<span style="color:var(--danger);">Pick a class first.</span>'; return; }
+  const classStudents=SD.students.filter(s=>s.class===cls);
+  if(!classStudents.length){
+    $('socr-status').innerHTML='<span style="color:var(--danger);">No students in this class. Add students first.</span>';
+    return;
+  }
+  window._socrTermMode=termMode;
+  _renderScoreOcrDropdownGrid(classStudents, termMode);
+}
+
+// ── Dropdown-based manual entry grid (CA 0-10, Exam 0-70) ──
+function _buildCaDropdown(val, term, field, idx){
+  let opts='<option value="0">-</option>';
+  for(let i=0;i<=10;i++){
+    opts+=`<option value="${i}"${(val===i)?' selected':''}>${i}</option>`;
+  }
+  return `<select class="socr-t${term}-${field} socr-dd" data-term="${term}" data-field="${field}" data-row="${idx}" style="width:48px;padding:2px;margin:0;font-size:0.72rem;border:1px solid var(--border);border-radius:4px;">${opts}</select>`;
+}
+
+function _buildExamDropdown(val, term, idx){
+  let opts='<option value="0">-</option>';
+  for(let i=0;i<=70;i++){
+    opts+=`<option value="${i}"${(val===i)?' selected':''}>${i}</option>`;
+  }
+  return `<select class="socr-t${term}-exam socr-dd" data-term="${term}" data-field="exam" data-row="${idx}" style="width:54px;padding:2px;margin:0;font-size:0.72rem;border:1px solid var(--border);border-radius:4px;">${opts}</select>`;
+}
+
+function _renderScoreOcrDropdownGrid(classStudents, termMode){
+  const isAllTerms=(termMode==='all'||!termMode);
+  const termNum=isAllTerms?'1':(termMode||'1');
+  const statusEl=$('socr-status');
+  if(statusEl) statusEl.innerHTML='<span style="color:var(--brand);">✍️ Manual entry mode — pick scores from the dropdowns. No scanning needed.</span>';
+
+  const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
+
+  // Build data rows with zeros
+  const manualRows=classStudents.map(s=>({
+    name:s.name.toUpperCase(),
+    t1:{ca1:0,ca2:0,ca3:0,exam:0},
+    t2:{ca1:0,ca2:0,ca3:0,exam:0},
+    t3:{ca1:0,ca2:0,ca3:0,exam:0}
+  }));
+
+  // Build the same tabbed or single-term layout but with dropdowns
+  let pHTML=`<div style="margin-top:0.5rem;">`;
+  if(isAllTerms){
+    pHTML+=`<div style="display:flex;gap:0.3rem;margin-bottom:0.4rem;">
+      <button id="socr-tab-t1" class="socr-term-tab" onclick="socrSwitchTermTab(1)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--brand);background:var(--brand);color:#fff;font-size:0.75rem;font-weight:700;cursor:pointer;">Term 1</button>
+      <button id="socr-tab-t2" class="socr-term-tab" onclick="socrSwitchTermTab(2)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:0.75rem;font-weight:700;cursor:pointer;">Term 2</button>
+      <button id="socr-tab-t3" class="socr-term-tab" onclick="socrSwitchTermTab(3)" style="flex:1;padding:0.4rem;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:0.75rem;font-weight:700;cursor:pointer;">Term 3</button>
+    </div>`;
+  }
+
+  const termsToShow=isAllTerms?[1,2,3]:[parseInt(termNum)];
+  for(const t of termsToShow){
+    pHTML+=`<div id="socr-term-${t}-panel" style="display:${(isAllTerms&&t!==1)?'none':'block'};">`;
+    if(!isAllTerms){
+      const tLabel=t===1?'Term 1':t===2?'Term 2':'Term 3';
+      pHTML+=`<p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;font-weight:600;">${tLabel}</p>`;
+    }
+    pHTML+=`<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.3rem;">
+      <table class="stbl" style="font-size:0.72rem;width:100%;">
+        <thead><tr>
+          <th style="text-align:left;">Student Name</th>
+          <th>1CA</th><th>2CA</th><th>3CA</th><th>Exam</th>
+        </tr></thead><tbody>`;
+    manualRows.forEach((item, idx)=>{
+      pHTML+=`<tr class="socr-preview-row socr-row-${idx}" data-name="${esc(item.name)}" data-row-idx="${idx}">
+        <td style="text-align:left;"><b>${esc(classStudents[idx].name)}</b></td>
+        <td>${_buildCaDropdown(0, t, 'ca1', idx)}</td>
+        <td>${_buildCaDropdown(0, t, 'ca2', idx)}</td>
+        <td>${_buildCaDropdown(0, t, 'ca3', idx)}</td>
+        <td>${_buildExamDropdown(0, t, idx)}</td>
+      </tr>`;
+    });
+    pHTML+=`</tbody></table></div></div>`;
+  }
+  pHTML+=`</div>`;
+
+  const previewEl=$('socr-preview'); if(previewEl) previewEl.innerHTML=pHTML;
+  const saveBtn=$('socr-save-btn'); if(saveBtn) saveBtn.style.display='block';
+
+  // Store data + term mode for save
+  window._socrPreviewData=manualRows;
+  window._socrTermMode=isAllTerms?'all':termMode;
+  window._socrManualMode=true;
 }
 
 function socrRescan(){
@@ -4509,13 +4602,15 @@ async function socrSaveScores(){
   if (!data || !data.length) { toast('No data to save.'); return; }
 
   // Capture latest input values from the DOM (user may have edited)
+  // Works for both <input type="number"> (OCR mode) and <select> dropdowns (manual mode)
   const finalRows = data.map((item, i) => {
     const row = document.querySelector('.socr-row-' + i);
     const updated = { name: item.name, t1: {...(item.t1||{})}, t2: {...(item.t2||{})}, t3: {...(item.t3||{})} };
     if (row) {
       for (let t = 1; t <= 3; t++) {
         ['ca1','ca2','ca3','exam'].forEach(f => {
-          const inp = row.querySelector('.socr-t' + t + '-' + f);
+          // Try input first, then select (dropdown)
+          const inp = row.querySelector('input.socr-t' + t + '-' + f) || row.querySelector('select.socr-t' + t + '-' + f);
           if (inp) updated['t' + t][f] = parseInt(inp.value) || 0;
         });
       }

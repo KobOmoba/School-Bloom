@@ -1345,6 +1345,13 @@ function toggleEye(inputId, btn) {
     </button>
     <p style="font-size:0.7rem;color:var(--sub);text-align:center;margin-top:0.3rem;">Also accepts: CSV, PDF, Excel, typed list</p>
 
+    <!-- Manual mode toggle — for when the photo won't cooperate -->
+    <div style="text-align:center;margin-top:0.4rem;margin-bottom:0.3rem;">
+      <button id="socr-manual-toggle" class="btn-ghost btn-sm" onclick="socrToggleManualMode()" style="font-size:0.75rem;">
+        ✍️ Skip Scan — Enter Manually
+      </button>
+    </div>
+
     <!-- Status + progress -->
     <div id="socr-status" style="font-size:0.8rem;margin-bottom:0.5rem;min-height:1.2rem;"></div>
 
