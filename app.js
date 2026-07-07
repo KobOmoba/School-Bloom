@@ -5479,6 +5479,343 @@ async function refreshPlanFromFirestore(btn) {
 // SECTION 9 — Auto-login on page load
 // ═══════════════════════════════════════════════════════════════════════
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// FEE REGISTER SCANNER — Groq Vision → Structured Data → Payment Import
+// Workflow: photo of physical handwritten fee register → Groq reads it
+// → extracts structured JSON → matches students → imports payments
+// ═══════════════════════════════════════════════════════════════════════
+
+let _feeGroqKey = null;
+let _feeImportData = null;  // holds last scanned result for import confirm
+
+// ── 1. Get Groq key from admin_settings (same source as agent app) ────
+async function _getFeeGroqKey() {
+  if (_feeGroqKey) return _feeGroqKey;
+  try {
+    if (!db) return null;
+    const doc = await db.collection('admin_settings').doc('main').get();
+    if (doc.exists && doc.data().groqApiKey) {
+      _feeGroqKey = doc.data().groqApiKey;
+      return _feeGroqKey;
+    }
+  } catch(e) { console.warn('Groq key fetch:', e.message); }
+  return null;
+}
+
+// ── 2. File input handler wired from index.html ───────────────────────
+async function handleFeeRegisterPhoto(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+
+  const fb = document.getElementById('fee-scan-fb');
+  const show = msg => { if (fb) { fb.style.display = 'block'; fb.textContent = msg; } };
+
+  if (!navigator.onLine) { show('❌ No internet. Connect to scan a register.'); return; }
+
+  show('📸 Resizing image...');
+  let resized;
+  try { resized = await _resizeFeeImage(file, 1200); }
+  catch(e) { show('❌ Could not read image: ' + e.message); return; }
+
+  show('🔑 Fetching AI key...');
+  const key = await _getFeeGroqKey();
+  if (!key) {
+    show('❌ Groq API key not found. Ask Bayo to add groqApiKey in the portal admin settings.');
+    return;
+  }
+
+  show('🤖 Groq AI is reading your register... (10–20 seconds)');
+  try {
+    const result = await _callGroqFeeVision(key, resized.base64, resized.mimeType);
+    if (fb) fb.style.display = 'none';
+    _feeImportData = result;
+    _showFeeImportReview(result);
+  } catch(e) {
+    console.error('Fee register scan:', e);
+    show('❌ ' + (e.message || 'Unknown error. Try a clearer, well-lit photo.'));
+  }
+}
+
+// ── 3. Resize image before sending to Groq ───────────────────────────
+function _resizeFeeImage(file, maxPx) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
+        resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' });
+      };
+      img.onerror = reject;
+      img.src = ev.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── 4. Groq Vision call with Nigerian fee ledger system prompt ────────
+async function _callGroqFeeVision(apiKey, base64, mimeType) {
+  // This system prompt is tuned from 5 real Nigerian school fee registers:
+  // Basic 4&5, Basic 3, Basic 1&2, Nursery 1&2, KG — Term 3, 2026
+  const SYSTEM_PROMPT = `You are reading a photograph of a Nigerian school fees ledger (handwritten register book). Extract ALL student payment records visible.
+
+COLUMN STRUCTURE (left to right):
+1. S/N — serial/row number
+2. NAMES — SURNAME first then FIRSTNAME (sometimes written as one full name)
+3. BALANCE FROM LAST TERM — debt carried from previous term (blank = 0)
+4. CURRENT TERMS FEES — this term's fee amount
+5. TOTAL — (Balance from last term) + (Current term fees)
+6. 1ST PART PAYMENT — first installment paid this term
+7. TELLER NO / BALANCE — running balance after 1st payment (the number remaining)
+8. DATE — date of 1st payment in Nigerian D/M/YY format (e.g. 12/5/26 = 12 May 2026)
+9. 2ND PART PAYMENT — second installment amount
+10. BALANCE — running balance after 2nd payment
+11. DATE — date of 2nd payment
+12. 3RD PART PAYMENT — third installment amount
+13. BALANCE / RECEIPT NO — running balance after 3rd payment
+14. DATE — date of 3rd payment
+
+CRITICAL RULES:
+- "FULLY PAID", "FULL PAID", "FULLY P", "F.P.", "FP" written anywhere on a row = student paid everything → status "FULLY PAID"
+- "BALANCE 3,000" or "BAL 2,000" appearing before CURRENT TERMS FEES = balance owed from last term
+- "Party" in a payment column = partial, record the number written near it
+- All amounts in Nigerian Naira as integers: 28,000 and 28000 and 28.000 all mean 28000
+- Dates: D/M/YY. Examples: 12/5/26 = 12 May 2026, 8/6/26 = 8 Jun 2026, 29/6/26 = 29 Jun 2026
+- Names are Nigerian: Yoruba (Olayinka, Adeoye, Ogunsola, Ilelaboye, Olatunde), Hausa (Musa, Aisha, Abdullahi, Khaleed), Igbo (Emeka, Chioma, Ezekiel)
+- Crossed-out numbers = corrections; use the newer number written next to them
+- Blank cell = no payment recorded for that installment → null
+- Ignore TOTAL rows at the bottom of the page
+- Class name is usually at the top (e.g. "BASIC FOUR & BASIC FIVE", "NURSERY 1 & 2", "K-G")
+- Term is usually at the top (e.g. "3RD", "2ND")
+
+Output ONLY raw valid JSON with no markdown, no explanation, no code fences:
+{"class":"","term":"","year":"","students":[{"sn":1,"surname":"OGUNDETI","firstname":"SALAIM","bal_bf":null,"term_fees":26000,"total":26000,"pmt1":10000,"bal1":16000,"date1":"12/5/26","pmt2":5000,"bal2":11000,"date2":"22/6/26","pmt3":null,"bal3":null,"date3":null,"status":"Partial"}]}
+
+Status values: "FULLY PAID" | "Partial" | "No Payment"
+Use null for blank/unreadable cells. Integers only for amounts. Do NOT invent data.`;
+
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey
+    },
+    body: JSON.stringify({
+      model: 'qwen/qwen3.6-27b',
+      max_tokens: 4000,
+      temperature: 0.1,
+      reasoning_format: 'hidden',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
+          { type: 'text', text: SYSTEM_PROMPT }
+        ]
+      }]
+    })
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
+  }
+
+  const data = await resp.json();
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+
+  // Strip thinking tokens and markdown fences
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+
+  try { return JSON.parse(raw); }
+  catch(e) {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error('Could not parse Groq response. Try a clearer, straighter photo of the register.');
+  }
+}
+
+// ── 5. Show review modal before importing ─────────────────────────────
+function _showFeeImportReview(data) {
+  const students = data.students || [];
+  if (!students.length) {
+    alert('No student records found. Try a closer, well-lit photo with the register page flat.');
+    return;
+  }
+
+  // Fuzzy name match against existing SD.students
+  function matchStudent(surname, firstname) {
+    const query = ((surname || '') + ' ' + (firstname || '')).toLowerCase().replace(/[^a-z\s]/g, '');
+    const words = query.split(/\s+/).filter(w => w.length > 1);
+    if (!words.length) return null;
+    let best = null, bestScore = 0;
+    SD.students.forEach((s, idx) => {
+      const sn = (s.name || '').toLowerCase().replace(/[^a-z\s]/g, '');
+      const sw = sn.split(/\s+/).filter(w => w.length > 1);
+      let shared = 0;
+      words.forEach(w => { if (sw.some(v => v === w || v.startsWith(w) || w.startsWith(v))) shared++; });
+      const score = shared / Math.max(words.length, sw.length, 1);
+      if (score > bestScore) { bestScore = score; best = { idx, name: s.name }; }
+    });
+    return bestScore >= 0.35 ? best : null;
+  }
+
+  const matched = students.map(s => ({ ...s, _match: matchStudent(s.surname, s.firstname) }));
+  const matchCount = matched.filter(s => s._match).length;
+
+  // Remove existing modal if any
+  document.getElementById('_fee_import_modal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = '_fee_import_modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9998;overflow-y:auto;padding:1rem 0;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--s1);border-radius:14px;padding:1rem;max-width:580px;margin:0 auto;border:1px solid var(--border);';
+
+  // Header
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;gap:0.5rem;';
+  hdr.innerHTML =
+    '<div><div style="font-weight:800;font-size:1rem;color:var(--text);">📋 Review Scanned Register</div>' +
+    '<div style="font-size:0.75rem;color:var(--sub);margin-top:3px;">' +
+    'Class: <b style="color:var(--text);">' + esc(data.class||'—') + '</b> · ' +
+    'Term: <b style="color:var(--text);">' + esc(data.term||'—') + '</b> · ' +
+    'Year: <b style="color:var(--text);">' + esc(data.year||'—') + '</b><br>' +
+    matchCount + ' of ' + students.length + ' students matched to existing records</div></div>' +
+    '<button onclick="document.getElementById(\'_fee_import_modal\').remove()" ' +
+    'style="background:none;border:none;color:var(--sub);font-size:1.4rem;cursor:pointer;padding:0;line-height:1;">✕</button>';
+  box.appendChild(hdr);
+
+  // Student rows
+  const rowsDiv = document.createElement('div');
+  matched.forEach((s, i) => {
+    const m = s._match;
+    const fullName = [s.surname, s.firstname].filter(Boolean).join(' ');
+    const statusColor = s.status === 'FULLY PAID' ? '#22c55e' : s.status === 'No Payment' ? '#ef4444' : '#f59e0b';
+    const totalPaid = (s.pmt1||0) + (s.pmt2||0) + (s.pmt3||0);
+
+    const row = document.createElement('div');
+    row.style.cssText = 'background:' + (i%2===0?'var(--s2)':'var(--s1)') + ';border:1px solid ' + (m?'var(--border)':'rgba(239,68,68,0.3)') + ';border-radius:8px;padding:0.55rem 0.7rem;margin-bottom:0.35rem;';
+    row.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">' +
+        '<div style="font-weight:700;font-size:0.86rem;">' + s.sn + '. ' + esc(fullName) + '</div>' +
+        '<span style="font-size:0.72rem;font-weight:700;color:' + statusColor + ';">' + esc(s.status||'—') + '</span>' +
+      '</div>' +
+      '<div style="font-size:0.71rem;margin-top:2px;color:' + (m?'#60a5fa':'#ef4444') + ';">' +
+        (m ? '✅ Matches: <b>' + esc(m.name) + '</b>' : '⚠️ No match — will be skipped') +
+      '</div>' +
+      (totalPaid ? '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;font-size:0.69rem;color:var(--sub);">' +
+        (s.pmt1 ? '<span>1st: <b style="color:var(--money);">₦' + Number(s.pmt1).toLocaleString('en-NG') + '</b>' + (s.date1?' ('+s.date1+')':'') + '</span>' : '') +
+        (s.pmt2 ? '<span>2nd: <b style="color:var(--money);">₦' + Number(s.pmt2).toLocaleString('en-NG') + '</b>' + (s.date2?' ('+s.date2+')':'') + '</span>' : '') +
+        (s.pmt3 ? '<span>3rd: <b style="color:var(--money);">₦' + Number(s.pmt3).toLocaleString('en-NG') + '</b>' + (s.date3?' ('+s.date3+')':'') + '</span>' : '') +
+        '<span>Total: <b style="color:var(--money);">₦' + totalPaid.toLocaleString('en-NG') + '</b></span>' +
+        '</div>' : '');
+    rowsDiv.appendChild(row);
+  });
+  box.appendChild(rowsDiv);
+
+  // Footer buttons
+  const ftr = document.createElement('div');
+  ftr.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.75rem;';
+
+  const importBtn = document.createElement('button');
+  importBtn.className = 'btn-brand';
+  importBtn.style.cssText = 'flex:1;';
+  importBtn.textContent = '✅ Import ' + matchCount + ' Matched Records';
+  importBtn.onclick = () => _confirmFeeImport(matched);
+  ftr.appendChild(importBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-ghost';
+  cancelBtn.style.cssText = 'flex:0 0 auto;';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.onclick = () => modal.remove();
+  ftr.appendChild(cancelBtn);
+
+  box.appendChild(ftr);
+  modal.appendChild(box);
+  // Close on backdrop tap
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+// ── 6. Confirm and apply the import ──────────────────────────────────
+async function _confirmFeeImport(matched) {
+  let importedEntries = 0, skippedStudents = 0;
+  const today = new Date().toISOString().split('T')[0];
+
+  matched.forEach(s => {
+    if (!s._match) { skippedStudents++; return; }
+    const student = SD.students[s._match.idx];
+    if (!student) { skippedStudents++; return; }
+
+    // Set totalFee from register if student has none yet
+    if (s.term_fees && !student.totalFee) student.totalFee = s.term_fees;
+
+    // Ensure paymentHistory array exists
+    if (!student.paymentHistory) student.paymentHistory = [];
+
+    // Import each payment instalment
+    const payments = [
+      [s.pmt1, s.date1, '1st instalment'],
+      [s.pmt2, s.date2, '2nd instalment'],
+      [s.pmt3, s.date3, '3rd instalment']
+    ];
+
+    payments.forEach(([amt, rawDate, label]) => {
+      if (!amt || amt <= 0) return;
+      // Parse D/M/YY date to YYYY-MM-DD
+      let dateStr = today;
+      if (rawDate) {
+        const parts = rawDate.split('/');
+        if (parts.length === 3) {
+          const yr = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+          const mo = parts[1].padStart(2, '0');
+          const dy = parts[0].padStart(2, '0');
+          dateStr = yr + '-' + mo + '-' + dy;
+        }
+      }
+      // Dedup: skip if identical amount+date already exists
+      const dup = student.paymentHistory.some(p => p.amount === amt && p.date === dateStr);
+      if (dup) return;
+
+      student.paid = (student.paid || 0) + amt;
+      student.paymentHistory.unshift({
+        amount: amt,
+        method: 'Register Scan',
+        date: dateStr,
+        by: 'Fee Register OCR'
+      });
+      importedEntries++;
+    });
+  });
+
+  await SQ.push('students', SD.students);
+  checkTierStatus();
+  document.getElementById('_fee_import_modal')?.remove();
+  renderRevenue();
+  renderStudentList();
+
+  alert(
+    '✅ Import complete!\n\n' +
+    importedEntries + ' payment entries added\n' +
+    skippedStudents + ' students skipped (no name match)\n\n' +
+    'Open individual student profiles to verify.'
+  );
+}
+
+
+
 (function autoLogin() {
   const raw = localStorage.getItem('p_auth') || sessionStorage.getItem('p_auth');
   if (!raw) return;
