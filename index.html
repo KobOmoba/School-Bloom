@@ -233,6 +233,12 @@ function toggleEye(inputId, btn) {
         <input type="file" id="logo-file-input" accept="image/*,.heic,.heif,*/*" style="display:none;" onchange="handleLogoUpload(event)">
         <button class="btn-outline" onclick="document.getElementById('bulk-csv').click()">📂 Upload Bank Statement CSV</button>
         <div id="bulk-feedback" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);"></div>
+        <div style="border-top:1px solid var(--border);margin-top:0.75rem;padding-top:0.75rem;">
+          <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;">Or scan a photo of your physical handwritten fee register — Groq AI reads it and imports all payments automatically.</p>
+          <input type="file" id="fee-register-input" accept="image/*" capture="environment" style="display:none;" onchange="handleFeeRegisterPhoto(event)">
+          <button class="btn-brand" style="background:linear-gradient(135deg,#0891b2,#0e7490);width:100%;" onclick="document.getElementById('fee-register-input').click()">📸 Scan Physical Fee Register</button>
+          <div id="fee-scan-fb" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);display:none;"></div>
+        </div>
       </div>
       <div class="card">
         <div class="ct">🚨 Overdue Parents</div>
