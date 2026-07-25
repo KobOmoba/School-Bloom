@@ -5598,7 +5598,7 @@ READING DISCIPLINE:
 - If a field is illegible or not visible, output "UNCLEAR" for that field rather than guessing a plausible value.
 - Return ONLY valid JSON, no markdown, no explanation.`;
 
-function _isPremium() { return (SD.config && SD.config.plan === 'premium') || (window._demoMode === true); }
+function _isPremium() { return true; /* TEMP BYPASS */ }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
 function _gateScan(prefix, scanInputId) {
   if (_isPremium()) { return true; }
