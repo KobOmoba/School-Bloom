@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // EDUCATIONAL BLOOM — app.js (MERGED: v1 base + v2 extras)
 // Term-based scoring (CA1/CA2/CA3/Exam) is the canonical data model.
-// OCR uses full fallback chain: Groq Vision → HuggingFace Vision → OCR.space.
+// OCR uses Groq Vision (qwen/qwen3.6-27b) — sole engine, no fallback chain.
 // AI Tools (report card remarks, insights) now use Groq (see index.html inline scripts).
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -286,7 +286,7 @@ Rules:
 // Reset to '' at the start of each new multi-page scan (see processImagesSequentially).
 let _lastDetectedClass = '';
 
-const HF_OCR_MODEL = 'Qwen/Qwen2.5-VL-7B-Instruct';
+const HF_OCR_MODEL = 'DEPRECATED'; // HF fallback removed — Groq only
 const HF_KEY_STORAGE = 'hf_api_key';
 function getHFKey() { return window.HF_API_KEY || localStorage.getItem(HF_KEY_STORAGE) || ''; }
 
@@ -313,114 +313,6 @@ async function _fetchGroqKeyFromFirestore() {
       console.log('✅ HF key loaded via secure proxy');
     }
   } catch(e) { /* offline — use whatever is in localStorage */ }
-}
-
-async function hfVisionOCR(base64, mime) {
-  const hfKey = getHFKey();
-  if (!hfKey) throw new Error('No HF API key — enter it in portal Settings');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 45000);
-  let resp;
-  try {
-    resp = await fetch(
-      'https://api-inference.huggingface.co/models/' + HF_OCR_MODEL + '/v1/chat/completions',
-      {
-        method: 'POST', signal: controller.signal,
-        headers: { 'Authorization': 'Bearer ' + hfKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: HF_OCR_MODEL,
-          messages: [{ role: 'user', content: [
-            { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + base64 } },
-            { type: 'text', text: GROQ_OCR_PROMPT }
-          ]}],
-          max_tokens: 600
-        })
-      }
-    );
-    clearTimeout(timer);
-  } catch(fe) { clearTimeout(timer); throw new Error('HF network error: ' + fe.message); }
-  if (resp.status === 503) {
-    const ed = await resp.json().catch(() => ({}));
-    const wait = Math.min(Math.ceil(ed.estimated_time || 25), 45);
-    const ld = document.getElementById('csv-loading');
-    for (let s = wait; s > 0; s--) {
-      if (ld) ld.textContent = '\ud83e\udd17 HF model loading \u2014 ready in ' + s + 's...';
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    const ctrl2 = new AbortController();
-    const t2 = setTimeout(() => ctrl2.abort(), 45000);
-    try {
-      resp = await fetch(
-        'https://api-inference.huggingface.co/models/' + HF_OCR_MODEL + '/v1/chat/completions',
-        { method:'POST', signal:ctrl2.signal,
-          headers:{'Authorization':'Bearer '+hfKey,'Content-Type':'application/json'},
-          body: JSON.stringify({model:HF_OCR_MODEL,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+base64}},{type:'text',text:GROQ_OCR_PROMPT}]}],temperature:0.2,max_tokens:600})
-        }
-      );
-      clearTimeout(t2);
-    } catch(fe2){ clearTimeout(t2); throw new Error('HF retry failed: '+fe2.message); }
-  }
-  if (!resp.ok) {
-    const ed = await resp.json().catch(() => ({}));
-    throw new Error('HF ' + resp.status + ': ' + (ed.error?.message || resp.statusText));
-  }
-  const data = await resp.json();
-  let text = data.choices?.[0]?.message?.content || '';
-  if (!text.trim()) throw new Error('HF returned empty response');
-  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  let jsonStr = text.trim();
-  const cb = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/); if (cb) jsonStr = cb[1].trim();
-  // Try to capture a detected_class before the array-only regexes below strip it out
-  try {
-    const rawParsed = JSON.parse(jsonStr);
-    if (rawParsed && !Array.isArray(rawParsed) && rawParsed.detected_class) {
-      const dc = String(rawParsed.detected_class).trim().toUpperCase();
-      if (dc) _lastDetectedClass = dc;
-    }
-  } catch(_) {}
-  const ow = jsonStr.match(/\{[\s\S]*"students"\s*:\s*(\[[\s\S]*\])\s*\}/); if (ow) jsonStr = ow[1].trim();
-  const am = jsonStr.match(/(\[[\s\S]*\])/); if (am) jsonStr = am[1].trim();
-  let students;
-  try { students = JSON.parse(jsonStr); }
-  catch(_) {
-    const fb = extractNamesFromText(text);
-    return fb.map(n => { const p=n.trim().toUpperCase().split(/\s+/); return {surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n.trim().toUpperCase()}; }).filter(s=>s.fullName.length>=3);
-  }
-  if (!Array.isArray(students) || !students.length) throw new Error('HF returned 0 students');
-  return students.map(s => {
-    if (typeof s === 'string') {
-      const parts = s.trim().toUpperCase().split(/\s+/);
-      return { surname: parts[0]||'', firstname: parts.slice(1).join(' ')||'', fullName: s.trim().toUpperCase() };
-    }
-    const sur=(s.surname||'').trim().toUpperCase(), fst=(s.firstname||s.first_name||s.firstName||'').trim().toUpperCase();
-    const full=(s.fullName||s.full_name||'').trim().toUpperCase()||(sur+' '+fst).trim();
-    return {surname:sur, firstname:fst, fullName:full};
-  }).filter(s=>s.fullName.length>=2);
-}
-
-async function ocrSpaceOCR(base64, mime) {
-  const tryEngine = async (engine) => {
-    const fd = new FormData();
-    fd.append('base64Image', 'data:' + mime + ';base64,' + base64);
-    fd.append('language', 'eng');
-    fd.append('OCREngine', String(engine));
-    fd.append('isTable', 'true');
-    fd.append('apikey', 'helloworld');
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 30000);
-    const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd, signal: ctrl.signal });
-    clearTimeout(t);
-    const data = await resp.json();
-    if (data.IsErroredOnProcessing) throw new Error('OCR.space E' + engine + ': ' + (data.ErrorMessage?.[0] || 'error'));
-    const text = (data.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
-    if (!text.trim()) throw new Error('OCR.space E' + engine + ' returned empty text');
-    return extractNamesFromText(text);
-  };
-  try { return await tryEngine(3); }
-  catch(e3) {
-    console.warn('OCR.space E3 failed:', e3.message, '— trying E2');
-    return await tryEngine(2);
-  }
 }
 
 async function groqVisionOCR(base64, mime, _retry) {
@@ -555,10 +447,10 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
 
       ocrOverlayStep('load', canTryGroq
         ? 'Image loaded — sending to Groq Vision...'
-        : '🤗 Groq unavailable — preparing HuggingFace (page ' + pageNum + ')...', 20);
+        : '⚠️ No Groq API key — scanning unavailable (page ' + pageNum + ')...', 20);
 
       // Retry loading keys once if the proxy hadn't finished/succeeded yet (e.g. slow network on first login)
-      if (!groqKey && !getHFKey() && typeof _fetchGroqKeyFromFirestore === 'function') {
+      if (!groqKey && typeof _fetchGroqKeyFromFirestore === 'function') {
         await _fetchGroqKeyFromFirestore().catch(() => {});
       }
 
@@ -574,43 +466,11 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
         } catch (e) {
           _lastOcrError = e.message || 'Groq Vision failed';
           console.error('Groq Vision error (page ' + pageNum + '):', _lastOcrError);
-          // No hard-stop here even on invalid/auth errors — always fall through to HF next.
         }
-      } else if (!groqKey) {
-        _lastOcrError = 'Groq key not loaded (proxy unavailable) — trying HuggingFace';
+      } else {
+        _lastOcrError = 'Groq API key not configured — contact admin';
       }
-
-      try {
-        const hfLabel = canTryGroq ? 'Trying HuggingFace' : 'HuggingFace scanning';
-        ocrOverlayStep('scan', '🤗 ' + hfLabel + ' (page ' + pageNum + '/' + total + ')...', canTryGroq ? 70 : 40);
-        const hfResult = await hfVisionOCR(b64, mime);
-        if (hfResult && hfResult.length > 0) {
-          ocrOverlayStep('read', '🤗 HF: ' + hfResult.length + ' names (page ' + pageNum + ')', 100);
-          resolve(hfResult); return;
-        }
-      } catch (hfErr) {
-        const hfMsg = hfErr.message.includes('No HF API key')
-          ? '⚠️ HF not loaded (proxy unavailable) — trying OCR.space'
-          : ('🤗 HF failed (' + hfErr.message.slice(0,40) + ') — trying OCR.space');
-        console.warn('HF fallback:', hfErr.message);
-        ocrOverlayStep('scan', hfMsg, 80);
-      }
-      try {
-        const ocrNames = await ocrSpaceOCR(b64, mime);
-        if (ocrNames && ocrNames.length > 0) {
-          const mapped = ocrNames.map(name => {
-            const parts = name.trim().toUpperCase().split(/\s+/);
-            return { surname: parts[0]||'', firstname: parts.slice(1).join(' ')||'', fullName: name.trim().toUpperCase() };
-          }).filter(s => s.fullName.length >= 3);
-          if (mapped.length > 0) {
-            ocrOverlayStep('read', '📄 OCR.space: ' + mapped.length + ' names (page ' + pageNum + ')', 100);
-            resolve(mapped); return;
-          }
-        }
-      } catch (ocrErr) {
-        console.warn('OCR.space fallback failed:', ocrErr.message);
-      }
-      ocrOverlayStep('error', '⚠️ All OCR failed: ' + _lastOcrError.slice(0, 60), 100);
+      ocrOverlayStep('error', '⚠️ OCR failed: ' + _lastOcrError.slice(0, 60), 100);
       resolve([]);
       } catch(fatal) { console.error('_readOnePage fatal:', fatal.message||String(fatal)); resolve([]); }
     };
@@ -834,6 +694,7 @@ const SQ = {
   save() { localStorage.setItem('p_sq', JSON.stringify(this.q)); },
   push(key, data) {
     SD[key] = data;
+    if (window._demoMode) return; // Demo mode — no persistence, no Firestore writes
     if (schoolId) localStorage.setItem(`p_${schoolId}_${key}`, JSON.stringify(data));
     this.q.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), key, data, tries: 0 });
     this.save();
@@ -868,8 +729,12 @@ const SQ = {
           clearTimeout(timeoutId);
           this._probing = false;
           if (!this._offlineSince) this._offlineSince = Date.now();
-          const secs = (Date.now() - this._offlineSince) / 1000;
-          if (el && secs > 5) { el.className = 'sdot sd-off'; el.textContent = '● Offline'; }
+          // Use a persistent offline timestamp — UI updates after 5s
+          setTimeout(() => {
+            if (this._offlineSince && !navigator.onLine && el) {
+              el.className = 'sdot sd-off'; el.textContent = '● Offline';
+            }
+          }, 5000);
         });
       }
     }
@@ -880,7 +745,7 @@ const SQ = {
     const items = [...this.q];
     for (const item of items) {
       try {
-        await db.collection('schools').doc(schoolId).set({ [item.key]: item.data }, { merge: true });
+        await db.collection('v2_schools').doc(schoolId).set({ [item.key]: item.data }, { merge: true });
         this.q = this.q.filter(x => x.id !== item.id);
       } catch (e) {
         item.tries++;
@@ -891,9 +756,9 @@ const SQ = {
     this.save(); this.ping();
   },
   async silentPull() {
-    if (!db || !schoolId) return;
+    if (window._demoMode || !db || !schoolId) return;
     try {
-      const doc = await db.collection('schools').doc(schoolId).get();
+      const doc = await db.collection('v2_schools').doc(schoolId).get();
       if (!doc.exists) return;
       const d = doc.data();
       const pendingKeys = new Set(this.q.map(x => x.key));
@@ -917,7 +782,60 @@ window.addEventListener('offline', () => SQ.ping());
 const $ = id => document.getElementById(id);
 const esc = s => { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
 const fmt = n => '₦' + Number(n || 0).toLocaleString('en-NG');
-const openM = id => { const el = $(id); if (el) el.classList.add('on'); };
+const _PREMIUM_SCAN_MODALS = { 'add-student-modal': 'ns', 'add-staff-modal': 'sf', 'add-expense-modal': 'exp' };
+// ── Password hashing (SHA-256 via Web Crypto) ────────────────────────────────
+async function _hashPassword(pwd) {
+  if (!pwd) return '';
+  try {
+    const enc = new TextEncoder().encode('bloom_salt_v1:' + pwd);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch(e) {
+    // Fallback for older browsers
+    let h = 0;
+    const s = 'bloom_salt_v1:' + pwd;
+    for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
+    return 'fallback_' + Math.abs(h).toString(16);
+  }
+}
+
+async function _verifyPassword(pwd, storedHash) {
+  if (!storedHash) return !pwd; // no password set = any empty password works
+  if (!pwd) return false;
+  // Check if stored value is a hash (64 hex chars for SHA-256) or plaintext (legacy)
+  if (storedHash.length === 64 && /^[0-9a-f]+$/.test(storedHash)) {
+    const h = await _hashPassword(pwd);
+    return h === storedHash;
+  }
+  // Legacy plaintext fallback — auto-migrate on next successful login
+  if (storedHash === pwd) return true;
+  return false;
+}
+
+async function _migratePasswordIfNeeded(staff, pwd) {
+  if (!staff.password) return;
+  // If password is already hashed (64 hex chars), skip
+  if (staff.password.length === 64 && /^[0-9a-f]+$/.test(staff.password)) return;
+  // If plaintext matches, hash it and save
+  if (staff.password === pwd) {
+    staff.password = await _hashPassword(pwd);
+  }
+}
+
+const openM = id => {
+  const el = $(id); if (el) el.classList.add('on');
+  const prefix = _PREMIUM_SCAN_MODALS[id];
+  if (prefix) {
+    const scanBox = $(prefix + '-premium-scan'), nudgeBox = $(prefix + '-premium-nudge');
+    if (_isPremium()) {
+      if (scanBox) scanBox.style.display = 'block';
+      if (nudgeBox) nudgeBox.style.display = 'none';
+    } else {
+      if (scanBox) scanBox.style.display = 'none';
+      if (nudgeBox) nudgeBox.style.display = 'block';
+    }
+  }
+};
 const closeM = id => { const el = $(id); if (el) el.classList.remove('on'); };
 window.onclick = e => { if (e.target.classList.contains('modal')) e.target.classList.remove('on'); };
 document.onkeydown = e => { if (e.key === 'Escape') document.querySelectorAll('.modal').forEach(m => m.classList.remove('on')); };
@@ -929,6 +847,7 @@ function loadLocal(key, def) {
   return def;
 }
 function saveLocal(key, data) {
+  if (window._demoMode) return; // Demo mode — no persistence
   if (schoolId) localStorage.setItem(`p_${schoolId}_${key}`, JSON.stringify(data));
 }
 function gradeScore(t) {
@@ -945,6 +864,33 @@ function getGrade(tot) {
   if (tot >= 40) return { g: 'D', r: 'Fair', col: 'orange' };
   return { g: 'F', r: 'Fail', col: 'var(--danger)' };
 }
+// ── Score validation helpers ──────────────────────────────────────────
+// Caps CA values to 0–10 and Exam to 0–70 to catch OCR misreads and
+// impossible entries. Returns the capped values + flags.
+function _capScoreEntry(v) {
+  if (!v) v = { ca1:0, ca2:0, ca3:0, exam:0 };
+  const cap = (val, max) => {
+    const n = Number(val) || 0;
+    return { raw: n, capped: Math.max(0, Math.min(max, n)), over: n > max };
+  };
+  const ca1 = cap(v.ca1, 10);
+  const ca2 = cap(v.ca2, 10);
+  const ca3 = cap(v.ca3, 10);
+  const exam = cap(v.exam, 70);
+  const caT = ca1.capped + ca2.capped + ca3.capped;
+  const tot = caT + exam.capped;
+  const hasOverflow = ca1.over || ca2.over || ca3.over || exam.over;
+  return { ca1: ca1.capped, ca2: ca2.capped, ca3: ca3.capped, exam: exam.capped,
+           ca1Raw: ca1.raw, ca2Raw: ca2.raw, ca3Raw: ca3.raw, examRaw: exam.raw,
+           caT, tot, hasOverflow };
+}
+
+// Returns true if a subject entry actually exists in the term data
+// (distinguishes "student scored 0" from "no scores entered yet")
+function _hasScoreEntry(termData, sub) {
+  return termData && termData[sub] && typeof termData[sub] === 'object';
+}
+
 function toast(msg) {
   let box = $('toast-box');
   if (!box) {
@@ -1028,13 +974,19 @@ function slForgotPassword() {
   window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
-function doPrincipalLogin() {
+async function doPrincipalLogin() {
   const pwd = ($('sl-p-pwd')?.value || '').trim();
   const errEl = $('sl-p-err');
   if (errEl) errEl.style.display = 'none';
   if (!pwd) { if (errEl) { errEl.textContent = 'Enter your school password.'; errEl.style.display = 'block'; } return; }
-  const principal = (SD.staff || []).find(s => s.role === 'Principal' && (s.password || '') === pwd)
-    || (SD.staff || []).find(s => (s.password || '') === pwd);
+  // Check principal login with hashed password support (async)
+  let principal = null;
+  for (const s of (SD.staff || [])) {
+    if (await _verifyPassword(pwd, s.password || '')) {
+      principal = s;
+      break;
+    }
+  }
   if (!principal) {
     if (errEl) { errEl.textContent = 'Incorrect password. Check your agent WhatsApp. Default is bloom2026.'; errEl.style.display = 'block'; }
     return;
@@ -1046,13 +998,19 @@ function doPrincipalLogin() {
   startApp();
 }
 
-function doStaffLogin() {
+async function doStaffLogin() {
   const email = ($('sl-email')?.value || '').trim().toLowerCase();
   const pwd = $('sl-pwd')?.value || '';
   const errEl = $('sl-s-err');
   if (errEl) errEl.style.display = 'none';
   if (!email || !pwd) { if (errEl) { errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; } return; }
-  const staff = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email && (s.password || '') === pwd);
+  let staff = null;
+  for (const s of (SD.staff || [])) {
+    if ((s.email || '').trim().toLowerCase() === email && await _verifyPassword(pwd, s.password || '')) {
+      staff = s;
+      break;
+    }
+  }
   if (!staff) {
     if (errEl) { errEl.textContent = 'Not recognised. Ask your Principal to check your staff record.'; errEl.style.display = 'block'; }
     return;
@@ -1108,17 +1066,43 @@ function loadDemo() {
   ];
   const demoScores = {
     'Term 2': {
-      d1:{'Mathematics':{ca1:18,ca2:16,ca3:17,exam:62},'English Language':{ca1:17,ca2:18,ca3:16,exam:65},'Basic Science':{ca1:16,ca2:17,ca3:15,exam:60}},
-      d2:{'Mathematics':{ca1:20,ca2:19,ca3:18,exam:75},'English Language':{ca1:16,ca2:17,ca3:15,exam:60},'Basic Science':{ca1:18,ca2:17,ca3:19,exam:70}},
-      d3:{'Mathematics':{ca1:12,ca2:14,ca3:11,exam:45},'English Language':{ca1:13,ca2:12,ca3:14,exam:48},'Basic Science':{ca1:14,ca2:13,ca3:12,exam:50}},
-      d4:{'Mathematics':{ca1:19,ca2:20,ca3:20,exam:78},'English Language':{ca1:18,ca2:19,ca3:17,exam:70},'Basic Science':{ca1:20,ca2:19,ca3:18,exam:75}},
-      d5:{'Mathematics':{ca1:15,ca2:16,ca3:14,exam:55},'English Language':{ca1:15,ca2:16,ca3:14,exam:58},'Basic Science':{ca1:15,ca2:14,ca3:16,exam:56}},
-      d6:{'Mathematics':{ca1:18,ca2:17,ca3:19,exam:68},'English Language':{ca1:19,ca2:18,ca3:20,exam:72},'Basic Science':{ca1:17,ca2:18,ca3:16,exam:65}},
-      d7:{'Mathematics':{ca1:20,ca2:20,ca3:19,exam:80},'English Language':{ca1:20,ca2:19,ca3:18,exam:78},'Basic Science':{ca1:19,ca2:20,ca3:18,exam:76}},
-      d8:{'Mathematics':{ca1:10,ca2:11,ca3:12,exam:40},'English Language':{ca1:11,ca2:10,ca3:12,exam:42},'Basic Science':{ca1:12,ca2:11,ca3:10,exam:44}},
-      d9:{'Mathematics':{ca1:16,ca2:15,ca3:17,exam:60},'English Language':{ca1:17,ca2:16,ca3:15,exam:63},'Basic Science':{ca1:16,ca2:15,ca3:17,exam:62}},
-      d10:{'Mathematics':{ca1:14,ca2:13,ca3:15,exam:52},'English Language':{ca1:14,ca2:15,ca3:13,exam:54},'Basic Science':{ca1:13,ca2:14,ca3:12,exam:53}},
+      d1:{'Mathematics':{ca1:8,ca2:7,ca3:8,exam:62},'English Language':{ca1:7,ca2:8,ca3:7,exam:65},'Basic Science':{ca1:7,ca2:8,ca3:7,exam:60}},
+      d2:{'Mathematics':{ca1:9,ca2:9,ca3:8,exam:75},'English Language':{ca1:7,ca2:8,ca3:7,exam:60},'Basic Science':{ca1:8,ca2:8,ca3:9,exam:70}},
+      d3:{'Mathematics':{ca1:5,ca2:7,ca3:5,exam:45},'English Language':{ca1:6,ca2:6,ca3:7,exam:48},'Basic Science':{ca1:7,ca2:6,ca3:6,exam:50}},
+      d4:{'Mathematics':{ca1:9,ca2:10,ca3:9,exam:78},'English Language':{ca1:8,ca2:9,ca3:8,exam:70},'Basic Science':{ca1:9,ca2:9,ca3:8,exam:75}},
+      d5:{'Mathematics':{ca1:7,ca2:8,ca3:7,exam:55},'English Language':{ca1:7,ca2:8,ca3:7,exam:58},'Basic Science':{ca1:7,ca2:7,ca3:8,exam:56}},
+      d6:{'Mathematics':{ca1:8,ca2:8,ca3:9,exam:68},'English Language':{ca1:9,ca2:8,ca3:10,exam:72},'Basic Science':{ca1:8,ca2:9,ca3:8,exam:65}},
+      d7:{'Mathematics':{ca1:10,ca2:10,ca3:9,exam:80},'English Language':{ca1:10,ca2:9,ca3:9,exam:78},'Basic Science':{ca1:9,ca2:10,ca3:9,exam:76}},
+      d8:{'Mathematics':{ca1:5,ca2:5,ca3:6,exam:40},'English Language':{ca1:5,ca2:5,ca3:6,exam:42},'Basic Science':{ca1:6,ca2:5,ca3:5,exam:44}},
+      d9:{'Mathematics':{ca1:8,ca2:7,ca3:8,exam:60},'English Language':{ca1:8,ca2:8,ca3:7,exam:63},'Basic Science':{ca1:8,ca2:7,ca3:8,exam:62}},
+      d10:{'Mathematics':{ca1:7,ca2:6,ca3:7,exam:52},'English Language':{ca1:7,ca2:7,ca3:6,exam:54},'Basic Science':{ca1:6,ca2:7,ca3:6,exam:53}},
     }
+  };
+  // Term 1 (slightly lower — start of session)
+  demoScores['Term 1'] = {
+    d1:{'Mathematics':{ca1:7,ca2:8,ca3:7,exam:55},'English Language':{ca1:8,ca2:7,ca3:8,exam:58},'Basic Science':{ca1:7,ca2:8,ca3:7,exam:52}},
+    d2:{'Mathematics':{ca1:9,ca2:9,ca3:8,exam:68},'English Language':{ca1:7,ca2:8,ca3:7,exam:55},'Basic Science':{ca1:8,ca2:8,ca3:9,exam:65}},
+    d3:{'Mathematics':{ca1:5,ca2:6,ca3:5,exam:38},'English Language':{ca1:6,ca2:5,ca3:6,exam:42},'Basic Science':{ca1:6,ca2:6,ca3:5,exam:44}},
+    d4:{'Mathematics':{ca1:9,ca2:8,ca3:9,exam:72},'English Language':{ca1:8,ca2:9,ca3:8,exam:65},'Basic Science':{ca1:9,ca2:8,ca3:9,exam:70}},
+    d5:{'Mathematics':{ca1:7,ca2:7,ca3:6,exam:48},'English Language':{ca1:7,ca2:7,ca3:6,exam:50},'Basic Science':{ca1:6,ca2:7,ca3:7,exam:50}},
+    d6:{'Mathematics':{ca1:8,ca2:8,ca3:9,exam:62},'English Language':{ca1:9,ca2:8,ca3:9,exam:65},'Basic Science':{ca1:8,ca2:8,ca3:7,exam:58}},
+    d7:{'Mathematics':{ca1:9,ca2:9,ca3:9,exam:75},'English Language':{ca1:9,ca2:9,ca3:8,exam:70},'Basic Science':{ca1:9,ca2:9,ca3:8,exam:68}},
+    d8:{'Mathematics':{ca1:4,ca2:5,ca3:5,exam:35},'English Language':{ca1:5,ca2:4,ca3:5,exam:38},'Basic Science':{ca1:5,ca2:5,ca3:4,exam:40}},
+    d9:{'Mathematics':{ca1:7,ca2:8,ca3:7,exam:55},'English Language':{ca1:8,ca2:7,ca3:7,exam:58},'Basic Science':{ca1:7,ca2:8,ca3:7,exam:56}},
+    d10:{'Mathematics':{ca1:6,ca2:7,ca3:6,exam:48},'English Language':{ca1:6,ca2:7,ca3:6,exam:50},'Basic Science':{ca1:6,ca2:6,ca3:7,exam:48}},
+  };
+  // Term 3 (slightly higher — end of session)
+  demoScores['Term 3'] = {
+    d1:{'Mathematics':{ca1:9,ca2:8,ca3:9,exam:66},'English Language':{ca1:9,ca2:9,ca3:8,exam:68},'Basic Science':{ca1:8,ca2:9,ca3:8,exam:62}},
+    d2:{'Mathematics':{ca1:10,ca2:9,ca3:9,exam:78},'English Language':{ca1:8,ca2:9,ca3:8,exam:65},'Basic Science':{ca1:9,ca2:9,ca3:10,exam:72}},
+    d3:{'Mathematics':{ca1:6,ca2:7,ca3:6,exam:48},'English Language':{ca1:7,ca2:6,ca3:7,exam:50},'Basic Science':{ca1:7,ca2:7,ca3:6,exam:52}},
+    d4:{'Mathematics':{ca1:10,ca2:10,ca3:9,exam:80},'English Language':{ca1:9,ca2:10,ca3:9,exam:72},'Basic Science':{ca1:10,ca2:9,ca3:10,exam:75}},
+    d5:{'Mathematics':{ca1:8,ca2:8,ca3:7,exam:58},'English Language':{ca1:8,ca2:8,ca3:7,exam:60},'Basic Science':{ca1:7,ca2:8,ca3:8,exam:58}},
+    d6:{'Mathematics':{ca1:9,ca2:8,ca3:9,exam:70},'English Language':{ca1:10,ca2:9,ca3:10,exam:75},'Basic Science':{ca1:8,ca2:9,ca3:8,exam:67}},
+    d7:{'Mathematics':{ca1:10,ca2:10,ca3:10,exam:82},'English Language':{ca1:10,ca2:10,ca3:9,exam:80},'Basic Science':{ca1:10,ca2:10,ca3:9,exam:78}},
+    d8:{'Mathematics':{ca1:5,ca2:6,ca3:6,exam:42},'English Language':{ca1:6,ca2:5,ca3:6,exam:44},'Basic Science':{ca1:6,ca2:6,ca3:5,exam:46}},
+    d9:{'Mathematics':{ca1:8,ca2:8,ca3:9,exam:62},'English Language':{ca1:9,ca2:8,ca3:8,exam:65},'Basic Science':{ca1:8,ca2:9,ca3:8,exam:60}},
+    d10:{'Mathematics':{ca1:7,ca2:8,ca3:7,exam:55},'English Language':{ca1:7,ca2:8,ca3:7,exam:58},'Basic Science':{ca1:7,ca2:7,ca3:8,exam:56}},
   };
   const demoAttendance = {
     '2026-06-09':Object.fromEntries(demoStudents.map(s=>[s.name, s.id!=='d3'&&s.id!=='d8'?'Present':'Absent'])),
@@ -1130,7 +1114,7 @@ function loadDemo() {
     tier:'Small (51–100)', tierPrice:20000, tierMax:100, studentCount:10,
     whatsapp:'2348145073941', agent:{name:'Demo Agent',phone:'2348145073941'},
     _schoolId:'DEMO-SCHOOL', _demo:true,
-    subjects:['English Language','Mathematics','Basic Science','Social Studies','Civic Education']
+    subjects:['English Language','Mathematics','Basic Science','Social Studies','Civic Education','Cultural & Creative Arts','Computer Science','Physical & Health Education','Agricultural Science','Home Economics','Christian Religious Studies','Handwriting','Quantitative Reasoning']
   };
   SD.students = demoStudents;
   SD.staff = [{name:'Mrs. Adaora Obi',email:'demo@sunshine.edu.ng',password:'demo',role:'Principal',phone:'08012345600'}];
@@ -1150,8 +1134,9 @@ function loadDemo() {
 
   const demoBanner = $('demo-banner');
   if (demoBanner) demoBanner.style.display = 'flex';
+  window._demoMode = true; // Block all persistence in demo mode
   startApp();
-  console.log('🎬 Demo mode loaded');
+  console.log('🎬 Demo mode loaded — no data will be saved');
 }
 
 // ── Main Login ─────────────────────────────────────────────────────────
@@ -1209,7 +1194,7 @@ async function doLogin() {
     let school = null;
     if (db) {
       try {
-        const doc = await db.collection('schools').doc(sid).get();
+        const doc = await db.collection('v2_schools').doc(sid).get();
         if (doc.exists) { school = doc.data(); console.log('✅ Found in Firestore schools'); }
       } catch (e) { console.warn('Firestore read failed:', e.message); }
     }
@@ -1225,7 +1210,7 @@ async function doLogin() {
             students: [], expenses: [], attendance: {}, sports: { teams:{}, custom:[] }, arts: { gallery:[] },
             music: { practiceLogs:[], instruments:[] }, health: [], alumni: [], socialPages: [], commsLog: [], opportunities: [], scores: {}, affective: {}
           };
-          try { await db.collection('schools').doc(sid).set(school, { merge: true }); } catch (e2) {}
+          try { await db.collection('v2_schools').doc(sid).set(school, { merge: true }); } catch (e2) {}
         }
       } catch (e) { console.warn('admin_approved_schools check failed:', e.message); }
     }
@@ -1370,7 +1355,7 @@ function checkTierStatus() {
     cfg._lastReportedCount = count;
     SQ.push('config', cfg);
     if (db && sid && !cfg._demo) {
-      db.collection('schools').doc(sid).update({ 'config.studentCount': count, 'config._lastReportedCount': count }).catch(e => console.warn('studentCount sync:', e));
+      db.collection('v2_schools').doc(sid).update({ 'config.studentCount': count, 'config._lastReportedCount': count }).catch(e => console.warn('studentCount sync:', e));
     }
   }
 
@@ -1391,7 +1376,7 @@ function checkTierStatus() {
     cfg.tierExceededNewTier = newTier;
     SQ.push('config', cfg);
     if (db && sid && !cfg._demo) {
-      db.collection('schools').doc(sid).update({
+      db.collection('v2_schools').doc(sid).update({
         'config.tierExceededAt': cfg.tierExceededAt,
         'config.tierExceededNewTier': cfg.tierExceededNewTier,
         'config.studentCount': count
@@ -1784,7 +1769,7 @@ function editStudent(idx) {
           <button class="btn-brand btn-sm" style="font-size:0.72rem;" onclick="$('edit-photo-input').click()">📷 Take/Upload Photo</button>
           ${s.photo ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem;margin-left:0.3rem;color:var(--danger);" onclick="removeStudentPhoto(${idx})">🗑️ Remove</button>` : ''}
         </div>
-        <input type="file" id="edit-photo-input" accept="image/*" capture="environment" style="display:none;" onchange="handleEditPhoto(${idx},event)">
+        <input type="file" id="edit-photo-input" accept="image/*" style="display:none;" onchange="handleEditPhoto(${idx},event)">
       </div>
 
       <label>Full Name</label>
@@ -2230,7 +2215,7 @@ function buildProfile(s, idx) {
         </div>
       </div>
 
-      <input type="file" id="student-photo-input" accept="image/*" capture="environment" style="display:none;" onchange="handleStudentPhoto(${idx},event)">
+      <input type="file" id="student-photo-input" accept="image/*" style="display:none;" onchange="handleStudentPhoto(${idx},event)">
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
         <div style="background:var(--s2);padding:0.55rem;border-radius:8px;border:1px solid var(--border);">
@@ -2363,6 +2348,11 @@ function buildFees(s, idx) {
     </div><div class="prog-bg"><div class="prog-fill" style="width:${pct}%;"></div></div>
     <div style="text-align:right;font-size:0.7rem;color:var(--sub);margin-top:3px;">${pct}% paid</div></div>
     <div class="card"><div class="ct">Record Payment</div>
+    
+    <input type="file" accept="image/*" id="pay-scan-input" style="display:none" onchange="scanPaymentReceipt(event,${idx})">
+    <button class="btn-brand" style="width:100%;margin-bottom:0.5rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="document.getElementById('pay-scan-input').click()">📷 Scan Receipt</button>
+    <div id="pay-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;text-align:center;"></div>
+    
     <label>Amount (₦)</label><input type="number" id="pay-amt" placeholder="e.g. 25000">
     <label>Method</label><select id="pay-method"><option>Bank Transfer</option><option>Cash</option><option>POS</option><option>Online</option></select>
     <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
@@ -2558,19 +2548,30 @@ function buildScores(s, idx) {
     const termData = (SD.scores[term]||{})[sid] || {};
     let totalSum = 0, subCount = 0;
     const rows = subs.map(sub => {
-      const v = termData[sub] || { ca1:0, ca2:0, ca3:0, exam:0 };
-      const caT = (v.ca1||0)+(v.ca2||0)+(v.ca3||0);
-      const tot = caT + (v.exam||0);
-      if (tot > 0) { totalSum += tot; subCount++; }
+      if (!_hasScoreEntry(termData, sub)) {
+        return `<tr>
+          <td style="font-weight:600;font-size:0.76rem;max-width:90px;">${esc(sub)}</td>
+          <td><input type="number" min="0" max="10" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td><input type="number" min="0" max="10" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td><input type="number" min="0" max="10" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);"></td>
+          <td><input type="number" min="0" max="70" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)" style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;"></td>
+          <td></td>
+        </tr>`;
+      }
+      const e = _capScoreEntry(termData[sub]);
+      if (e.tot > 0 || _hasScoreEntry(termData, sub)) { totalSum += e.tot; subCount++; }
+      const ovFlag = e.hasOverflow ? '⚠️ ' : '';
       return `<tr>
         <td style="font-weight:600;font-size:0.76rem;max-width:90px;">${esc(sub)}</td>
-        <td><input type="number" min="0" max="10" value="${v.ca1||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-        <td><input type="number" min="0" max="10" value="${v.ca2||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-        <td><input type="number" min="0" max="10" value="${v.ca3||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-        <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);">${caT||''}</td>
-        <td><input type="number" min="0" max="70" value="${v.exam||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)" style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-        <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;color:${tot>=70?'var(--money)':tot>=50?'var(--text)':'var(--danger)'};">${tot||''}</td>
-        <td>${tot>0?gradeRow(tot):''}</td>
+        <td><input type="number" min="0" max="10" value="${e.ca1||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;${e.ca1Raw>10?'border-color:var(--danger);':''}"></td>
+        <td><input type="number" min="0" max="10" value="${e.ca2||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;${e.ca2Raw>10?'border-color:var(--danger);':''}"></td>
+        <td><input type="number" min="0" max="10" value="${e.ca3||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;${e.ca3Raw>10?'border-color:var(--danger);':''}"></td>
+        <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);">${e.caT||''}</td>
+        <td><input type="number" min="0" max="70" value="${e.exam||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)" style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;${e.examRaw>70?'border-color:var(--danger);':''}"></td>
+        <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;color:${e.tot>=70?'var(--money)':e.tot>=50?'var(--text)':'var(--danger)'};">${ovFlag}${e.tot||''}</td>
+        <td>${gradeRow(e.tot)}</td>
       </tr>`;
     }).join('');
     const avg = subCount ? Math.round(totalSum/subCount) : 0;
@@ -2626,17 +2627,27 @@ function scorecardSetTerm(term, idx) {
       let totalSum=0, subCount=0;
       const gradeRow = (tot) => { const {g,col}=getGrade(tot); return `<span style="font-weight:700;color:${col};font-size:0.8rem;">${g}</span>`; };
       const rows = subs.map(sub=>{
-        const v=termData[sub]||{ca1:0,ca2:0,ca3:0,exam:0};
-        const caT=(v.ca1||0)+(v.ca2||0)+(v.ca3||0); const tot=caT+(v.exam||0);
-        if(tot>0){totalSum+=tot;subCount++;}
+        if (!_hasScoreEntry(termData, sub)) {
+          return `<tr><td style="font-weight:600;font-size:0.76rem;max-width:90px;">${esc(sub)}</td>
+          <td><input type="number" min="0" max="10" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td><input type="number" min="0" max="10" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td><input type="number" min="0" max="10" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);"></td>
+          <td><input type="number" min="0" max="70" value="" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)" style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;"></td>
+          <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;"></td>
+          <td></td></tr>`;
+        }
+        const e=_capScoreEntry(termData[sub]);
+        if(e.tot>0||_hasScoreEntry(termData,sub)){totalSum+=e.tot;subCount++;}
+        const ovFlag=e.hasOverflow?'⚠️ ':'';
         return `<tr><td style="font-weight:600;font-size:0.76rem;max-width:90px;">${esc(sub)}</td>
-          <td><input type="number" min="0" max="10" value="${v.ca1||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-          <td><input type="number" min="0" max="10" value="${v.ca2||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-          <td><input type="number" min="0" max="10" value="${v.ca3||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-          <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);">${caT||''}</td>
-          <td><input type="number" min="0" max="70" value="${v.exam||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)" style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;"></td>
-          <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;color:${tot>=70?'var(--money)':tot>=50?'var(--text)':'var(--danger)'};">${tot||''}</td>
-          <td>${tot>0?gradeRow(tot):''}</td></tr>`;
+          <td><input type="number" min="0" max="10" value="${e.ca1||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca1',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;${e.ca1Raw>10?'border-color:var(--danger);':''}"></td>
+          <td><input type="number" min="0" max="10" value="${e.ca2||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca2',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;${e.ca2Raw>10?'border-color:var(--danger);':''}"></td>
+          <td><input type="number" min="0" max="10" value="${e.ca3||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','ca3',this.value)" style="margin:0;width:38px;font-size:0.75rem;text-align:center;padding:3px;${e.ca3Raw>10?'border-color:var(--danger);':''}"></td>
+          <td style="font-weight:700;font-size:0.8rem;font-family:'DM Mono',monospace;color:var(--sub);">${e.caT||''}</td>
+          <td><input type="number" min="0" max="70" value="${e.exam||''}" placeholder="0" onchange="updateScore(${idx},'${term}','${esc(sub)}','exam',this.value)" style="margin:0;width:42px;font-size:0.75rem;text-align:center;padding:3px;${e.examRaw>70?'border-color:var(--danger);':''}"></td>
+          <td style="font-weight:800;font-size:0.85rem;font-family:'DM Mono',monospace;color:${e.tot>=70?'var(--money)':e.tot>=50?'var(--text)':'var(--danger)'};">${ovFlag}${e.tot||''}</td>
+          <td>${gradeRow(e.tot)}</td></tr>`;
       }).join('');
       const avg = subCount?Math.round(totalSum/subCount):0;
       tableEl.innerHTML = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
@@ -2697,11 +2708,11 @@ function calcStudentTermStats(sid, term, subs) {
   const td = (SD.scores[term]||{})[sid] || {};
   let total = 0, count = 0; const perSub = {};
   subs.forEach(sub => {
-    const v = td[sub] || { ca1:0, ca2:0, ca3:0, exam:0 };
-    const caT = (v.ca1||0)+(v.ca2||0)+(v.ca3||0);
-    const tot = caT + (v.exam||0);
-    perSub[sub] = { caT, exam: v.exam||0, tot };
-    if (tot > 0) { total += tot; count++; }
+    if (!_hasScoreEntry(td, sub)) { perSub[sub] = { caT:0, exam:0, tot:0, hasData:false }; return; }
+    const e = _capScoreEntry(td[sub]);
+    perSub[sub] = { caT: e.caT, exam: e.exam, tot: e.tot, hasData:true, hasOverflow:e.hasOverflow,
+                   ca1:e.ca1, ca2:e.ca2, ca3:e.ca3, ca1Raw:e.ca1Raw, ca2Raw:e.ca2Raw, ca3Raw:e.ca3Raw, examRaw:e.examRaw };
+    if (e.tot > 0 || _hasScoreEntry(td, sub)) { total += e.tot; count++; }
   });
   const avg = count ? Math.round(total/count) : 0;
   return { perSub, total, count, avg };
@@ -2713,9 +2724,9 @@ function calcCumulative(sid, subs) {
     let tSum=0, tCount=0;
     terms.forEach(term => {
       const td = (SD.scores[term]||{})[sid] || {};
-      const v = td[sub] || { ca1:0,ca2:0,ca3:0,exam:0 };
-      const tot = (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
-      if (tot > 0) { tSum += tot; tCount++; }
+      if (!_hasScoreEntry(td, sub)) return; // skip genuine gaps — don't treat as zero
+      const e = _capScoreEntry(td[sub]);
+      if (e.tot > 0 || _hasScoreEntry(td, sub)) { tSum += e.tot; tCount++; }
     });
     cumSub[sub] = tCount ? Math.round(tSum/tCount) : 0;
   });
@@ -2751,8 +2762,13 @@ function renderScorecard() {
   const isCum = activeView === 'Cumulative';
   const studentStats = classStudents.map(s => {
     const sid = s.id || SD.students.indexOf(s);
-    if (isCum) { const { cumSub, avg } = calcCumulative(sid, subs); return { s, sid, perSub: cumSub, avg }; }
-    const { perSub, avg } = calcStudentTermStats(sid, activeView, subs); return { s, sid, perSub, avg };
+    if (isCum) {
+      const { cumSub, avg } = calcCumulative(sid, subs);
+      const hasAny = subs.some(sub => cumSub[sub] > 0 || ['Term 1','Term 2','Term 3'].some(t => _hasScoreEntry((SD.scores[t]||{})[sid]||{}, sub)));
+      return { s, sid, perSub: cumSub, avg, hasData: hasAny };
+    }
+    const { perSub, avg, count } = calcStudentTermStats(sid, activeView, subs);
+    return { s, sid, perSub, avg, hasData: count > 0 };
   });
   const ranked = [...studentStats].sort((a,b)=>b.avg-a.avg);
   const posMap = {}; ranked.forEach((r,i)=>posMap[r.sid]=i+1);
@@ -2768,19 +2784,27 @@ function renderScorecard() {
   });
 
   const subHeaders = subs.map(sub=>`<th style="font-size:0.6rem;writing-mode:vertical-lr;transform:rotate(180deg);padding:3px;min-width:26px;">${esc(sub)}</th>`).join('');
-  const rows = studentStats.sort((a,b)=>posMap[a.sid]-posMap[b.sid]).map(({s,sid,perSub,avg})=>{
+  const rows = studentStats.sort((a,b)=>posMap[a.sid]-posMap[b.sid]).map(({s,sid,perSub,avg,hasData})=>{
     const pos = posMap[sid]; const {g,col} = getGrade(avg);
     const medal = pos===1?'🥇':pos===2?'🥈':pos===3?'🥉':'';
     const subCells = subs.map(sub=>{
-      const v = isCum?perSub[sub]:(perSub[sub]?.tot||0);
+      let v, hasSub;
+      if (isCum) {
+        v = perSub[sub]||0;
+        hasSub = ['Term 1','Term 2','Term 3'].some(t => _hasScoreEntry((SD.scores[t]||{})[sid]||{}, sub));
+      } else {
+        const ps = perSub[sub];
+        v = ps?.hasData ? ps.tot : 0;
+        hasSub = ps?.hasData;
+      }
       const {col:sc} = getGrade(v||0);
-      return `<td style="text-align:center;font-size:0.74rem;font-weight:700;color:${v>0?sc:'var(--border)'};padding:3px 2px;">${v||'–'}</td>`;
+      return `<td style="text-align:center;font-size:0.74rem;font-weight:700;color:${hasSub?(v>0?sc:'var(--danger)'):'var(--border)'};padding:3px 2px;">${hasSub?v:'–'}</td>`;
     }).join('');
     return `<tr><td style="text-align:center;font-weight:700;font-size:0.72rem;color:${col};">${medal}${pos}</td>
       <td style="font-size:0.74rem;font-weight:600;white-space:nowrap;min-width:110px;">${esc(s.name)}</td>
       ${subCells}
       <td style="text-align:center;font-weight:800;font-size:0.82rem;color:${col};">${avg||'–'}</td>
-      <td style="text-align:center;"><span style="font-weight:700;font-size:0.74rem;color:${col};">${avg>0?g:'–'}</span></td></tr>`;
+      <td style="text-align:center;"><span style="font-weight:700;font-size:0.74rem;color:${col};">${hasData?g:'–'}</span></td></tr>`;
   }).join('');
 
   const top3 = ranked.filter(r=>r.avg>0).slice(0,3);
@@ -2837,25 +2861,28 @@ function printReportCard(idx, term) {
   const myPos = (allAvgs.findIndex(r=>r.name===s.name)+1)||'–';
 
   const rows = subs.map(sub => {
-    const v = termData[sub] || {ca1:0,ca2:0,ca3:0,exam:0};
-    const caT = (v.ca1||0)+(v.ca2||0)+(v.ca3||0);
-    const tot = caT+(v.exam||0);
-    const {g} = getGrade(tot);
+    if (!_hasScoreEntry(termData, sub)) {
+      return `<tr><td>${esc(sub)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+    }
+    const e = _capScoreEntry(termData[sub]);
+    const {g} = getGrade(e.tot);
     const subRanked = classStudents.map(st=>{
       const stid = st.id || SD.students.indexOf(st);
       const sv = (SD.scores[term]||{})[stid]||{};
-      const svs = sv[sub]||{};
-      const stot = (svs.ca1||0)+(svs.ca2||0)+(svs.ca3||0)+(svs.exam||0);
-      return { name: st.name, tot: stot };
+      if (!_hasScoreEntry(sv, sub)) return { name: st.name, tot: 0 };
+      const se = _capScoreEntry(sv[sub]);
+      return { name: st.name, tot: se.tot };
     }).sort((a,b)=>b.tot-a.tot);
     const sPos = (subRanked.findIndex(r=>r.name===s.name)+1)||'–';
-    return `<tr><td>${esc(sub)}</td><td>${v.ca1||''}</td><td>${v.ca2||''}</td><td>${v.ca3||''}</td><td>${caT||''}</td><td>${v.exam||''}</td>
-      <td style="font-weight:700;color:${tot>=70?'green':tot>=50?'#333':'red'};">${tot||''}</td>
-      <td style="font-weight:700;">${tot>0?g:''}</td><td>${tot>0?sPos:''}</td></tr>`;
+    const ovFlag = e.hasOverflow ? '⚠️' : '';
+    return `<tr><td>${esc(sub)}</td><td>${e.ca1||''}</td><td>${e.ca2||''}</td><td>${e.ca3||''}</td><td>${e.caT||''}</td><td>${e.exam||''}</td>
+      <td style="font-weight:700;color:${e.tot>=70?'green':e.tot>=50?'#333':'red'};">${ovFlag}${e.tot||''}</td>
+      <td style="font-weight:700;">${g}</td><td>${sPos}</td></tr>`;
   }).join('');
 
-  const totals = subs.map(sub=>{const v=termData[sub]||{};return(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);}).filter(v=>v>0);
-  const avg = totals.length?Math.round(totals.reduce((a,b)=>a+b,0)/totals.length):0;
+  const totals = subs.filter(sub=>_hasScoreEntry(termData,sub)).map(sub=>{const e=_capScoreEntry(termData[sub]);return e.tot;}).filter(v=>v>0);
+  const allZeroCount = subs.filter(sub=>_hasScoreEntry(termData,sub)&&_capScoreEntry(termData[sub]).tot===0).length;
+  const avg = (totals.length||allZeroCount)?Math.round(totals.reduce((a,b)=>a+b,0)/Math.max(totals.length,1)):0;
   const affTraits=['Punctuality','Neatness','Attentiveness','Honesty','Politeness','Relationship with others'];
   const psyTraits=['Handwriting','Sports Ability','Drawing & Craft','Class Participation'];
   const stars=n=>['','★','★★','★★★','★★★★','★★★★★'][n]||'–';
@@ -3026,14 +3053,14 @@ function printBroadsheet(cls, view) {
   const classStudents = SD.students.filter(s=>s.class===cls);
   const stats = classStudents.map(s=>{
     const sid = s.id || SD.students.indexOf(s);
-    if (isCum) { const {cumSub,avg}=calcCumulative(sid,subs); return {s,perSub:cumSub,avg}; }
-    const {perSub,avg}=calcStudentTermStats(sid,view,subs); return {s,perSub,avg};
+    if (isCum) { const {cumSub,avg}=calcCumulative(sid,subs); const cnt=subs.reduce((n,sub)=>cumSub[sub]?n+1:n,0); return {s,perSub:cumSub,avg,count:cnt}; }
+    const {perSub,avg,count}=calcStudentTermStats(sid,view,subs); return {s,perSub,avg,count};
   }).sort((a,b)=>b.avg-a.avg);
   const thCells = subs.map(s=>`<th style="writing-mode:vertical-lr;transform:rotate(180deg);font-size:9px;padding:2px;">${esc(s)}</th>`).join('');
   const rows = stats.map(({s,perSub,avg},i)=>{
-    const cells = subs.map(sub=>{const v=isCum?perSub[sub]:(perSub[sub]?.tot||0);return`<td style="text-align:center;font-size:9.5px;">${v||'–'}</td>`;}).join('');
+    const cells = subs.map(sub=>{if(isCum){const v=perSub[sub]||0;return`<td style="text-align:center;font-size:9.5px;">${v||'–'}</td>`;}const ps=perSub[sub];if(!ps||!ps.hasData)return`<td style="text-align:center;font-size:9.5px;color:#ccc;">–</td>`;return`<td style="text-align:center;font-size:9.5px;">${ps.tot}</td>`;}).join('');
     const {g}=getGrade(avg);
-    return `<tr><td>${i+1}</td><td style="white-space:nowrap;font-size:10px;">${esc(s.name)}</td>${cells}<td style="font-weight:700;">${avg||'–'}</td><td>${avg>0?g:''}</td></tr>`;
+    return `<tr><td>${i+1}</td><td style="white-space:nowrap;font-size:10px;">${esc(s.name)}</td>${cells}<td style="font-weight:700;">${avg||'–'}</td><td>${stats[i].count>0?g:'–'}</td></tr>`;
   }).join('');
   const w = window.open('','_blank','width=1100,height=800'); if (!w) return;
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Broadsheet</title>
@@ -3063,26 +3090,26 @@ function renderBulkScoreGrid(cls, term, subIdx) {
 
   const rows = classStudents.map((s,i)=>{
     const sid = s.id || SD.students.indexOf(s);
-    const v = ((SD.scores[term]||{})[sid]||{})[sub] || {ca1:0,ca2:0,ca3:0,exam:0};
-    const caT = (v.ca1||0)+(v.ca2||0)+(v.ca3||0);
-    const tot = caT+(v.exam||0);
-    const {g,col}=getGrade(tot);
+    const td = ((SD.scores[term]||{})[sid]||{});
+    const hasData = _hasScoreEntry(td, sub);
+    const e = hasData ? _capScoreEntry(td[sub]) : { ca1:0,ca2:0,ca3:0,exam:0,ca1Raw:0,ca2Raw:0,ca3Raw:0,examRaw:0,caT:0,tot:0,hasOverflow:false };
+    const {g,col}=getGrade(e.tot);
     const tabBase = i*4;
-    return `<tr id="bsg-row-${i}" style="${tot>=70?'background:rgba(16,185,129,0.04)':''}">
+    return `<tr id="bsg-row-${i}" style="${e.tot>=70?'background:rgba(16,185,129,0.04)':''}">
       <td style="font-size:0.76rem;font-weight:600;padding:5px 6px;white-space:nowrap;">${esc(s.name)}</td>
-      <td style="padding:2px;"><input type="number" min="0" max="10" value="${v.ca1||''}" tabindex="${tabBase+1}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca1',this.value)" onkeydown="bsgNav(event,${i},0,${classStudents.length})" style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${v.ca1?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-0"></td>
-      <td style="padding:2px;"><input type="number" min="0" max="10" value="${v.ca2||''}" tabindex="${tabBase+2}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca2',this.value)" onkeydown="bsgNav(event,${i},1,${classStudents.length})" style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${v.ca2?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-1"></td>
-      <td style="padding:2px;"><input type="number" min="0" max="10" value="${v.ca3||''}" tabindex="${tabBase+3}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca3',this.value)" onkeydown="bsgNav(event,${i},2,${classStudents.length})" style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${v.ca3?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-2"></td>
-      <td style="padding:2px;"><input type="number" min="0" max="70" value="${v.exam||''}" tabindex="${tabBase+4}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'exam',this.value)" onkeydown="bsgNav(event,${i},3,${classStudents.length})" style="width:48px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${v.exam?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-3"></td>
-      <td style="text-align:center;font-weight:700;font-family:'DM Mono',monospace;font-size:0.82rem;color:${tot>0?'var(--text)':'var(--border)'};">${tot||'–'}</td>
-      <td style="text-align:center;"><span style="font-weight:700;font-size:0.76rem;color:${col};">${tot>0?g:'–'}</span></td>
+      <td style="padding:2px;"><input type="number" min="0" max="10" value="${e.ca1||''}" tabindex="${tabBase+1}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca1',this.value)" onkeydown="bsgNav(event,${i},0,${classStudents.length})" style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${e.ca1Raw>10?'var(--danger)':e.ca1?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-0"></td>
+      <td style="padding:2px;"><input type="number" min="0" max="10" value="${e.ca2||''}" tabindex="${tabBase+2}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca2',this.value)" onkeydown="bsgNav(event,${i},1,${classStudents.length})" style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${e.ca2Raw>10?'var(--danger)':e.ca2?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-1"></td>
+      <td style="padding:2px;"><input type="number" min="0" max="10" value="${e.ca3||''}" tabindex="${tabBase+3}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'ca3',this.value)" onkeydown="bsgNav(event,${i},2,${classStudents.length})" style="width:44px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${e.ca3Raw>10?'var(--danger)':e.ca3?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-2"></td>
+      <td style="padding:2px;"><input type="number" min="0" max="70" value="${e.exam||''}" tabindex="${tabBase+4}" placeholder="0" onchange="bsgUpdate('${esc(cls)}','${esc(term)}','${esc(sub)}',${i},'exam',this.value)" onkeydown="bsgNav(event,${i},3,${classStudents.length})" style="width:48px;text-align:center;margin:0;font-size:0.8rem;padding:4px 2px;border:1px solid ${e.examRaw>70?'var(--danger)':e.exam?'var(--brand)':'var(--border)'};border-radius:6px;" id="bsg-${i}-3"></td>
+      <td style="text-align:center;font-weight:700;font-family:'DM Mono',monospace;font-size:0.82rem;color:${hasData?(e.tot>0?'var(--text)':'var(--danger)'):'var(--border)'};">${hasData?(e.hasOverflow?'⚠️ ':'')+e.tot:'–'}</td>
+      <td style="text-align:center;"><span style="font-weight:700;font-size:0.76rem;color:${col};">${hasData?g:'–'}</span></td>
     </tr>`;
   }).join('');
 
   const entered = classStudents.filter(s=>{
     const sid=s.id||SD.students.indexOf(s);
-    const v=((SD.scores[term]||{})[sid]||{})[sub]||{};
-    return (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0)>0;
+    const td=((SD.scores[term]||{})[sid]||{});
+    return _hasScoreEntry(td, sub);
   }).length;
 
   el.innerHTML = `<div class="card" style="padding:0.75rem 0.5rem;">
@@ -3117,16 +3144,17 @@ function bsgUpdate(cls, term, sub, rowIdx, field, val) {
   if (!SD.scores[term][sid][sub]) SD.scores[term][sid][sub]={ca1:0,ca2:0,ca3:0,exam:0};
   SD.scores[term][sid][sub][field] = parseInt(val)||0;
   const v = SD.scores[term][sid][sub];
-  const tot = (v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);
+  const e = _capScoreEntry(v);
   const row = $('bsg-row-'+rowIdx);
   if (row) {
     const cells = row.querySelectorAll('td');
-    const {g,col}=getGrade(tot);
-    if (cells[5]) cells[5].textContent = tot||'–';
-    if (cells[6]) cells[6].innerHTML = `<span style="font-weight:700;font-size:0.76rem;color:${col};">${tot>0?g:'–'}</span>`;
-    row.style.background = tot>=70?'rgba(16,185,129,0.04)':'';
+    const {g,col}=getGrade(e.tot);
+    if (cells[5]) cells[5].textContent = e.hasOverflow ? '⚠️ '+e.tot : (e.tot||'–');
+    if (cells[6]) cells[6].innerHTML = `<span style="font-weight:700;font-size:0.76rem;color:${col};">${g}</span>`;
+    row.style.background = e.tot>=70?'rgba(16,185,129,0.04)':'';
     const inp = $(`bsg-${rowIdx}-${['ca1','ca2','ca3','exam'].indexOf(field)}`);
-    if (inp) inp.style.borderColor = val?'var(--brand)':'var(--border)';
+    const maxVal = field==='exam'?70:10;
+    if (inp) inp.style.borderColor = (parseInt(val)>maxVal)?'var(--danger)':(val?'var(--brand)':'var(--border)');
   }
 }
 
@@ -3159,19 +3187,23 @@ function printAllReportCards(cls, term) {
     const myPos = (allAvgs.findIndex(r=>r.name===s.name)+1)||'–';
     const daysPresent = Object.values(SD.attendance||{}).filter(day=>day[s.name]==='Present').length;
     const rows = subs.map(sub=>{
-      const v=termData[sub]||{ca1:0,ca2:0,ca3:0,exam:0};
-      const caT=(v.ca1||0)+(v.ca2||0)+(v.ca3||0); const tot=caT+(v.exam||0); const {g}=getGrade(tot);
+      if (!_hasScoreEntry(termData, sub)) {
+        return `<tr><td>${esc(sub)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+      }
+      const e=_capScoreEntry(termData[sub]); const {g}=getGrade(e.tot);
       const subRanked = classStudents.map(st=>{
         const stid=st.id||SD.students.indexOf(st);
-        const sv=((SD.scores[term]||{})[stid]||{})[sub]||{};
-        return {name:st.name,tot:(sv.ca1||0)+(sv.ca2||0)+(sv.ca3||0)+(sv.exam||0)};
+        const sv=((SD.scores[term]||{})[stid]||{});
+        if (!_hasScoreEntry(sv, sub)) return {name:st.name,tot:0};
+        const se=_capScoreEntry(sv[sub]);
+        return {name:st.name,tot:se.tot};
       }).sort((a,b)=>b.tot-a.tot);
       const sPos = (subRanked.findIndex(r=>r.name===s.name)+1)||'–';
-      return `<tr><td>${esc(sub)}</td><td>${v.ca1||''}</td><td>${v.ca2||''}</td><td>${v.ca3||''}</td><td>${caT||''}</td><td>${v.exam||''}</td>
-        <td style="font-weight:700;color:${tot>=70?'green':tot>=50?'#333':'red'};">${tot||''}</td><td style="font-weight:700;">${tot>0?g:''}</td><td>${tot>0?sPos:''}</td></tr>`;
+      const ovFlag=e.hasOverflow?'⚠️':'';
+      return `<tr><td>${esc(sub)}</td><td>${e.ca1||''}</td><td>${e.ca2||''}</td><td>${e.ca3||''}</td><td>${e.caT||''}</td><td>${e.exam||''}</td>
+        <td style="font-weight:700;color:${e.tot>=70?'green':e.tot>=50?'#333':'red'};">${ovFlag}${e.tot||''}</td><td style="font-weight:700;">${g}</td><td>${sPos}</td></tr>`;
     }).join('');
-    const totals = subs.map(sub=>{const v=termData[sub]||{};return(v.ca1||0)+(v.ca2||0)+(v.ca3||0)+(v.exam||0);}).filter(v=>v>0);
-    const avg = totals.length?Math.round(totals.reduce((a,b)=>a+b,0)/totals.length):0;
+    const {avg:avg, count:dataCount} = calcStudentTermStats(sid, term, subs);
     const affTraits=['Punctuality','Neatness','Attentiveness','Honesty','Politeness','Relationship with others'];
     const psyTraits=['Handwriting','Sports Ability','Drawing & Craft','Class Participation'];
     const stars=n=>['','★','★★','★★★','★★★★','★★★★★'][n]||'–';
@@ -3190,7 +3222,7 @@ function printAllReportCards(cls, term) {
         <div><b>Days Opened:</b> ${cfg.daysOpened||'–'}</div><div><b>Days Present:</b> ${daysPresent}</div></div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:6px 0;text-align:center;">
         <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${avg||'–'}</div>Average</div>
-        <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${avg>0?getGrade(avg).g:'–'}</div>Grade</div>
+        <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${dataCount>0?getGrade(avg).g:'–'}</div>Grade</div>
         <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${myPos}</div>Position</div>
         <div style="border:1px solid #ccc;border-radius:4px;padding:5px;"><div style="font-size:15px;font-weight:800;color:#2563eb;">${classStudents.length}</div>In Class</div></div>
       <div style="font-weight:700;font-size:11px;background:#e8e8e8;padding:3px 5px;margin:6px 0 3px;">ACADEMIC PERFORMANCE</div>
@@ -3412,7 +3444,8 @@ async function addStaff() {
   const isPrem = SD.config.plan === 'premium';
   if (!isPrem && (SD.staff||[]).length >= 3) { openUpgradeModal(); return; }
   if (!SD.staff) SD.staff = [];
-  SD.staff.push({ name, email, password: pwd, role, assignedClass: assignedClass||null, assignedSubjects });
+    const hashedPwd = await _hashPassword(pwd);
+  SD.staff.push({ name, email, password: hashedPwd, role, assignedClass: assignedClass||null, assignedSubjects });
   await SQ.push('staff', SD.staff);
   closeM('add-staff-modal');
   $('sf-name').value=''; $('sf-email').value=''; $('sf-pwd').value='';
@@ -4006,24 +4039,7 @@ async function _groqScoreOCR(b64, mime, prompt){
   return parsed;
 }
 
-async function _hfScoreOCR(b64, mime, prompt){
-  const hfKey=getHFKey();
-  if(!hfKey) throw new Error('No HF key configured');
-  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),45000);
-  let r;
-  try {
-    r=await fetch('https://api-inference.huggingface.co/models/'+HF_OCR_MODEL+'/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Authorization':'Bearer '+hfKey,'Content-Type':'application/json'},body:JSON.stringify({
-      model: HF_OCR_MODEL, temperature:0.2, max_tokens:4000,
-      messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
-    })});
-  } finally { clearTimeout(timer); }
-  if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('HF '+r.status+': '+(ed.error?.message||r.statusText)); }
-  const d=await r.json();
-  const raw=d.choices?.[0]?.message?.content||'[]';
-  const parsed=_parseScoreOcrJson(raw);
-  if(!Array.isArray(parsed)||!parsed.length) throw new Error('HF returned 0 score entries');
-  return parsed;
-}
+// _hfScoreOCR removed — Groq-only OCR pipeline
 
 function _renderScoreOcrPreview(rows, classStudents, termMode){
   const statusEl=$('socr-status');
@@ -4429,48 +4445,18 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, t
     const rows = await _groqScoreOCR(b64, mime, prompt);
     if (rows && rows.length) return { rows, fromTesseract: false };
   } catch (e1) {
-    console.warn('Groq score OCR failed:', e1.message, '— trying HF Vision');
+    console.warn('Groq score OCR failed:', e1.message);
   }
 
-  // ── Step 2: HuggingFace Vision — same, reads names AND numbers ──
-  try {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Retrying with HuggingFace Vision...</span>';
-    const rows = await _hfScoreOCR(b64, mime, prompt);
-    if (rows && rows.length) return { rows, fromTesseract: false };
-  } catch (e2) {
-    console.warn('HF score OCR failed:', e2.message);
-  }
-
-  // ── Step 3: Tesseract.js — handwritten names are unreliable via Tesseract,
-  // so we DON'T trust its name reading at all. Instead we only trust the NUMBERS
-  // it finds per row, and map them positionally onto your actual class roster
-  // (sorted alphabetically — the standard register order). This guarantees real,
-  // correct student names every time, even when the photo is too messy for AI vision.
-  try {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Trying Tesseract OCR (number reader)...</span>';
-    const rows = await socrTesseractOCR(processedDataURL, classStudents);
-    if (rows && rows.length) return { rows, fromTesseract: true };
-  } catch (e3) {
-    console.warn('Tesseract score OCR failed:', e3.message);
-  }
-
+    // ── Groq-only: no fallback engines ──
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">⚠️ Groq scan failed. Check image quality and retry.</span>';
   return null;
 }
 
 // ── Tesseract.js loader (lazy-loaded on first use) ──
 let _tesseractLoading = null;
-function loadTesseract() {
-  if (window.Tesseract) return Promise.resolve(true);
-  if (_tesseractLoading) return _tesseractLoading;
-  _tesseractLoading = new Promise(resolve => {
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload = () => resolve(true);
-    s.onerror = () => { console.warn('Tesseract.js failed to load'); resolve(false); };
-    document.head.appendChild(s);
-  });
-  return _tesseractLoading;
-}
+// loadTesseract removed — Groq-only OCR pipeline
+
 
 // ── Tesseract.js OCR — runs entirely in-browser, no API key needed ──
 // IMPORTANT: Tesseract is unreliable at reading handwritten cursive names
@@ -4481,65 +4467,8 @@ function loadTesseract() {
 //   3. Map row 1 of numbers → student 1 of roster, row 2 → student 2, etc.
 // This guarantees the names shown are always correct, real student names —
 // only the numbers came from OCR, and the user reviews/edits them anyway.
-async function socrTesseractOCR(dataURL, classStudents) {
-  // Tesseract can't reliably distinguish 3 term column blocks, so we only
-  // try to read Term 1 numbers positionally. t2/t3 stay as zeros — the user
-  // can fill them in the review table or re-scan for AI vision to pick up.
-  const ready = await loadTesseract();
-  if (!ready) throw new Error('Tesseract.js not loaded');
+// socrTesseractOCR removed — Groq-only OCR pipeline
 
-  const result = await Tesseract.recognize(dataURL, 'eng', {
-    logger: m => { if (m.status === 'recognizing text') console.log('[Tesseract]', Math.round(m.progress * 100) + '%'); }
-  });
-
-  const rawText = result.data.text || '';
-  if (!rawText.trim()) throw new Error('Tesseract returned empty text');
-
-  // Extract number-groups per line — ignore whatever "name" text is on the line
-  const lines = rawText.split(/\r?\n/).filter(l => l.trim());
-  const numberRows = [];
-
-  lines.forEach(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    // Skip obvious header/label/footer lines
-    if (/^(total|s\/n|serial|name|ca|exam|score|class|subject|term|1ca|2ca|3ca|student|register|lowest|highest|average|position)/i.test(trimmed)) return;
-
-    const nums = (trimmed.match(/\d+\.?\d*/g) || []).map(n => parseFloat(n));
-    // A real score row has at least 2 numbers (e.g. a CA + exam, or serial + score) —
-    // require at least 3 to reduce false positives from stray digits/dates/watermarks
-    if (nums.length < 3) return;
-
-    numberRows.push(nums);
-  });
-
-  if (!numberRows.length) throw new Error('Tesseract found 0 rows with score numbers');
-
-  // Sort roster alphabetically — matches standard Nigerian register ordering
-  const sortedRoster = [...classStudents].sort((a, b) => a.name.localeCompare(b.name));
-
-  const rowCount = Math.min(numberRows.length, sortedRoster.length);
-  const rows = [];
-  for (let i = 0; i < rowCount; i++) {
-    const nums = numberRows[i];
-    const student = sortedRoster[i];
-    // Drop a leading serial number if present (small int ≤ roster size, followed by more numbers)
-    let usable = nums;
-    if (nums.length > 4 && nums[0] <= sortedRoster.length && nums[0] === Math.round(nums[0])) {
-      usable = nums.slice(1);
-    }
-    rows.push({
-      name: student.name.toUpperCase(),
-      ca1: Math.min(usable[0] || 0, 10),
-      ca2: Math.min(usable[1] || 0, 10),
-      ca3: Math.min(usable[2] || 0, 10),
-      exam: Math.min(usable.find(n => n > 10) || usable[3] || 0, 70)
-    });
-  }
-
-  if (!rows.length) throw new Error('Tesseract could not map any rows to the roster');
-  return rows;
-}
 
 // ── PDF.js loader (lazy-loaded on first PDF scan) ──
 let _pdfjsLoading = null;
@@ -5249,6 +5178,14 @@ function loadSettings() {
   const aiEl=$('settings-ai'); if(aiEl) aiEl.textContent=isPrem?'Premium Advisor':'Basic Analysis';
   updateLogoBadges(cfg.logo);
   renderSubjectChips();
+  const subjScanBox=$('subj-premium-scan'), subjNudgeBox=$('subj-premium-nudge');
+  if (_isPremium()) {
+    if (subjScanBox) subjScanBox.style.display = 'block';
+    if (subjNudgeBox) subjNudgeBox.style.display = 'none';
+  } else {
+    if (subjScanBox) subjScanBox.style.display = 'none';
+    if (subjNudgeBox) subjNudgeBox.style.display = 'block';
+  }
   loadGeminiKeySetting();
   loadBankDetails();
 }
@@ -5293,11 +5230,8 @@ function loadGeminiKeySetting() {
   if (getGroqKey()) {
     status.innerHTML = '✅ Scanner ready — Groq Vision active';
     status.style.color = '#22c55e';
-  } else if (getHFKey()) {
-    status.innerHTML = '🤗 Groq not loaded — using HuggingFace Vision fallback';
-    status.style.color = '#f59e0b';
   } else {
-    status.innerHTML = '⚠️ Not loaded yet — will retry, or falls back to OCR.space';
+    status.innerHTML = '⚠️ Groq API key not loaded — contact admin to configure';
     status.style.color = '#f87171';
   }
 }
@@ -5331,6 +5265,46 @@ function loadPresetSubjects(type) {
   };
   SD.config.subjects = presets[type] || presets.primary;
   renderSubjectChips();
+}
+
+// ── Subject list / curriculum photo scan (Premium) ────────────────────────
+// Photograph a printed curriculum sheet, timetable header, or subject list
+// and bulk-extract the subject names instead of typing each one.
+async function scanSubjectList(event) {
+  if (!_isPremium()) { _gateScan('subj'); return; }
+  const file = event.target.files[0]; if (!file) return;
+  event.target.value = '';
+  const fb = document.getElementById('subj-scan-fb');
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
+  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
+  show('📸 Reading subject list...');
+  try {
+    const resized = await _resizeFeeImage(file, 1200);
+    const key = await _getFeeGroqKey();
+    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
+    const prompt = `You are reading a photograph of a Nigerian school curriculum sheet, timetable, or list of subject names.
+Extract every distinct subject name visible (e.g. "Mathematics", "English Language", "Basic Science & Technology").
+${_OCR_DISCIPLINE}
+Output ONLY: {"subjects":["Subject Name 1","Subject Name 2"]}
+If nothing legible is found, output: {"subjects":[]}`;
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 600);
+    if (fb) fb.style.display = 'none';
+    const found = Array.isArray(result.subjects) ? result.subjects.filter(s => s && s !== 'UNCLEAR') : [];
+    if (!found.length) { show('❌ No subjects found — try a clearer photo, or add manually below.'); return; }
+    if (!SD.config.subjects) SD.config.subjects = [];
+    let added = 0;
+    found.forEach(s => {
+      const clean = String(s).trim();
+      if (clean && !SD.config.subjects.some(x => x.toLowerCase() === clean.toLowerCase())) {
+        SD.config.subjects.push(clean); added++;
+      }
+    });
+    renderSubjectChips();
+    show(`✅ Added ${added} subject${added!==1?'s':''} from photo — review the list above before saving.`);
+    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 5000);
+  } catch(e) {
+    show('❌ ' + (e.message || 'Could not read subject list. Try a clearer photo.'));
+  }
 }
 
 
@@ -5369,7 +5343,7 @@ async function saveSettings() {
   const pwd = $('set-pwd')?.value.trim();
   if (pwd) {
     const pr = (SD.staff||[]).find(s=>s.role==='Principal');
-    if (pr) pr.password = pwd;
+    if (pr) pr.password = await _hashPassword(pwd);
     if ($('set-pwd')) $('set-pwd').value='';
   }
   // Sync subjects from textarea if chips are empty
@@ -5463,7 +5437,7 @@ async function refreshPlanFromFirestore(btn) {
   const sid=schoolId||SD.config?._schoolId;
   if(!sid||!db){ if(btn){ btn.textContent='❌ Not connected'; btn.disabled=false; } return; }
   try{
-    const snap=await db.collection('schools').doc(sid).get();
+    const snap=await db.collection('v2_schools').doc(sid).get();
     if(snap.exists){
       const cfg=snap.data().config||{};
       SD.config=Object.assign({},SD.config,cfg);
@@ -5560,6 +5534,268 @@ function _resizeFeeImage(file, maxPx) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PREMIUM OCR ENTRY POINTS — Expense/Payment/Student/Staff
+// Reuses _getFeeGroqKey() and _resizeFeeImage() above. All four features
+// share one generic Groq call (same qwen/qwen3.6-27b model + reading
+// discipline as the fee register scanner) instead of duplicating logic.
+// Gated behind SD.config.plan === 'premium', same mechanism as BloomCollect.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, maxTokens, _retry) {
+  if (_retry === undefined) _retry = 0;
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify({
+      model: 'qwen/qwen3.6-27b',
+      max_tokens: maxTokens || 800,
+      temperature: 0,
+      reasoning_format: 'hidden',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
+          { type: 'text', text: systemPrompt }
+        ]
+      }]
+    })
+  });
+
+  if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
+    if (_retry >= 3) throw new Error('Groq rate-limited after multiple retries — try again shortly.');
+    const retryAfter = resp.headers.get('retry-after');
+    let waitMs = parseFloat(retryAfter) * 1000;
+    if (!waitMs || isNaN(waitMs)) waitMs = 15000;
+    waitMs = Math.min(Math.max(waitMs, 3000), 60000);
+    await new Promise(r => setTimeout(r, waitMs));
+    return _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, maxTokens, _retry + 1);
+  }
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
+  }
+  const data = await resp.json();
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  try { return JSON.parse(raw); }
+  catch(e) {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch(e2) {} }
+    throw new Error('Could not parse response. Try a clearer, straighter photo.');
+  }
+}
+
+// Shared reading discipline — same never-guess-a-status principle that
+// fixed the ledger payment-status bug in bloom-agent-v2, applied here too.
+const _OCR_DISCIPLINE = `
+READING DISCIPLINE:
+- Transcribe exactly what is written, do not guess or invent values.
+- Read numbers digit by digit — common confusions: 7 vs 1, 0 vs 6, 4 vs 9, 3 vs 8, 5 vs 6/8.
+- If a field is illegible or not visible, output "UNCLEAR" for that field rather than guessing a plausible value.
+- Return ONLY valid JSON, no markdown, no explanation.`;
+
+function _isPremium() { return (SD.config && SD.config.plan === 'premium') || (window._demoMode === true); }
+// ── Premium gate for scan buttons ─────────────────────────────────────────
+function _gateScan(prefix, scanInputId) {
+  if (_isPremium()) { return true; }
+  const nudge = $(prefix + '-premium-nudge');
+  const scan = $(prefix + '-premium-scan');
+  if (nudge) { nudge.style.display = 'block'; }
+  if (scan) { scan.style.display = 'none'; }
+  toast('⭐ Premium feature — upgrade to scan');
+  return false;
+}
+
+function _gateScanFn(prefix) {
+  return function() { return _gateScan(prefix, prefix + '-scan-input'); };
+}
+
+
+// Parses common Nigerian D/M/YY or D/M/YYYY date text into YYYY-MM-DD
+function _parseNigerianDate(raw) {
+  const m = String(raw).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (!m) return null;
+  let [, d, mo, y] = m;
+  if (y.length === 2) y = '20' + y;
+  d = d.padStart(2, '0'); mo = mo.padStart(2, '0');
+  return `${y}-${mo}-${d}`;
+}
+
+// ── 1. Expense receipt scan ─────────────────────────────────────────────
+async function scanExpenseReceipt(event) {
+  if (!_isPremium()) { _gateScan('exp'); return; }
+  const file = event.target.files[0]; if (!file) return;
+  event.target.value = '';
+  const fb = document.getElementById('exp-scan-fb');
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
+  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
+  show('📸 Reading receipt...');
+  try {
+    const resized = await _resizeFeeImage(file, 1000);
+    const key = await _getFeeGroqKey();
+    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
+    const prompt = `You are reading a photograph of a Nigerian school expense receipt or payment teller/slip.
+Extract:
+  vendor      = the shop/vendor/payee name written on the receipt (text)
+  description = a short 3-8 word description of what was purchased or paid for
+  amount      = the TOTAL amount paid (integer, Naira)
+  date        = the date on the receipt if visible (raw text as written, e.g. "12/5/26")
+  category    = your single best guess, ONE of exactly: Staff Salaries, Utilities (NEPA/Generator), Building Maintenance, Teaching Materials, Government/Ministry Fees, Cleaning & Security, Transport, Examination Fees, Other
+${_OCR_DISCIPLINE}
+Output ONLY: {"vendor":"","description":"","amount":0,"date":"","category":""}`;
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 500);
+    if (fb) fb.style.display = 'none';
+    const descParts = [result.vendor, result.description].filter(v => v && v !== 'UNCLEAR');
+    if ($('exp-desc')) $('exp-desc').value = descParts.join(' — ');
+    if ($('exp-amt') && result.amount && result.amount !== 'UNCLEAR') $('exp-amt').value = result.amount;
+    const catSel = $('exp-cat');
+    if (catSel && result.category && result.category !== 'UNCLEAR') {
+      const opt = [...catSel.options].find(o => o.value === result.category);
+      if (opt) catSel.value = result.category;
+    }
+    show('✅ Filled from receipt — please verify before saving.');
+    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 4000);
+  } catch(e) {
+    show('❌ ' + (e.message || 'Could not read receipt. Try a clearer photo.'));
+  }
+}
+
+// ── 2. Payment teller/receipt scan ──────────────────────────────────────
+async function scanPaymentReceipt(event, idx) {
+  if (!_isPremium()) { toast('⭐ Premium feature — upgrade to scan receipts'); return; }
+  const file = event.target.files[0]; if (!file) return;
+  event.target.value = '';
+  const fb = document.getElementById('pay-scan-fb');
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
+  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
+  show('📸 Reading payment slip...');
+  try {
+    const resized = await _resizeFeeImage(file, 1000);
+    const key = await _getFeeGroqKey();
+    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
+    const prompt = `You are reading a photograph of a Nigerian bank payment teller, POS slip, transfer receipt, or cash receipt for a school fee payment.
+Extract ALL of the following:
+  amount    = the amount paid (integer, Naira). Look for "AMOUNT", "N", "₦", or the largest numeric value. Common formats: 25,000 / 25000 / 25.000 all mean 25000.
+  date      = the date on the slip if visible (raw text as written, e.g. "12/5/26", "8th June 2026")
+  method    = your best guess, ONE of exactly: Bank Transfer, Cash, POS, Online — based on what kind of document this looks like
+  payer     = the name of the person who made the payment, if visible (text). Look near "FROM", "DEPOSITOR", "REMITTER", "CUSTOMER", "PAID BY".
+  recipient = the school or account name receiving the payment, if visible (text). Look near "TO", "BENEFICIARY", "ACCOUNT NAME".
+  reference = the transaction reference, teller number, or session ID, if visible (text). Look near "REF", "TELLER NO", "SESSION ID", "RRR", "TRANS ID".
+  account_no = the destination account number if visible (10-digit NUBAN, digits only)
+
+${_OCR_DISCIPLINE}
+Output ONLY: {"amount":0,"date":"","method":"","payer":"","recipient":"","reference":"","account_no":""}`;
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 500);
+    if (fb) fb.style.display = 'none';
+    if ($('pay-amt') && result.amount && result.amount !== 'UNCLEAR') $('pay-amt').value = result.amount;
+    if ($('pay-date') && result.date && result.date !== 'UNCLEAR') {
+      const parsed = _parseNigerianDate(result.date);
+      if (parsed) $('pay-date').value = parsed;
+    }
+    const methodSel = $('pay-method');
+    if (methodSel && result.method && result.method !== 'UNCLEAR') {
+      const opt = [...methodSel.options].find(o => o.value === result.method);
+      if (opt) methodSel.value = result.method;
+    }
+    const extra = [];
+    if (result.payer && result.payer !== 'UNCLEAR') extra.push('Payer: ' + result.payer);
+    if (result.reference && result.reference !== 'UNCLEAR') extra.push('Ref: ' + result.reference);
+    const msg = extra.length ? '✅ Filled from receipt — ' + extra.join(' · ') + '. Please verify before saving.' : '✅ Filled from receipt — please verify before saving.';
+    show(msg);
+    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 6000);
+  } catch(e) {
+    show('❌ ' + (e.message || 'Could not read receipt. Try a clearer photo.'));
+  }
+}
+
+// ── 3. Student admission form / ID scan ─────────────────────────────────
+async function scanStudentForm(event) {
+  if (!_isPremium()) { _gateScan('ns'); return; }
+  const file = event.target.files[0]; if (!file) return;
+  event.target.value = '';
+  const fb = document.getElementById('ns-scan-fb');
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
+  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
+  show('📸 Reading admission form...');
+  try {
+    const resized = await _resizeFeeImage(file, 1200);
+    const key = await _getFeeGroqKey();
+    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
+    const prompt = `You are reading a photograph of a Nigerian school student admission form or student ID card.
+Extract:
+  name         = the student's full name (text, Nigerian names)
+  parent_phone = a parent/guardian WhatsApp or phone number if visible (digits only)
+  class        = the class/grade the student is being admitted into, if stated (text, e.g. "Basic 4", "JSS 1", "Nursery 2")
+  dob          = date of birth if visible (raw text as written)
+${_OCR_DISCIPLINE}
+Output ONLY: {"name":"","parent_phone":"","class":"","dob":""}`;
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 400);
+    if (fb) fb.style.display = 'none';
+    if ($('ns-name') && result.name && result.name !== 'UNCLEAR') $('ns-name').value = result.name;
+    if ($('ns-phone') && result.parent_phone && result.parent_phone !== 'UNCLEAR') $('ns-phone').value = result.parent_phone.replace(/\D/g,'');
+    if ($('ns-class') && result.class && result.class !== 'UNCLEAR') {
+      const opt = [...$('ns-class').options].find(o => o.value.toLowerCase() === result.class.toLowerCase());
+      if (opt) $('ns-class').value = opt.value;
+    }
+    if ($('ns-dob') && result.dob && result.dob !== 'UNCLEAR') {
+      const parsed = _parseNigerianDate(result.dob);
+      if (parsed) $('ns-dob').value = parsed;
+    }
+    show('✅ Filled from form — please verify before saving.');
+    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 4000);
+  } catch(e) {
+    show('❌ ' + (e.message || 'Could not read form. Try a clearer photo.'));
+  }
+}
+
+// ── 4. Staff ID/CV scan ──────────────────────────────────────────────────
+// Deliberately does NOT touch the password field — a scanned photo should
+// never generate or guess a login credential.
+async function scanStaffID(event) {
+  if (!_isPremium()) { _gateScan('sf'); return; }
+  const file = event.target.files[0]; if (!file) return;
+  event.target.value = '';
+  const fb = document.getElementById('sf-scan-fb');
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
+  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
+  show('📸 Reading staff ID/CV...');
+  try {
+    const resized = await _resizeFeeImage(file, 1200);
+    const key = await _getFeeGroqKey();
+    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
+    const prompt = `You are reading a photograph of a staff ID card or CV/resume for a Nigerian school employee.
+Extract ALL of the following:
+  name  = the staff member's full name (text). Look near "NAME", "FULL NAME", "STAFF NAME". Nigerian names: Yoruba (Adeoye, Ogunsola, Olatunde), Hausa (Musa, Abdullahi), Igbo (Emeka, Chioma).
+  email = an email address if visible (text)
+  role  = the job title or position, if stated (text). Look near "POSITION", "ROLE", "DESIGNATION", "TITLE". Common Nigerian school roles: Teacher, Bursar, Head Teacher, Vice Principal, Admin, Sports Coach, Arts Teacher, Music Teacher.
+  phone = a phone number if visible (digits only). Look near "PHONE", "TEL", "MOBILE", "CONTACT".
+
+${_OCR_DISCIPLINE}
+Output ONLY: {"name":"","email":"","role":"","phone":""}`;
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 400);
+    if (fb) fb.style.display = 'none';
+    if ($('sf-name') && result.name && result.name !== 'UNCLEAR') $('sf-name').value = result.name;
+    if ($('sf-email') && result.email && result.email !== 'UNCLEAR') $('sf-email').value = result.email;
+    const roleSel = $('sf-role');
+    if (roleSel && result.role && result.role !== 'UNCLEAR') {
+      const opt = [...roleSel.options].find(o => o.value.toLowerCase() === String(result.role).toLowerCase()
+        || o.value.toLowerCase().includes(String(result.role).toLowerCase())
+        || String(result.role).toLowerCase().includes(o.value.toLowerCase()));
+      if (opt) roleSel.value = opt.value;
+    }
+    const extra6 = [];
+    if (result.phone && result.phone !== 'UNCLEAR') extra6.push('Phone: ' + result.phone);
+    if (result.role && result.role !== 'UNCLEAR' && !roleSel?.value?.toLowerCase().includes(String(result.role).toLowerCase())) extra6.push('Role: ' + result.role);
+    const msg6 = extra6.length ? '✅ Filled from ID — ' + extra6.join(' · ') + '. Set a password before saving.' : '✅ Filled from ID — please verify name/email and set a password before saving.';
+    show(msg6);
+    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 6000);
+  } catch(e) {
+    show('❌ ' + (e.message || 'Could not read ID. Try a clearer photo.'));
+  }
 }
 
 // ── 4. Groq Vision call with Nigerian fee ledger system prompt ────────
@@ -6022,22 +6258,24 @@ In 2 short sentences (max 30 words each), give the principal ONE urgent action a
     const attData = SD.attendance || {};
 
     // Find students with 3+ consecutive absences
+    // SD.attendance structure: { date: { studentName: 'Present'|'Absent'|'Late' } }
     const absentStreaks = [];
+    const allDates = Object.keys(attData).sort().slice(-7); // last 7 recorded dates
     students.forEach(s => {
-      const records = attData[s.name] || {};
-      const dates = Object.keys(records).sort().slice(-7); // last 7 days
       let streak = 0;
-      for (let i = dates.length - 1; i >= 0; i--) {
-        if (records[dates[i]] === 'A') streak++;
+      for (let i = allDates.length - 1; i >= 0; i--) {
+        const status = attData[allDates[i]]?.[s.name];
+        if (status === 'Absent' || status === 'A') streak++;
         else break;
       }
       if (streak >= 3) absentStreaks.push({ name: s.name, class: s.class, streak });
     });
 
     // Students with no scores at all this term
-    const term = SD.scores?.currentTerm || 'First Term';
+    // SD.scores structure: { 'Term 1': { studentId: { subject: {ca1,ca2,ca3,exam} } } }
+    const term = SD.config?.currentTerm || 'Term 1';
     const noScores = students.filter(s => {
-      const termScores = SD.scores?.[term]?.[s.name];
+      const termScores = (SD.scores?.[term]||{})[s.id];
       return !termScores || Object.keys(termScores).length === 0;
     });
 
@@ -6252,6 +6490,10 @@ Use a respectful, professional tone suitable for a Nigerian school principal.`, 
       } catch(e) {
         console.warn("Remark failed for " + s.name + ":", e.message);
         done++;
+        // Backoff on rate limit (429) to avoid storm of failing requests
+        if (e.message && (e.message.includes('429') || e.message.includes('rate'))) {
+          await new Promise(function(r){ setTimeout(r, 5000); });
+        }
       }
     }
 

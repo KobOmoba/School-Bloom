@@ -14,7 +14,6 @@
 <meta name="theme-color" content="#4f46e5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Educational Bloom · School Portal</title>
-<link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Edu-BLOOM">
@@ -235,7 +234,7 @@ function toggleEye(inputId, btn) {
         <div id="bulk-feedback" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);"></div>
         <div style="border-top:1px solid var(--border);margin-top:0.75rem;padding-top:0.75rem;">
           <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;">Or scan a photo of your physical handwritten fee register — Groq AI reads it and imports all payments automatically.</p>
-          <input type="file" id="fee-register-input" accept="image/*" capture="environment" style="display:none;" onchange="handleFeeRegisterPhoto(event)">
+          <input type="file" id="fee-register-input" accept="image/*" style="display:none;" onchange="handleFeeRegisterPhoto(event)">
           <button class="btn-brand" style="background:linear-gradient(135deg,#0891b2,#0e7490);width:100%;" onclick="document.getElementById('fee-register-input').click()">📸 Scan Physical Fee Register</button>
           <div id="fee-scan-fb" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);display:none;"></div>
         </div>
@@ -267,7 +266,7 @@ function toggleEye(inputId, btn) {
         <button class="btn-ghost btn-sm" style="color:var(--text);" onclick="$('csv-up').click()">📁 Import (CSV / Photo)</button>
         <button class="btn-ghost btn-sm" style="color:var(--danger);" onclick="fixGarbledNames()">🔧 Fix & Clean</button>
         <button class="btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="clearAllStudents()">🗑️ Clear All</button>
-        <input type="file" id="csv-up" accept="image/*,application/pdf,.csv,.txt,.doc,.docx,.xls,.xlsx,.webp,.heic,.heif" multiple capture="environment" style="display:none;" onchange="handleCSV(event)">
+        <input type="file" id="csv-up" accept="image/*,application/pdf,.csv,.txt,.doc,.docx,.xls,.xlsx,.webp,.heic,.heif" multiple style="display:none;" onchange="handleCSV(event)">
       </div>
       <div id="csv-fb" style="font-size:0.75rem;color:var(--money);margin-bottom:0.4rem;"></div>
       <div id="students-list"></div>
@@ -918,6 +917,12 @@ function toggleEye(inputId, btn) {
           <button class="btn-ghost btn-sm" onclick="loadPresetSubjects('jss')" style="font-size:0.72rem;">📚 JSS</button>
           <button class="btn-ghost btn-sm" onclick="loadPresetSubjects('sss')" style="font-size:0.72rem;">📚 SSS</button>
         </div>
+        <div id="subj-premium-scan" style="display:none;">
+          <input type="file" accept="image/*" id="subj-scan-input" style="display:none" onchange="scanSubjectList(event)">
+          <button class="btn-brand" style="width:100%;margin-bottom:0.5rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="document.getElementById('subj-scan-input').click()">📷 Scan Curriculum/Subject List</button>
+          <div id="subj-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;text-align:center;"></div>
+        </div>
+        <div id="subj-premium-nudge" style="display:none;background:linear-gradient(135deg,#7c3aed,#2563eb);border-radius:10px;padding:0.6rem;text-align:center;font-size:0.76rem;margin-bottom:0.6rem;">⭐ Upgrade to Premium to scan a subject list/timetable instead of typing each one</div>
         <div id="subj-chips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:0.5rem;min-height:28px;"></div>
         <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
           <input type="text" id="new-subj-inp" placeholder="Add subject…" style="flex:1;margin:0;font-size:0.82rem;" onkeydown="if(event.key==='Enter'){event.preventDefault();addSubjectFromInput();}">
@@ -1082,6 +1087,12 @@ function toggleEye(inputId, btn) {
 <div class="modal" id="add-student-modal">
   <div class="mbox">
     <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">➕ Add Student</h3><button class="mclose" onclick="closeM('add-student-modal')">×</button></div>
+    <div id="ns-premium-scan" style="display:none;">
+      <input type="file" accept="image/*" id="ns-scan-input" style="display:none" onchange="scanStudentForm(event)">
+      <button class="btn-brand" style="width:100%;margin-bottom:0.5rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="document.getElementById('ns-scan-input').click()">📷 Scan Admission Form/ID</button>
+      <div id="ns-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;text-align:center;"></div>
+    </div>
+    <div id="ns-premium-nudge" style="display:none;background:linear-gradient(135deg,#7c3aed,#2563eb);border-radius:10px;padding:0.6rem;text-align:center;font-size:0.76rem;margin-bottom:0.6rem;">⭐ Upgrade to Premium to scan admission forms instead of typing</div>
     <label>Full Name</label><input type="text" id="ns-name" placeholder="e.g. Adebayo Okonkwo">
     <label>Parent's WhatsApp</label><input type="tel" id="ns-phone" placeholder="2348012345678">
     <label>Class</label><select id="ns-class" onchange="handleClassSelectChange(this)"></select>
@@ -1093,6 +1104,12 @@ function toggleEye(inputId, btn) {
 <div class="modal" id="add-staff-modal">
   <div class="mbox">
     <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">👤 Add Staff</h3><button class="mclose" onclick="closeM('add-staff-modal')">×</button></div>
+    <div id="sf-premium-scan" style="display:none;">
+      <input type="file" accept="image/*" id="sf-scan-input" style="display:none" onchange="scanStaffID(event)">
+      <button class="btn-brand" style="width:100%;margin-bottom:0.5rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="document.getElementById('sf-scan-input').click()">📷 Scan Staff ID/CV</button>
+      <div id="sf-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;text-align:center;"></div>
+    </div>
+    <div id="sf-premium-nudge" style="display:none;background:linear-gradient(135deg,#7c3aed,#2563eb);border-radius:10px;padding:0.6rem;text-align:center;font-size:0.76rem;margin-bottom:0.6rem;">⭐ Upgrade to Premium to scan staff ID/CV instead of typing</div>
     <label>Full Name</label><input type="text" id="sf-name" placeholder="e.g. Mrs. Adunola Bello">
     <label>Email (login email)</label><input type="email" id="sf-email" placeholder="teacher@school.edu.ng">
     <label>Password</label>
@@ -1109,6 +1126,12 @@ function toggleEye(inputId, btn) {
 <div class="modal" id="add-expense-modal">
   <div class="mbox">
     <div class="mhead"><h3 style="font-size:0.95rem;font-weight:800;">📉 Log Expense</h3><button class="mclose" onclick="closeM('add-expense-modal')">×</button></div>
+    <div id="exp-premium-scan" style="display:none;">
+      <input type="file" accept="image/*" id="exp-scan-input" style="display:none" onchange="scanExpenseReceipt(event)">
+      <button class="btn-brand" style="width:100%;margin-bottom:0.5rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="document.getElementById('exp-scan-input').click()">📷 Scan Receipt</button>
+      <div id="exp-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;text-align:center;"></div>
+    </div>
+    <div id="exp-premium-nudge" style="display:none;background:linear-gradient(135deg,#7c3aed,#2563eb);border-radius:10px;padding:0.6rem;text-align:center;font-size:0.76rem;margin-bottom:0.6rem;">⭐ Upgrade to Premium to scan receipts instead of typing</div>
     <label>Category</label>
     <select id="exp-cat"><option>Staff Salaries</option><option>Utilities (NEPA/Generator)</option><option>Building Maintenance</option><option>Teaching Materials</option><option>Government/Ministry Fees</option><option>Cleaning & Security</option><option>Transport</option><option>Examination Fees</option><option>Other</option></select>
     <label>Description</label><input type="text" id="exp-desc" placeholder="e.g. Generator servicing">
@@ -1246,7 +1269,7 @@ function toggleEye(inputId, btn) {
   </div>
 </div>
 
-<script src="app.js?v=20260703a"></script>
+<script src="app.js?v=20260725c"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
@@ -1345,7 +1368,7 @@ function toggleEye(inputId, btn) {
 
     <!-- Step 2: Photo button — accepts ALL file types like the Agent app -->
     <input type="file" id="socr-img-input" accept="image/*,application/pdf,.csv,.txt,.doc,.docx,.xls,.xlsx,.webp,.heic,.heif,*/*"
-      style="display:none;" onchange="socrHandleImage(event)" multiple capture="environment">
+      style="display:none;" onchange="socrHandleImage(event)" multiple>
     <button class="btn-brand" onclick="socrPickPhoto()" style="margin-bottom:0.5rem;">
       📷 Take Photo / Choose File
     </button>
@@ -1414,21 +1437,13 @@ function toggleEye(inputId, btn) {
 </div>
 
 <script>
-// ── Register Service Worker (PWA) ──────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => {
-        console.log('[PWA] Service Worker registered:', reg.scope);
-        // Listen for background sync messages from SW
-        navigator.serviceWorker.addEventListener('message', e => {
-          if (e.data?.type === 'BACKGROUND_SYNC') {
-            if (typeof SQ !== 'undefined') SQ.flush();
-          }
-        });
-      })
-      .catch(err => console.warn('[PWA] SW registration failed:', err));
-  });
+// ── Service Worker DISABLED for v2 test sandbox ────────────────────────────
+// A cached SW actively fights rapid test iteration — same caching pain
+// fought all session in bloom-agent-v2 before ?v=N cache-busting. v2 is
+// meant to be tested live against the freshest code every time. Re-enable
+// when this code is ported into the live School-Bloom app.
+if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
 }
 // ── PWA Install Prompt ──────────────────────────────────────────────────────
 let _deferredInstall = null;
