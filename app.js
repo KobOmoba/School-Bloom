@@ -5579,7 +5579,8 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, ma
       model: 'qwen/qwen3.6-27b',
       max_tokens: maxTokens || 800,
       temperature: 0,
-      reasoning_format: 'hidden',
+      reasoning_effort: 'none',
+      response_format: { type: 'json_object' },
       messages: [{
         role: 'user',
         content: [
@@ -5591,11 +5592,11 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, ma
   });
 
   if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
-    if (_retry >= 3) throw new Error('Groq rate-limited after multiple retries — try again shortly.');
+    if (_retry >= 4) throw new Error('Groq rate-limited after multiple retries — try again shortly.');
     const retryAfter = resp.headers.get('retry-after');
     let waitMs = parseFloat(retryAfter) * 1000;
-    if (!waitMs || isNaN(waitMs)) waitMs = 15000;
-    waitMs = Math.min(Math.max(waitMs, 3000), 60000);
+    if (!waitMs || isNaN(waitMs)) waitMs = 20000;
+    waitMs = Math.min(Math.max(waitMs, 3000), 65000);
     await new Promise(r => setTimeout(r, waitMs));
     return _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, maxTokens, _retry + 1);
   }
@@ -5624,12 +5625,9 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, ma
 
 // Shared reading discipline — same never-guess-a-status principle that
 // fixed the ledger payment-status bug in bloom-agent-v2, applied here too.
-const _OCR_DISCIPLINE = `
-READING DISCIPLINE:
-- Transcribe exactly what is written, do not guess or invent values.
-- Read numbers digit by digit — common confusions: 7 vs 1, 0 vs 6, 4 vs 9, 3 vs 8, 5 vs 6/8.
-- If a field is illegible or not visible, output "UNCLEAR" for that field rather than guessing a plausible value.
-- Return ONLY valid JSON, no markdown, no explanation.`;
+// _OCR_DISCIPLINE — aliased to the fuller READING_DISCIPLINE ported from bloom-agent-v2
+// All 5 scan prompts reference this via ${_OCR_DISCIPLINE}
+const _OCR_DISCIPLINE = READING_DISCIPLINE;
 
 function _isPremium() { return true; /* TEMP BYPASS */ }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
