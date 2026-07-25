@@ -1024,7 +1024,7 @@ async function doStaffLogin() {
 
 function loadSchoolIntoSD(sid, school) {
   SD.config = school.config || {};
-  SD.students = school.students || [];
+  SD.students = (school.students || []).map(s => s.class ? { ...s, class: normaliseClassName(s.class) } : s);
   SD.staff = school.staff || [];
   SD.expenses = school.expenses || [];
   SD.attendance = school.attendance || {};
@@ -1958,9 +1958,35 @@ let _ocrReviewData = [];
 // roster with a standard Nigerian curriculum list, so the dropdown is useful
 // even for a brand-new school with zero students so far.
 function getKnownClasses() {
-  const existing = [...new Set((SD.students || []).map(s => (s.class || '').trim().toUpperCase()).filter(Boolean))];
+  const existing = [...new Set((SD.students || []).map(s => normaliseClassName(s.class || '').trim().toUpperCase()).filter(Boolean))];
   const defaults = ['DAYCARE','PLAYGROUP','PRE-NURSERY','NURSERY 1','NURSERY 2','KG 1','KG 2','BASIC 1','BASIC 2','BASIC 3','BASIC 4','BASIC 5','BASIC 6','JSS 1','JSS 2','JSS 3','SS 1','SS 2','SS 3'];
   return [...new Set([...existing, ...defaults])].sort();
+}
+
+// Normalise non-standard class names to the Nigerian curriculum standard.
+// Nigerian primary school = BASIC 1-6 only. BASIC 7 does not exist —
+// it maps to JSS 1. BASIC 8 → JSS 2. BASIC 9 → JSS 3.
+function normaliseClassName(raw) {
+  if (!raw) return '';
+  const s = raw.trim().toUpperCase();
+  const overrides = {
+    'BASIC 7': 'JSS 1', 'BASIC7': 'JSS 1',
+    'BASIC 8': 'JSS 2', 'BASIC8': 'JSS 2',
+    'BASIC 9': 'JSS 3', 'BASIC9': 'JSS 3',
+    'PRIMARY 1': 'BASIC 1','PRIMARY 2': 'BASIC 2','PRIMARY 3': 'BASIC 3',
+    'PRIMARY 4': 'BASIC 4','PRIMARY 5': 'BASIC 5','PRIMARY 6': 'BASIC 6',
+    'PRIM 1': 'BASIC 1','PRIM 2': 'BASIC 2','PRIM 3': 'BASIC 3',
+    'PRIM 4': 'BASIC 4','PRIM 5': 'BASIC 5','PRIM 6': 'BASIC 6',
+    'KG': 'KG 1','KINDERGARTEN': 'KG 1','KINDERGARTEN 1': 'KG 1','KINDERGARTEN 2': 'KG 2',
+    'NURSERY': 'NURSERY 1','NUR 1': 'NURSERY 1','NUR 2': 'NURSERY 2',
+    'PRE-NURSERY 1': 'PRE-NURSERY','PRE NURSERY': 'PRE-NURSERY',
+    'DAYCARE': 'DAYCARE','DAY CARE': 'DAYCARE',
+    'JSS1': 'JSS 1','JSS2': 'JSS 2','JSS3': 'JSS 3',
+    'SS1': 'SS 1','SS2': 'SS 2','SS3': 'SS 3',
+    'SSS 1': 'SS 1','SSS 2': 'SS 2','SSS 3': 'SS 3',
+    'SENIOR 1': 'SS 1','SENIOR 2': 'SS 2','SENIOR 3': 'SS 3',
+  };
+  return overrides[s] || raw.trim();
 }
 
 // Fills a <select> with known classes + a "New class…" option, preserving `current`.
@@ -5583,9 +5609,16 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, ma
   raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
   try { return JSON.parse(raw); }
   catch(e) {
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { return JSON.parse(m[0]); } catch(e2) {} }
-    throw new Error('Could not parse response. Try a clearer, straighter photo.');
+    // 1. Outermost { }
+    const m1 = raw.match(/\{[\s\S]*\}/);
+    if (m1) { try { return JSON.parse(m1[0]); } catch(e2) {} }
+    // 2. Find first { and last } and try that slice
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try { return JSON.parse(raw.slice(start, end + 1)); } catch(e3) {}
+    }
+    throw new Error('Could not read the photo. Please try again with a flatter, well-lit, closer shot.');
   }
 }
 
@@ -5874,9 +5907,22 @@ Use null for blank/unreadable cells. Integers only for amounts. Do NOT invent da
 
   try { return JSON.parse(raw); }
   catch(e) {
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
-    throw new Error('Could not parse Groq response. Try a clearer, straighter photo of the register.');
+    // Try progressively more aggressive extraction
+    // 1. Outermost { } including nested
+    const m1 = raw.match(/\{[\s\S]*\}/);
+    if (m1) { try { return JSON.parse(m1[0]); } catch(e2) {} }
+    // 2. Find the students array start and reconstruct
+    const arrIdx = raw.indexOf('"students"');
+    if (arrIdx !== -1) {
+      const fromStudents = raw.slice(raw.lastIndexOf('{', arrIdx));
+      try { return JSON.parse(fromStudents); } catch(e3) {}
+    }
+    // 3. If JSON is truncated, try to close it
+    try {
+      const closed = raw.replace(/,\s*$/, '') + ']}';
+      return JSON.parse(closed);
+    } catch(e4) {}
+    throw new Error('Could not parse Groq response. Try a closer, flatter photo with better lighting — make sure all rows are fully visible.');
   }
 }
 
