@@ -5832,99 +5832,237 @@ Output ONLY: {"name":"","email":"","role":"","phone":""}`;
 }
 
 // ── 4. Groq Vision call with Nigerian fee ledger system prompt ────────
-async function _callGroqFeeVision(apiKey, base64, mimeType) {
-  // This system prompt is tuned from 5 real Nigerian school fee registers:
-  // Basic 4&5, Basic 3, Basic 1&2, Nursery 1&2, KG — Term 3, 2026
-  const SYSTEM_PROMPT = `You are reading a photograph of a Nigerian school fees ledger (handwritten register book). Extract ALL student payment records visible.
+// ── Fee register OCR — prompt + parse ported verbatim from bloom-agent-v2
+// (the version proven on real Nigerian school registers — do not simplify)
+const READING_DISCIPLINE=[
+  'READING DISCIPLINE — apply to every field, always:',
+  '- Transcribe exactly what is written. Do not paraphrase or "clean up" text.',
+  '- For NUMBERS: read digit by digit, not at a glance. Common handwriting',
+  '  confusions to double-check: 7 vs 1, 0 vs 6, 4 vs 9, 3 vs 8, 5 vs 6/8.',
+  '- For STATUS fields: actively scan for explicit keywords, ticks, or',
+  '  strikethroughs BEFORE deciding a value. Never pick a default status',
+  '  just because nothing else is obviously visible — that produces a',
+  '  confidently wrong answer, which is worse than no answer.',
+  '- If a field is illegible or you are not confident, output "UNCLEAR"',
+  '  for that field rather than guessing a plausible-looking value.'
+].join('\n');
 
-COLUMN STRUCTURE (left to right):
-1. S/N — serial/row number
-2. NAMES — SURNAME first then FIRSTNAME (sometimes written as one full name)
-3. BALANCE FROM LAST TERM — debt carried from previous term (blank = 0)
-4. CURRENT TERMS FEES — this term's fee amount
-5. TOTAL — (Balance from last term) + (Current term fees)
-6. 1ST PART PAYMENT — first installment paid this term
-7. TELLER NO / BALANCE — running balance after 1st payment (the number remaining)
-8. DATE — date of 1st payment in Nigerian D/M/YY format (e.g. 12/5/26 = 12 May 2026)
-9. 2ND PART PAYMENT — second installment amount
-10. BALANCE — running balance after 2nd payment
-11. DATE — date of 2nd payment
-12. 3RD PART PAYMENT — third installment amount
-13. BALANCE / RECEIPT NO — running balance after 3rd payment
-14. DATE — date of 3rd payment
+const LEDGER_PROMPT=[
+  'You are reading the LEFT ~62% of a Nigerian SCHOOL FEES LEDGER (handwritten).',
+  'This image is cropped — the 2nd and 3rd payment-installment columns are',
+  'NOT visible. Do not look for them. The 1st part-payment/teller columns ARE visible.',
+  'The columns you can see are:',
+  '  Col 1: SERIAL NO (1, 2, 3...)',
+  '  Col 2: SURNAME (family name — all caps)',
+  '  Col 3: FIRSTNAME (given name — all caps)',
+  '  Col 4: BALANCE FROM LAST TERM (debt carried forward — 0 or blank means none)',
+  '  Col 5: CURRENT TERM FEES (the fee charged this term, e.g. 24000, 26000, 28000)',
+  '  Col 6: TOTAL (col4 + col5 = everything this student owes)',
+  '  Col 7: 1ST PART PAYMENT (an amount, OR a handwritten status word)',
+  '  Col 8: TELLER NO / RECEIPT NO (often overwritten with a status word instead of a number)',
+  '',
+  READING_DISCIPLINE,
+  '',
+  'PAYMENT STATUS — this is the field that was getting this wrong before:',
+  'Look in columns 7-8 (and the space around/above/below them — handwriting is',
+  'often diagonal or overflows its cell) for any of these words or close variants:',
+  '  "FULLY PAID", "FULL PAID", "FULLY", "PAID", "F/PAID", "PART PAYMENT"',
+  'Decide payment_status using this priority:',
+  '  1. If "FULLY PAID"/"FULL PAID"/"FULLY"+"PAID" appears anywhere on the row -> "PAID"',
+  '  2. Else if a part-payment amount is visible and it is LESS than the total -> "PARTIAL"',
+  '  3. Else if the row is completely blank in columns 7-8 with no annotation -> "UNCLEAR"',
+  '  4. Only mark "OWING" if there is clear evidence of a remaining unpaid amount',
+  '     (a positive number written as still-owed, or an explicit note) — never as a',
+  '     silent default just because you found nothing else.',
+  'When in doubt between OWING and UNCLEAR, choose UNCLEAR — a wrong confident',
+  '"OWING" tells a parent who already paid that they still owe money.',
+  '',
+  'YOUR TASK: For every numbered student row return:',
+  '  name           = SURNAME + space + FIRSTNAME',
+  '  balance_bf     = col 4 value (integer, 0 if blank or dash)',
+  '  termFees       = col 5 value (integer)',
+  '  total          = col 6 value (integer)',
+  '  payment_status = one of "PAID", "PARTIAL", "OWING", "UNCLEAR" (see rules above)',
+  '  ocr_confidence  = "HIGH", "MEDIUM", or "LOW" — your confidence in this row overall',
+  '  detected_class = class label at the top of the page (e.g. K-G, BASIC FOUR, NURSERY 1, BASIC THREE)',
+  '  year           = year written at top of ledger (e.g. 2026)',
+  '  term           = term number at top of ledger (e.g. 3)',
+  '',
+  'Nigerian SURNAMES (common): OGUNDETI, OYERINDE, OLATUNDE, OBASA, OKENDINMI, ILELABOYE,',
+  'AFOLABI, OLIYIDE, KOLANDLE, ADEGUNLE, ADEOYE, SABIU, OGUNLADE, ALIMI, JOHN, AKINOLA,',
+  'KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, ODEREYE, AKINBELE,',
+  'ADEBAYO, AYANDIYA, SHONIPE, GBELEKALE, FAFIOLU, DADA, MOSES, OYEBOLA, ADERIBIGBE,',
+  'LAWAL, OLAYINOLA, IDOWU, ATAJA, AWOLOWO, AKINDELE, OGUNSOLA',
+  '',
+  'Nigerian FIRSTNAMES (common): SALAM, OYEDEPO, WAJUD, MICHEAL, IBRAHIM, RAHMON, AISHAT,',
+  'CHRISTIANA, AFEEZ, DOMINION, SAMUEL, MALEEK, FATHIA, INIOLUWA, QUARIBAT, AWAL, GOLD,',
+  'TOHEEB, GODWIN, ELIZABETH, TIBESIMI, WASLAT, MOZEED, DEBORAH, SHINDARA, GABRIEL,',
+  'RASAQ, ENOCH, ABIGEAL, KOREDE, ADEMIDE, AMINDAT, WIQUYAT, ISREA, DORCAS, MARIAM,',
+  'CYNTHIA, AMINAT, FATOBI, MUSTEQEEM, GIFT, SUCCESS, RASHEEDAT, KOREDE',
+  '',
+  'RULES:',
+  '1. Every numbered row = one student. Read ALL rows. A page typically has 10-30 students.',
+  '2. Crossed-out numbers: ignore the crossed-out value, read the correction written nearby.',
+  '3. SELF-CHECK before finalizing each row: total must equal balance_bf + termFees.',
+  '   If they do not match, re-read that row\'s digits and correct before moving on.',
+  '4. Return ONLY valid JSON — no markdown fences, no explanation text.',
+  '',
+  'EXAMPLE OUTPUT:',
+  '{"detected_class":"K-G","year":"2026","term":"3","students":[',
+  '{"name":"OLIYIDE GODWIN","balance_bf":0,"termFees":24000,"total":24000,"payment_status":"PAID","ocr_confidence":"HIGH"},',
+  '{"name":"KASALI RASAQ","balance_bf":5000,"termFees":24000,"total":29000,"payment_status":"PARTIAL","ocr_confidence":"MEDIUM"},',
+  '{"name":"JOHN DEBORAH","balance_bf":3000,"termFees":26000,"total":29000,"payment_status":"UNCLEAR","ocr_confidence":"LOW"}',
+  ']}'
+].join('\n');
 
-CRITICAL RULES:
-- "FULLY PAID", "FULL PAID", "FULLY P", "F.P.", "FP" written anywhere on a row = student paid everything → status "FULLY PAID"
-- "BALANCE 3,000" or "BAL 2,000" appearing before CURRENT TERMS FEES = balance owed from last term
-- "Party" in a payment column = partial, record the number written near it
-- All amounts in Nigerian Naira as integers: 28,000 and 28000 and 28.000 all mean 28000
-- Dates: D/M/YY. Examples: 12/5/26 = 12 May 2026, 8/6/26 = 8 Jun 2026, 29/6/26 = 29 Jun 2026
-- Names are Nigerian: Yoruba (Olayinka, Adeoye, Ogunsola, Ilelaboye, Olatunde), Hausa (Musa, Aisha, Abdullahi, Khaleed), Igbo (Emeka, Chioma, Ezekiel)
-- Crossed-out numbers = corrections; use the newer number written next to them
-- Blank cell = no payment recorded for that installment → null
-- Ignore TOTAL rows at the bottom of the page
-- Class name is usually at the top (e.g. "BASIC FOUR & BASIC FIVE", "NURSERY 1 & 2", "K-G")
-- Term is usually at the top (e.g. "3RD", "2ND")
-
-Output ONLY raw valid JSON with no markdown, no explanation, no code fences:
-{"class":"","term":"","year":"","students":[{"sn":1,"surname":"OGUNDETI","firstname":"SALAIM","bal_bf":null,"term_fees":26000,"total":26000,"pmt1":10000,"bal1":16000,"date1":"12/5/26","pmt2":5000,"bal2":11000,"date2":"22/6/26","pmt3":null,"bal3":null,"date3":null,"status":"Partial"}]}
-
-Status values: "FULLY PAID" | "Partial" | "No Payment"
-Use null for blank/unreadable cells. Integers only for amounts. Do NOT invent data.`;
-
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + apiKey
-    },
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: 4000,
-      temperature: 0.1,
-      reasoning_format: 'hidden',
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
-          { type: 'text', text: SYSTEM_PROMPT }
-        ]
-      }]
-    })
-  });
-
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
+function parseLedgerJSON(text){
+  text=text.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+  window._lastOCRRaw=text;
+  let parsed={};
+  try{parsed=JSON.parse(text);}
+  catch(e){
+    const m=text.match(/\{[\s\S]*\}/);
+    try{parsed=m?JSON.parse(m[0]):{};}catch(e2){parsed={};}
   }
-
-  const data = await resp.json();
-  let raw = (data.choices?.[0]?.message?.content || '').trim();
-
-  // Strip thinking tokens and markdown fences
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-
-  try { return JSON.parse(raw); }
-  catch(e) {
-    // Try progressively more aggressive extraction
-    // 1. Outermost { } including nested
-    const m1 = raw.match(/\{[\s\S]*\}/);
-    if (m1) { try { return JSON.parse(m1[0]); } catch(e2) {} }
-    // 2. Find the students array start and reconstruct
-    const arrIdx = raw.indexOf('"students"');
-    if (arrIdx !== -1) {
-      const fromStudents = raw.slice(raw.lastIndexOf('{', arrIdx));
-      try { return JSON.parse(fromStudents); } catch(e3) {}
-    }
-    // 3. If JSON is truncated, try to close it
-    try {
-      const closed = raw.replace(/,\s*$/, '') + ']}';
-      return JSON.parse(closed);
-    } catch(e4) {}
-    throw new Error('Could not parse Groq response. Try a closer, flatter photo with better lighting — make sure all rows are fully visible.');
+  let students=Array.isArray(parsed.students)?parsed.students:[];
+  // Safety net: if the whole-JSON parse produced nothing (e.g. the response
+  // got cut off mid-array because it hit the token limit), salvage whatever
+  // complete {..."name":...} objects exist in the raw text rather than
+  // losing every student on that page.
+  if(!students.length){
+    const objMatches=text.match(/\{[^{}]*"name"[^{}]*\}/g)||[];
+    objMatches.forEach(m=>{
+      try{const o=JSON.parse(m);if(o&&o.name)students.push(o);}catch(e){}
+    });
+    if(students.length)console.warn('[parseLedgerJSON] Recovered '+students.length+' students from truncated/invalid JSON');
   }
+  const result={
+    detected_class:parsed.detected_class||'',
+    term:parsed.term||'',
+    year:parsed.year||'',
+    students
+  };
+  parseLedgerJSON._lastResult=result;
+  return result;
 }
+
+
+async function callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry){
+  if(_retry===undefined)_retry=0;
+  if(!maxTokens)maxTokens=600;
+  const base64=imageDataUrl.split(',')[1];
+  const mimeType=imageDataUrl.split(';')[0].split(':')[1]||'image/jpeg';
+  // qwen/qwen3.6-27b is the current reliable free-tier Groq vision model.
+  // llama-4-scout / llama-4-maverick / llama-3.2-90b-vision-preview are deprecated
+  // and return 400s — this was why signboard OCR stopped working.
+  const model='qwen/qwen3.6-27b';
+  const controller=new AbortController();
+  const fetchTimer=setTimeout(()=>controller.abort(),45000);
+  let resp;
+  try{
+    resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+      method:'POST',
+      signal:controller.signal,
+      headers:{'Authorization':'Bearer '+apiKey,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model,
+        messages:[{role:'user',content:[
+          {type:'image_url',image_url:{url:'data:'+mimeType+';base64,'+base64}},
+          {type:'text',text:prompt}
+        ]}],
+        temperature:0,
+        max_tokens:maxTokens,
+        reasoning_effort:'none',
+        response_format:{type:'json_object'}
+      })
+    });
+    clearTimeout(fetchTimer);
+  }catch(fetchErr){
+    clearTimeout(fetchTimer);
+    if(_retry<2){
+      await new Promise(r=>setTimeout(r,1500));
+      return callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry+1);
+    }
+    throw new Error(fetchErr.name==='AbortError'?'Groq timed out':fetchErr.message);
+  }
+  if(resp.status===429||resp.status===503||resp.status===529){
+    // A fixed 3s backoff was nowhere near long enough — Groq's free-tier
+    // rate limit is a rolling per-MINUTE window, not a per-few-seconds one.
+    // That mismatch is what caused a different random page to fail on every
+    // run of the same 5 photos: whichever page happened to land right as
+    // the TPM budget ran out got a 429, retried for only ~6 seconds total,
+    // then gave up. Respect the server's own Retry-After header — it knows
+    // exactly how long is left in the window — and allow more attempts
+    // since this is a fully recoverable, expected condition, not an error.
+    const retryAfterHeader=resp.headers.get('retry-after');
+    let waitMs=parseFloat(retryAfterHeader)*1000;
+    if(!waitMs||isNaN(waitMs))waitMs=20000; // no header given — assume a full window
+    waitMs=Math.min(Math.max(waitMs,3000),65000); // clamp 3s-65s
+    if(_retry>=4){const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||'Groq rate-limited after multiple retries');}
+    console.warn('[Groq] rate-limited (attempt '+(_retry+1)+'), waiting '+Math.round(waitMs/1000)+'s per Retry-After');
+    await new Promise(r=>setTimeout(r,waitMs));
+    return callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry+1);
+  }
+  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||'Groq '+resp.status);}
+  const data=await resp.json();
+  let text=data.choices?.[0]?.message?.content||'';
+  text=text.replace(/<ildo>[\s\S]*?<\/ildo>/gi,'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+  console.log('[Groq] '+model+' responded ('+text.length+' chars, budget '+maxTokens+')');
+  return text;
+}
+
+function fileToDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();r.onload=e=>resolve(e.target.result);r.onerror=reject;r.readAsDataURL(file);
+  });
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  SQ.ping();
+  const saved=localStorage.getItem('ag2_agent');
+  if(saved){
+    try{
+      agent=JSON.parse(saved);
+      if(agent&&agent.id){
+        startApp();
+        if(db&&!agent._guest){const p=normPhone(agent.phone||'');const l=p.startsWith('234')?'0'+p.slice(3):p;refreshBg(agent.id,p,l).catch(()=>{});}
+        return;
+      }
+    }catch(e){localStorage.removeItem('ag2_agent');}
+  }
+  $('login').style.display='flex';$('login').style.flexDirection='column';
+  $('app').style.display='none';
+});
+
+// Adapter: keeps the existing School-Bloom call signature unchanged
+async function _callGroqFeeVision(apiKey, base64, mimeType) {
+  const dataUrl = 'data:' + mimeType + ';base64,' + base64;
+  const rawText = await callGroqVision(dataUrl, LEDGER_PROMPT, apiKey, 4096);
+  const parsed  = parseLedgerJSON(rawText);
+  // Remap V2 field names to the shape _showFeeImportReview already expects
+  const students = (parsed.students || []).map(s => ({
+    sn:        null,
+    surname:   (s.name || '').split(' ')[0]  || '',
+    firstname: (s.name || '').split(' ').slice(1).join(' ') || '',
+    bal_bf:    s.balance_bf  ?? null,
+    term_fees: s.termFees    ?? null,
+    total:     s.total       ?? null,
+    pmt1: null, bal1: null, date1: null,
+    pmt2: null, bal2: null, date2: null,
+    pmt3: null, bal3: null, date3: null,
+    status: s.payment_status === 'PAID'    ? 'FULLY PAID'  :
+            s.payment_status === 'PARTIAL' ? 'Partial'     :
+            s.payment_status === 'UNCLEAR' ? 'No Payment'  : 'No Payment'
+  }));
+  return {
+    class:    parsed.detected_class || '',
+    term:     parsed.term           || '',
+    year:     parsed.year           || '',
+    students
+  };
+}
+
 
 // ── 5. Show review modal before importing ─────────────────────────────
 function _showFeeImportReview(data) {
