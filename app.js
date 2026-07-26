@@ -5629,7 +5629,7 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, ma
 // All 5 scan prompts reference this via ${_OCR_DISCIPLINE}
 const _OCR_DISCIPLINE = READING_DISCIPLINE;
 
-function _isPremium() { return (SD.config && SD.config.plan === 'premium') || (window._demoMode === true); }
+function _isPremium() { return true; /* TEMP BYPASS - Bayo testing Base44's OCR work, do not restore until he confirms */ }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
 function _gateScan(prefix, scanInputId) {
   if (_isPremium()) { return true; }
