@@ -4049,17 +4049,7 @@ function _parseScoreOcrJson(raw){
 async function _groqScoreOCR(b64, mime, prompt){
   const groqKey=getGroqKey();
   if(!groqKey) throw new Error('No Groq key configured');
-  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),60000);
-  let r;
-  try {
-    r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:4000,
-      messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
-    })});
-  } finally { clearTimeout(timer); }
-  if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('Groq '+r.status+': '+(ed.error?.message||r.statusText)); }
-  const d=await r.json();
-  const raw=d.choices?.[0]?.message?.content||'[]';
+  const raw = await callGroqVision('data:'+mime+';base64,'+b64, prompt, groqKey, 4000);
   const parsed=_parseScoreOcrJson(raw);
   if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries');
   return parsed;
@@ -5629,7 +5619,7 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, ma
 // All 5 scan prompts reference this via ${_OCR_DISCIPLINE}
 const _OCR_DISCIPLINE = READING_DISCIPLINE;
 
-function _isPremium() { return true; /* TEMP BYPASS - Bayo testing Base44's OCR work, do not restore until he confirms */ }
+function _isPremium() { return (SD.config && SD.config.plan === 'premium') || (window._demoMode === true); }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
 function _gateScan(prefix, scanInputId) {
   if (_isPremium()) { return true; }
@@ -5945,6 +5935,23 @@ function parseLedgerJSON(text){
 }
 
 
+let groqRateState={remainingTokens:null,resetMs:0};
+function parseGroqDuration(v){
+  if(!v)return 0;
+  v=String(v).trim();
+  if(v.endsWith('ms'))return parseFloat(v);
+  if(v.endsWith('s'))return parseFloat(v)*1000;
+  return parseFloat(v)*1000||0;
+}
+function updateGroqRateState(resp){
+  try{
+    const remaining=resp.headers.get('x-ratelimit-remaining-tokens');
+    const reset=resp.headers.get('x-ratelimit-reset-tokens');
+    if(remaining!==null)groqRateState.remainingTokens=parseInt(remaining);
+    if(reset!==null)groqRateState.resetMs=parseGroqDuration(reset);
+  }catch(e){/* headers not available in this environment — ignore */}
+}
+
 async function callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry){
   if(_retry===undefined)_retry=0;
   if(!maxTokens)maxTokens=600;
@@ -5975,6 +5982,7 @@ async function callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry){
       })
     });
     clearTimeout(fetchTimer);
+    updateGroqRateState(resp);
   }catch(fetchErr){
     clearTimeout(fetchTimer);
     if(_retry<2){
