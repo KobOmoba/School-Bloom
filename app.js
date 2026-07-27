@@ -290,27 +290,24 @@ const HF_OCR_MODEL = 'DEPRECATED'; // HF fallback removed — Groq only
 const HF_KEY_STORAGE = 'hf_api_key';
 function getHFKey() { return window.HF_API_KEY || localStorage.getItem(HF_KEY_STORAGE) || ''; }
 
-// Keys sync from Firestore admin_settings/main — survives browsing-data clears
 async function _fetchGroqKeyFromFirestore() {
+  // Reads directly from Firestore now — no external proxy. public_ocr_keys/main
+  // holds ONLY the OCR keys (never anything sensitive), mirrored there by the
+  // portal whenever Bayo updates a key in Settings.
   try {
-    const sid = (typeof schoolId !== 'undefined' && schoolId) || '';
-    if (!sid) return;
-    const res = await fetch('https://superagent-626f0107.base44.app/functions/getEduBloomKeys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'school', id: sid })
-    });
-    if (!res.ok) return; // fall back to whatever's cached in localStorage
-    const d = await res.json();
+    if (!db) return;
+    const doc = await db.collection('public_ocr_keys').doc('main').get();
+    if (!doc.exists) return; // fall back to whatever's cached in localStorage
+    const d = doc.data();
     if (d.groqApiKey) {
       window.GROQ_API_KEY = d.groqApiKey;
       localStorage.setItem(GROQ_KEY_STORAGE, d.groqApiKey);
-      console.log('✅ Groq key loaded via secure proxy');
+      console.log('✅ Groq key loaded from Firestore');
     }
     if (d.hfApiKey) {
       window.HF_API_KEY = d.hfApiKey;
       localStorage.setItem(HF_KEY_STORAGE, d.hfApiKey);
-      console.log('✅ HF key loaded via secure proxy');
+      console.log('✅ HF key loaded from Firestore');
     }
   } catch(e) { /* offline — use whatever is in localStorage */ }
 }
@@ -5479,12 +5476,12 @@ async function refreshPlanFromFirestore(btn) {
 let _feeGroqKey = null;
 let _feeImportData = null;  // holds last scanned result for import confirm
 
-// ── 1. Get Groq key from admin_settings (same source as agent app) ────
+// ── 1. Get Groq key from public_ocr_keys (safe to read without admin auth) ──
 async function _getFeeGroqKey() {
   if (_feeGroqKey) return _feeGroqKey;
   try {
     if (!db) return null;
-    const doc = await db.collection('admin_settings').doc('main').get();
+    const doc = await db.collection('public_ocr_keys').doc('main').get();
     if (doc.exists && doc.data().groqApiKey) {
       _feeGroqKey = doc.data().groqApiKey;
       return _feeGroqKey;
