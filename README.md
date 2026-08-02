@@ -2,6 +2,55 @@
 
 **Production site:** [school.edubloom.com.ng](https://school.edubloom.com.ng)
 
+## Latest Update — 2026-08-02 (v20260802-forgotpwd) — Forgot password, everywhere a password is required
+
+**Requested by Bayo:** "add forgotten password to everywhere password is
+required and making it Retrievable." Staff passwords here are SHA-256
+hashed (deliberate — Bayo confirmed this was done to close security
+loopholes, see the Security section below), so a hash literally cannot be
+turned back into the original password. **True retrieval isn't possible
+without undoing that hashing, which Bayo did not want undone** — so the
+secure equivalent (reset, not retrieve) was built at every point a
+password exists in this app:
+
+1. **Principal login** — `slForgotPassword()` already existed (opens
+   WhatsApp with a prefilled message). **Fixed the routing**: it was
+   messaging the school's **agent**, who has no way to actually reset
+   anything — now goes straight to AariNAT/Bayo's number
+   (`2348145073941`), the only person with the tool to fix it (see
+   `bloom-portal`'s "🔑 Reset Password" button, that repo's README).
+   Wording also corrected from "send my school password" (implies
+   retrieval) to "reset my school password" (accurate).
+
+2. **Staff (email + password) login** — had no forgot-password link at
+   all. Added `slStaffForgotPassword()` + matching button. First tap
+   shows an inline nudge to ask their Principal (who can now self-serve
+   this, see #3). Second tap (or if the Principal's unreachable) opens
+   WhatsApp to AariNAT directly — not the agent, same reasoning as #1.
+
+3. **Staff tab (Principal-only)** — this was the real gap: a Principal
+   had **no way at all** to reset a staff member's password if they
+   forgot it, short of asking Claude/Bayo to hand-edit Firestore. Added
+   **`resetStaffPassword(idx)`** + a "🔑 Reset Pwd" button next to each
+   staff row (Principal-only, gated by both hiding the button for other
+   roles and a `userRole !== 'Principal'` check inside the function
+   itself). Prompts for a new password (min 4 chars), hashes it with the
+   existing `_hashPassword()` — same function `addStaff()` already
+   uses, so no new hashing path was introduced — saves it, then offers to
+   WhatsApp the new password to that staff member directly. Works for any
+   role including resetting a second Principal-role entry if one exists.
+
+**Net effect:** every login screen in this app now has a working,
+self-service-first path back in, without weakening the password hashing
+Bayo asked to have in place.
+
+### Commit
+`app.js` (staff reset function + button, forgot-password routing fixes),
+`index.html` (staff panel forgot-password link, cache bumped to
+`?v=20260802-forgotpwd`).
+
+---
+
 ## Latest Update — 2026-07-25 (v20260725e) — OCR resilience repair + premium gate status
 
 ### ⚠️ IMPORTANT: premium gate is currently bypassed, deliberately, by Bayo
