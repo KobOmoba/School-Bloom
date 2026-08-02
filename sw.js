@@ -5,7 +5,7 @@
 //  assets (icons/manifest/CDN), Network-First for Firestore
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME   = 'edu-bloom-v2';
+const CACHE_NAME   = 'edu-bloom-v20260802-forgotpwd';
 const SHELL_ASSETS = [
   './',
   './index.html',
