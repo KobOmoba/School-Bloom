@@ -967,8 +967,32 @@ function slForgotPassword() {
   const agent = SD.config?.agent;
   const phone = (agent?.phone || '2348145073941').replace(/\D/g, '');
   const school = SD.config?.schoolName || 'my school';
-  const msg = 'Hello, I am the Principal of ' + school + '. I cannot log into EduBloom — please send my school password. School ID: ' + (schoolId || 'unknown');
+  const msg = 'Hello, I am the Principal of ' + school + '. I cannot log into EduBloom — please reset my school password. School ID: ' + (schoolId || 'unknown');
   window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
+}
+
+// Staff (non-Principal) forgot-password: unlike the Principal, staff can be
+// reset from inside the app by their own Principal (Staff tab → 🔑 Reset).
+// This just points them there, or to the agent if the Principal is unreachable.
+function slStaffForgotPassword() {
+  const email = ($('sl-email')?.value || '').trim();
+  const agent = SD.config?.agent;
+  const phone = (agent?.phone || '2348145073941').replace(/\D/g, '');
+  const school = SD.config?.schoolName || 'my school';
+  const errEl = $('sl-s-err');
+  if (errEl) {
+    errEl.style.color = 'var(--sub)';
+    errEl.textContent = 'Ask your Principal to reset your password from the Staff tab. If you can\'t reach them, tap again to message the agent.';
+    errEl.style.display = 'block';
+  }
+  // Second tap (or if there's no way to reach the Principal) — message the agent directly
+  if (errEl && errEl.dataset.tapped === '1') {
+    const msg = 'Hello, I am a staff member (' + (email||'no email entered') + ') at ' + school + '. I cannot log into EduBloom and cannot reach my Principal — please help reset my password. School ID: ' + (schoolId || 'unknown');
+    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
+    if (errEl) errEl.dataset.tapped = '0';
+    return;
+  }
+  if (errEl) errEl.dataset.tapped = '1';
 }
 
 async function doPrincipalLogin() {
@@ -3445,8 +3469,9 @@ function renderStaff() {
         <div style="font-weight:700;font-size:0.88rem;">${esc(s.name)}</div>
         <div style="font-size:0.72rem;color:var(--sub);">${esc(s.email||'')} · ${esc(s.role||'')}${s.assignedClass?' · '+esc(s.assignedClass):''}</div>
       </div>
-      <div style="display:flex;gap:5px;flex-shrink:0;">
+      <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;">
         <button onclick="editStaff(${i})" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
+        ${userRole==='Principal'?`<button onclick="resetStaffPassword(${i})" style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#b45309;white-space:nowrap;">🔑 Reset Pwd</button>`:''}
         ${s.role!=='Principal'?`<button onclick="deleteStaff(${i})" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#dc2626;white-space:nowrap;">🗑️</button>`:''}
       </div>
     </div>`).join('');
@@ -3526,6 +3551,28 @@ async function deleteStaff(idx) {
   SD.staff.splice(idx,1);
   await SQ.push('staff',SD.staff); saveLocal('staff',SD.staff);
   renderStaff(); toast('🗑️ Staff removed.');
+}
+
+// Principal-only: issue a brand-new password for any staff member (including
+// themself). Passwords are SHA-256 hashed on save — this does NOT reveal the
+// old password (that's impossible by design), it replaces it with a new one
+// the Principal then shares with that staff member directly.
+async function resetStaffPassword(idx) {
+  if (userRole !== 'Principal') { alert('Only the Principal can reset passwords.'); return; }
+  const s = (SD.staff||[])[idx]; if (!s) return;
+  const newPwd = prompt(`New password for ${s.name} (min 4 characters):`);
+  if (newPwd === null) return; // cancelled
+  if (!newPwd || newPwd.trim().length < 4) { alert('Password must be at least 4 characters.'); return; }
+  s.password = await _hashPassword(newPwd.trim());
+  await SQ.push('staff', SD.staff); saveLocal('staff', SD.staff);
+  renderStaff();
+  toast(`✅ Password reset for ${s.name}`);
+  if (confirm(`Send the new password to ${s.name} via WhatsApp now?`)) {
+    const phone = (s.phone || SD.config?.whatsapp || '').replace(/\D/g,'');
+    const msg = `Hello ${s.name},\n\nYour EduBloom staff password has been reset by your Principal.\n\nNew password: ${newPwd.trim()}\n\nLogin at: https://school.edubloom.com.ng\nSchool ID: ${schoolId}\nEmail: ${s.email||'(ask your Principal)'}\n\nPlease keep this safe.`;
+    if (phone) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    else alert('No phone number on file for ' + s.name + '. Share the new password with them directly:\n\n' + newPwd.trim());
+  }
 }
 
 // ── Expenses ─────────────────────────────────────────────────────────────
