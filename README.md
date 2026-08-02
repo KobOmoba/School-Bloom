@@ -2,6 +2,36 @@
 
 **Production site:** [school.edubloom.com.ng](https://school.edubloom.com.ng)
 
+## Latest Update — 2026-08-02 (2) — sw.js cache bump (same class of bug as bloom-portal)
+
+**Context:** while debugging why Bayo kept seeing pre-fix behaviour on
+`bloom-portal` after real pushes, root cause turned out to be the service
+worker (`sw.js`) cache-first-serving the old app shell — `?v=N` on the
+`<script>` tag does **not** bust it, since the SW caches by request URL,
+not querystring. Full writeup in `bloom-portal`'s README.
+
+**Checked School-Bloom for the same trap — found it.** `sw.js` here uses
+the identical cache-first pattern and `CACHE_NAME` (`edu-bloom-v2`) hadn't
+been bumped since before today's forgot-password push. That means the
+`app.js`/`index.html` changes below may have been invisible to anyone who
+already had School-Bloom open or installed as a PWA, even though the
+correct code was already live on GitHub Pages.
+
+**Fix:** bumped `CACHE_NAME` to `edu-bloom-v20260802-forgotpwd`. SW's
+`activate` handler already deletes any cache not matching `CACHE_NAME`
+and calls `skipWaiting()`/`clients.claim()`, so this alone forces a
+refresh on next visit — no other code changes needed.
+
+**Standing rule for next Claude:** any push touching `index.html`,
+`app.js`, or `style.css` in an app that has a `sw.js` **must** also bump
+that file's `CACHE_NAME` in the same push, or the fix is live on GitHub
+but invisible to users. Check `bloom-agent`'s `sw.js` too before assuming
+a push there is "live" — same pattern found there, not yet bumped as of
+this writing (no bloom-agent changes were made today, so left as-is, but
+flag it if you touch that repo next).
+
+---
+
 ## Latest Update — 2026-08-02 (v20260802-forgotpwd) — Forgot password, everywhere a password is required
 
 **Requested by Bayo:** "add forgotten password to everywhere password is
