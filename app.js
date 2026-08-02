@@ -964,8 +964,7 @@ function slSetTab(tab) {
 }
 
 function slForgotPassword() {
-  const agent = SD.config?.agent;
-  const phone = (agent?.phone || '2348145073941').replace(/\D/g, '');
+  const phone = '2348145073941'; // AariNAT/Bayo — only he can reset via Portal, not agents
   const school = SD.config?.schoolName || 'my school';
   const msg = 'Hello, I am the Principal of ' + school + '. I cannot log into EduBloom — please reset my school password. School ID: ' + (schoolId || 'unknown');
   window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
@@ -973,19 +972,19 @@ function slForgotPassword() {
 
 // Staff (non-Principal) forgot-password: unlike the Principal, staff can be
 // reset from inside the app by their own Principal (Staff tab → 🔑 Reset).
-// This just points them there, or to the agent if the Principal is unreachable.
+// This just points them there, or to AariNAT directly if the Principal is
+// unreachable — NOT the agent, since agents have no reset capability at all.
 function slStaffForgotPassword() {
   const email = ($('sl-email')?.value || '').trim();
-  const agent = SD.config?.agent;
-  const phone = (agent?.phone || '2348145073941').replace(/\D/g, '');
+  const phone = '2348145073941'; // AariNAT/Bayo — only he can help, not agents
   const school = SD.config?.schoolName || 'my school';
   const errEl = $('sl-s-err');
   if (errEl) {
     errEl.style.color = 'var(--sub)';
-    errEl.textContent = 'Ask your Principal to reset your password from the Staff tab. If you can\'t reach them, tap again to message the agent.';
+    errEl.textContent = 'Ask your Principal to reset your password from the Staff tab. If you can\'t reach them, tap again to message AariNAT directly.';
     errEl.style.display = 'block';
   }
-  // Second tap (or if there's no way to reach the Principal) — message the agent directly
+  // Second tap (or if there's no way to reach the Principal) — message AariNAT directly
   if (errEl && errEl.dataset.tapped === '1') {
     const msg = 'Hello, I am a staff member (' + (email||'no email entered') + ') at ' + school + '. I cannot log into EduBloom and cannot reach my Principal — please help reset my password. School ID: ' + (schoolId || 'unknown');
     window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
