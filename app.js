@@ -742,7 +742,7 @@ const SQ = {
     const items = [...this.q];
     for (const item of items) {
       try {
-        await db.collection('v2_schools').doc(schoolId).set({ [item.key]: item.data }, { merge: true });
+        await db.collection('schools').doc(schoolId).set({ [item.key]: item.data }, { merge: true });
         this.q = this.q.filter(x => x.id !== item.id);
       } catch (e) {
         item.tries++;
@@ -755,7 +755,7 @@ const SQ = {
   async silentPull() {
     if (window._demoMode || !db || !schoolId) return;
     try {
-      const doc = await db.collection('v2_schools').doc(schoolId).get();
+      const doc = await db.collection('schools').doc(schoolId).get();
       if (!doc.exists) return;
       const d = doc.data();
       const pendingKeys = new Set(this.q.map(x => x.key));
@@ -1214,7 +1214,7 @@ async function doLogin() {
     let school = null;
     if (db) {
       try {
-        const doc = await db.collection('v2_schools').doc(sid).get();
+        const doc = await db.collection('schools').doc(sid).get();
         if (doc.exists) { school = doc.data(); console.log('✅ Found in Firestore schools'); }
       } catch (e) { console.warn('Firestore read failed:', e.message); }
     }
@@ -1230,7 +1230,7 @@ async function doLogin() {
             students: [], expenses: [], attendance: {}, sports: { teams:{}, custom:[] }, arts: { gallery:[] },
             music: { practiceLogs:[], instruments:[] }, health: [], alumni: [], socialPages: [], commsLog: [], opportunities: [], scores: {}, affective: {}
           };
-          try { await db.collection('v2_schools').doc(sid).set(school, { merge: true }); } catch (e2) {}
+          try { await db.collection('schools').doc(sid).set(school, { merge: true }); } catch (e2) {}
         }
       } catch (e) { console.warn('admin_approved_schools check failed:', e.message); }
     }
@@ -1375,7 +1375,7 @@ function checkTierStatus() {
     cfg._lastReportedCount = count;
     SQ.push('config', cfg);
     if (db && sid && !cfg._demo) {
-      db.collection('v2_schools').doc(sid).update({ 'config.studentCount': count, 'config._lastReportedCount': count }).catch(e => console.warn('studentCount sync:', e));
+      db.collection('schools').doc(sid).update({ 'config.studentCount': count, 'config._lastReportedCount': count }).catch(e => console.warn('studentCount sync:', e));
     }
   }
 
@@ -1396,7 +1396,7 @@ function checkTierStatus() {
     cfg.tierExceededNewTier = newTier;
     SQ.push('config', cfg);
     if (db && sid && !cfg._demo) {
-      db.collection('v2_schools').doc(sid).update({
+      db.collection('schools').doc(sid).update({
         'config.tierExceededAt': cfg.tierExceededAt,
         'config.tierExceededNewTier': cfg.tierExceededNewTier,
         'config.studentCount': count
@@ -5496,7 +5496,7 @@ async function refreshPlanFromFirestore(btn) {
   const sid=schoolId||SD.config?._schoolId;
   if(!sid||!db){ if(btn){ btn.textContent='❌ Not connected'; btn.disabled=false; } return; }
   try{
-    const snap=await db.collection('v2_schools').doc(sid).get();
+    const snap=await db.collection('schools').doc(sid).get();
     if(snap.exists){
       const cfg=snap.data().config||{};
       SD.config=Object.assign({},SD.config,cfg);
