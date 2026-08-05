@@ -149,3 +149,21 @@ bumped to `?v=20260725e`).
 
 ### Cache-Busting
 - Version: `?v=20260725c`
+
+
+---
+
+## Changelog
+
+### 2026-08-05 — Collection rename + API key consolidation
+
+**`v2_schools` → `schools` rename (7 occurrences)**
+All Firestore collection references renamed from `v2_schools` to `schools`.
+- Aligns v1 with the portal (which has always written approved schools to `schools`) and with bloom-school-v2 sandbox
+- Previously, a new school approved via portal landed in `schools` but v1 read from `v2_schools`, causing a bootstrap detour on every first login
+- Safe to do now: no real school data existed in Firestore yet
+- All four apps (portal, v1 school, v2 sandbox, agent) now read and write the same collection
+
+**Firebase API key consolidated**
+- school-bloom already used the original single registration (`appId: 2b3da887`)
+- No change needed here; documented for completeness
