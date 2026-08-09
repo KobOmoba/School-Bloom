@@ -167,3 +167,24 @@ All Firestore collection references renamed from `v2_schools` to `schools`.
 **Firebase API key consolidated**
 - school-bloom already used the original single registration (`appId: 2b3da887`)
 - No change needed here; documented for completeness
+
+
+---
+
+## 📍 Current Position — 2026-08-07
+
+### Status: Awaiting port from bloom-school-v2 sandbox
+
+All development is happening in `bloom-school-v2` (sandbox). This repo (`school-bloom`) is the production target.
+
+**What's in production now:** The v1 flat-model school app with the `v2_schools` → `schools` rename applied (2026-08-05). No subcollection architecture yet.
+
+**What's coming in Step 4:** The full `bloom-school-v2` codebase — subcollections, OCR Engine v2, per-field retry, role-based access, staff login with Firebase Auth, delete cascade, all fixes.
+
+### Step 4 port checklist (do after Step 3 security rules confirmed)
+- [ ] Copy `app.js`, `index.html`, `style.css` from `bloom-school-v2` → `school-bloom`
+- [ ] Restore real `_isPremium()` — remove `return true` bypass, restore plan-check logic
+- [ ] Bump `CACHE_NAME` in `sw.js`
+- [ ] Bump `?v=` on `app.js` in `index.html`
+- [ ] Push and verify on device at `school.edubloom.com.ng`
+- [ ] Confirm Enter Portal works, OCR scan works, staff login works
