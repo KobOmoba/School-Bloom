@@ -264,23 +264,267 @@ function getGroqKey() { return window.GROQ_API_KEY || localStorage.getItem(GROQ_
 const GROQ_OCR_MODEL = 'qwen/qwen3.6-27b'; // llama-4-scout deprecated June 17 2026
 let _groqRateLimitedThisSession = false; // once Groq hits an org-wide rate limit, skip it for remaining pages this scan
 
-const GROQ_OCR_PROMPT = `You are reading a Nigerian school attendance/fee register photo.
-Columns: SERIAL NO | SURNAME | FIRST NAME | (other columns — ignore them).
-The image may be at any angle — read it correctly.
+// ═══════════════════════════════════════════════════════════════════════
+// OCR ENGINE v2 — schema-driven, one engine for every document type
+//
+// Every discipline fix, every anti-hallucination rule, and every
+// adaptive-reading improvement lives in ONE place (OCR_CORE_DISCIPLINE).
+// Adding a new document type = one new entry in OCR_SCHEMAS. No new
+// hand-written prompt needed, no risk of discipline rules drifting out
+// of sync between features.
+//
+// Usage: buildOcrPrompt('schema_key')
+//        buildOcrPrompt('schema_key', { subject: 'Mathematics', termNum: '2' })
+// ═══════════════════════════════════════════════════════════════════════
 
-TASK 1: Extract every student name visible. Combine as "SURNAME FIRSTNAME" (all caps).
-TASK 2: Look for a class/form name written anywhere on the page — usually in a header, title, or top corner (e.g. "JSS 2A REGISTER", "BASIC 5 CLASS LIST", "SS1 GOLD", "NURSERY 2"). If found, return it as "detected_class" (all caps, e.g. "JSS 2A"). If no class name is visible anywhere, return "" — do NOT guess.
+const OCR_CORE_DISCIPLINE = [
+  'CORE RULES (apply regardless of document type):',
+  '1. NO HALLUCINATION: Transcribe ONLY what is visibly present. Do not add',
+  '   contextual words, correct spelling, infer missing data, or summarize.',
+  '2. NUMBERS: Read digit by digit, not at a glance. Common handwriting',
+  '   confusions: 7 vs 1 — 0 vs 6 — 4 vs 9 — 5 vs 8 — 3 vs 8.',
+  '3. ILLEGIBLE/UNCERTAIN: If a field is illegible, cropped, or you are not',
+  '   confident, output null for that field — never guess a plausible value.',
+  '   Exception: domain rules for a specific schema may override this for names.',
+  '4. STAMPS & SIGNATURES: Use a bracketed note e.g. [SIGNATURE PRESENT].',
+  '5. Return ONLY valid JSON — no markdown fences, no explanation text,',
+  '   no conversational filler before or after the JSON object.'
+].join('\n');
 
-Nigerian name examples — surnames: OGUNLADE, KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, SHONPE, GBELEKALE, OLIYIDE, KOLANOLE, ADEGUNLE, ADEOYE, LAWAL, AYOMIDE, OBASA, OLATUNDE, ADENIYI, OLOOETU
-Firstnames: GABRIEL, RASAQ, GODWIN, ENOCH, ABIGEAL, KOREDE, MICHEAL, ADEMIDE, SUCCESS, EZEKIEL, AWAL, EMMANUEL, BIGGOLD, QUARDRI, MUEEZ, ZAINAB, SALAM, WAJUD
+const OCR_ADAPTIVE_STRUCTURE = [
+  'ADAPTIVE STRUCTURE READING:',
+  '- Do not assume a fixed column position or field order.',
+  '- Read the actual headers/labels present on THIS specific page first.',
+  '- Map what you find to the requested fields based on the header text',
+  '  AND the pattern of the data (small numbers near dates = payment amounts;',
+  '  large round numbers = fee totals).',
+  '- If related numeric fields do not reconcile logically (e.g. stated total',
+  '  does not equal balance_bf + termFees), re-examine your column mapping.'
+].join('\n');
 
-Rules:
-1. Every row = one student — read ALL rows, do not skip any
-2. Ignore serial numbers, headers (NAMES, S/N), fee columns, dates, totals
-3. Unclear handwriting — make your BEST guess at the Nigerian name
-4. Output ONLY the JSON below — no explanation, no markdown, no extra text
+const NIGERIAN_NAME_REFERENCE = [
+  'NIGERIAN NAMES — use these for recognition, not for guessing:',
+  'Surnames: OGUNLADE, KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE,',
+  '  OLAWALE, SHONPE, GBELEKALE, OLIYIDE, KOLANOLE, ADEGUNLE, ADEOYE, LAWAL,',
+  '  AYOMIDE, OBASA, OLATUNDE, ADENIYI, OGUNSOLA, ILELABOYE, OLOOETU',
+  'Firstnames: GABRIEL, RASAQ, GODWIN, ENOCH, ABIGEAL, KOREDE, MICHEAL,',
+  '  ADEMIDE, SUCCESS, EZEKIEL, AWAL, EMMANUEL, BIGGOLD, QUARDRI, MUEEZ,',
+  '  ZAINAB, SALAM, WAJUD, SALAIM, AISHA, ABDULLAHI, KHALEED, EMEKA, CHIOMA'
+].join('\n');
 
-{"names":["OGUNLADE GABRIEL","KASALI RASAQ","ALAWODE SUCCESS"],"detected_class":"JSS 2A"}`;
+const OCR_SCHEMAS = {
+
+  // ── 1. Student class register (names extraction) ───────────────────
+  student_roster: {
+    intro: 'You are reading a Nigerian school attendance/class register photo.',
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- Every row = one student — read ALL rows, do not skip any.',
+      '- Combine as "SURNAME FIRSTNAME" (all caps).',
+      '- Ignore serial numbers, headers (NAMES, S/N), fee columns, dates, totals.',
+      '- Look for a class/form name anywhere on the page (header, title, corner)',
+      '  and return as detected_class (all caps, e.g. "JSS 2A"). Return null if',
+      '  not visible — do NOT guess.',
+      '- NAME EXCEPTION: make your best effort to read handwritten names even if',
+      '  unclear — a garbled name is better than omitting the student entirely.'
+    ],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: { detected_class: null, names: ['SURNAME FIRSTNAME'] }
+  },
+
+  // ── 2. Fee payment ledger (the 14-column handwritten register) ─────
+  fee_ledger: {
+    intro: 'You are reading a photograph of a Nigerian school fees ledger (handwritten register book). Extract ALL student payment records visible.',
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'COLUMN STRUCTURE (typical, may vary — adapt to what is actually on this page):',
+      '  S/N | NAMES | BALANCE FROM LAST TERM | CURRENT TERMS FEES | TOTAL |',
+      '  1ST PAYMENT | BALANCE | DATE | 2ND PAYMENT | BALANCE | DATE |',
+      '  3RD PAYMENT | BALANCE | DATE',
+      'PAYMENT STATUS — scan the ENTIRE row before deciding:',
+      '  - "FULLY PAID" / "FULL PAID" / "FULLY P" / "F.P." / "FP" / ticks (✓)',
+      '    or a zero remaining balance anywhere on the row → "FULLY PAID"',
+      '  - Partial amount less than total, or remaining balance > 0 → "Partial"',
+      '  - No evidence of payment on the entire row → "No Payment"',
+      '  - Never default silently to "No Payment" — any mark or amount on the',
+      '    row must be investigated before using "No Payment".',
+      'NUMERIC RULES:',
+      '  - Naira amounts as integers: 28,000 and 28.000 and ₦28000 all = 28000',
+      '  - Dates in D/M/YY format (e.g. 12/5/26 = 12 May 2026)',
+      '  - Crossed-out number = correction; use the newer number beside it',
+      '  - Blank cell = null',
+      '  - Ignore TOTAL rows at the bottom of the page',
+      '  - "BALANCE 3,000" appearing before CURRENT TERMS FEES = bal_bf'
+    ],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: {
+      class: '', term: '', year: '',
+      students: [{
+        sn: 1, surname: '', firstname: '',
+        bal_bf: null, term_fees: 0, total: 0,
+        pmt1: null, bal1: null, date1: null,
+        pmt2: null, bal2: null, date2: null,
+        pmt3: null, bal3: null, date3: null,
+        status: 'FULLY PAID|Partial|No Payment'
+      }]
+    }
+  },
+
+  // ── 3a. Score sheet — read all 3 terms ────────────────────────────
+  score_sheet_all: {
+    intro: (p) => `You are reading a Nigerian school CA/exam score sheet (broadsheet) for subject: ${p && p.subject ? p.subject : 'unknown subject'}.`,
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- The sheet has THREE term blocks side by side: "1ST TERM", "2ND TERM", "3RD TERM".',
+      '- Within each block: 1st CA | 2nd CA | 3rd CA (each /10) | Exam (/70).',
+      '- Read EVERY student row and ALL THREE terms.',
+      '- If the sheet only shows one or two terms, fill the missing terms with zeros.',
+      '- Names: SURNAME FIRSTNAME, all caps.',
+      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.'
+    ],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: [{
+      name: 'SURNAME FIRSTNAME',
+      t1: { ca1: 0, ca2: 0, ca3: 0, exam: 0 },
+      t2: { ca1: 0, ca2: 0, ca3: 0, exam: 0 },
+      t3: { ca1: 0, ca2: 0, ca3: 0, exam: 0 }
+    }]
+  },
+
+  // ── 3b. Score sheet — read one specific term only ──────────────────
+  score_sheet_single: {
+    intro: (p) => {
+      const labels = { '1': '1ST TERM', '2': '2ND TERM', '3': '3RD TERM' };
+      const label = labels[p && p.termNum] || '1ST TERM';
+      return `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}. Read ONLY the ${label} columns.`;
+    },
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- The sheet may show multiple terms — read ONLY the columns under the',
+      '  requested term block; ignore all other terms\' columns.',
+      '- Within that term: 1st CA | 2nd CA | 3rd CA (each /10) | Exam (/70).',
+      '- Blank or illegible score cell = 0.',
+      '- Names: SURNAME FIRSTNAME, all caps.',
+      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.'
+    ],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: [{ name: 'SURNAME FIRSTNAME', ca1: 0, ca2: 0, ca3: 0, exam: 0 }]
+  },
+
+  // ── 4. Exam script (individual student answer sheet) ───────────────
+  exam_script: {
+    intro: 'You are reading a single Nigerian student\'s exam script or answer sheet.',
+    usesAdaptiveStructure: false,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- Read the student name (usually at the top of the page).',
+      '- Read the total marked score — the final marked total, not intermediate sums.',
+      '- If multiple scores appear, return the one circled or marked as final.'
+    ],
+    outputShape: { name: '', score: 0 }
+  },
+
+  // ── 5. Student admission form / ID / register entry ────────────────
+  // Used by: scanStudentForm, scanStudentFormEdit
+  student_info: {
+    intro: 'You are reading a photograph that contains Nigerian school student information. The document format can be ANYTHING — printed admission form, handwritten notebook page, register table, student ID card, WhatsApp screenshot, or typed list.',
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'DOMAIN RULES (find these fields ANYWHERE in the image regardless of format):',
+      '- name: student full name. Look under "Name:", "Student:", "Pupil:", or column',
+      '  "Names". Can be SURNAME FIRSTNAME or FIRSTNAME SURNAME.',
+      '- parent_phone: 11-digit Nigerian number (starts 07/08/09) or +234 prefix.',
+      '  Look near "Phone:", "WhatsApp:", "Tel:", "Parent:", or column "Phone No".',
+      '- class: class/grade. Values: Basic 1–6, Primary 1–6, JSS 1–3, SSS 1–3,',
+      '  Nursery 1–2, KG. Look near "Class:", "Form:", "Grade:", or column "Class".',
+      '- fee: Naira fee amount. Near "Fee:", ₦ symbol, or column "Fee". Integer only.',
+      '- dob: date of birth ONLY if clearly visible. Return exactly as written.',
+      '- FIELD EXCEPTION: output "UNCLEAR" (not null) for fields you cannot read —',
+      '  this triggers the per-field retry UI for the school staff.'
+    ],
+    outputShape: { name: '', parent_phone: '', class: '', fee: null, dob: '' }
+  },
+
+  // ── 6–10. New document types — schemas ready, UI not built yet ─────
+
+  subjects: {
+    intro: 'You are reading a Nigerian school curriculum sheet, timetable, or subject list.',
+    usesAdaptiveStructure: false,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- Normalize subject names (e.g. "MATHS" → "Mathematics", "ENG LANG" → "English Language").',
+      '- Do not duplicate a subject that appears more than once.',
+      '- Ignore class names, teacher names, times, room numbers, and any other metadata.'
+    ],
+    outputShape: { subjects: [''] }
+  },
+
+  staff: {
+    intro: 'You are reading a Nigerian school staff or teacher list.',
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- Role is one of: Class Teacher, Subject Teacher, Bursar, Principal.',
+      '- Infer the closest role from context (e.g. "Form Tutor" → "Class Teacher").',
+      '- assignedClass: the class this teacher is responsible for, or null.'
+    ],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: { staff: [{ name: '', role: '', assignedClass: null }] }
+  },
+
+  alumni: {
+    intro: 'You are reading a Nigerian school alumni or graduates list.',
+    usesAdaptiveStructure: true,
+    domainRules: [],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: { alumni: [{ name: '', year: null, job: null, phone: null }] }
+  },
+
+  expenses: {
+    intro: 'You are reading a Nigerian school expense record, receipt, or expense ledger.',
+    usesAdaptiveStructure: true,
+    domainRules: [
+      'DOMAIN RULES:',
+      '- If a total line is visible, check that extracted amounts roughly sum to it.',
+      '  Re-read digits if they do not reconcile.',
+      '- Categories (pick the closest): Staff Salaries, Utilities, Building Maintenance,',
+      '  Teaching Materials, Government/Ministry Fees, Cleaning & Security, Transport,',
+      '  Examination Fees, Other.'
+    ],
+    outputShape: { expenses: [{ description: '', amount: 0, date: null, category: 'Other' }] }
+  },
+
+  sports_roster: {
+    intro: 'You are reading a Nigerian school sports team roster or fixture list.',
+    usesAdaptiveStructure: true,
+    domainRules: [],
+    referenceData: NIGERIAN_NAME_REFERENCE,
+    outputShape: { players: [{ name: '', num: null, pos: null }] }
+  }
+};
+
+// ── Engine: builds a complete prompt from a schema entry ─────────────────
+function buildOcrPrompt(schemaKey, params) {
+  const schema = OCR_SCHEMAS[schemaKey];
+  if (!schema) throw new Error('[OCR] Unknown schema: ' + schemaKey);
+  const intro = typeof schema.intro === 'function' ? schema.intro(params) : schema.intro;
+  const parts = [
+    intro, '',
+    OCR_CORE_DISCIPLINE,
+    schema.usesAdaptiveStructure ? '\n' + OCR_ADAPTIVE_STRUCTURE : '',
+    schema.domainRules && schema.domainRules.length ? '\n' + schema.domainRules.join('\n') : '',
+    schema.referenceData ? '\n' + schema.referenceData : '',
+    '',
+    'Return JSON in exactly this shape (no markdown, no extra text):',
+    JSON.stringify(schema.outputShape, null, 2)
+  ];
+  return parts.filter(Boolean).join('\n');
+}
+
+const GROQ_OCR_PROMPT = buildOcrPrompt('student_roster');
 
 // Set by groqVisionOCR/hfVisionOCR when the model spots a class/form header on the page.
 // Reset to '' at the start of each new multi-page scan (see processImagesSequentially).
@@ -290,6 +534,7 @@ const HF_OCR_MODEL = 'DEPRECATED'; // HF fallback removed — Groq only
 const HF_KEY_STORAGE = 'hf_api_key';
 function getHFKey() { return window.HF_API_KEY || localStorage.getItem(HF_KEY_STORAGE) || ''; }
 
+// Keys sync from Firestore admin_settings/main — survives browsing-data clears
 async function _fetchGroqKeyFromFirestore() {
   // Reads directly from Firestore now — no external proxy. public_ocr_keys/main
   // holds ONLY the OCR keys (never anything sensitive), mirrored there by the
@@ -339,9 +584,8 @@ async function groqVisionOCR(base64, mime, _retry) {
           ]
         }],
         temperature: 0.2,
-        max_tokens:  600,
-        reasoning_effort: "none",
-        response_format: { type: "json_object" }
+        max_tokens: 4096,
+        reasoning_format: 'hidden'
       })
     });
     clearTimeout(fetchTimer);
@@ -923,23 +1167,47 @@ function defaultOpps() {
 }
 
 // ── RBAC helpers ───────────────────────────────────────────────────────
+// ── Role-based navigation whitelist ──────────────────────────────────────
+// null = Principal (sees everything). All other roles use explicit whitelists.
+// Anything NOT in the set is hidden from the nav AND gated in go().
+const ROLE_TABS = {
+  'Principal':       null,
+  'Class Teacher':   new Set(['students','sports','arts','music','health','comms','security','support']),
+  'Subject Teacher': new Set(['students','sports','arts','music','health','comms','security','support','scorecard']),
+  'Bursar':          new Set(['revenue','students','expenses','finance','comms','analytics','support']),
+};
+const ROLE_DEFAULT_TAB = {
+  'Principal': 'revenue', 'Bursar': 'revenue',
+  'Class Teacher': 'students', 'Subject Teacher': 'scorecard'
+};
+
+// Normalise legacy role strings → canonical ROLE_TABS keys
+const ROLE_NORMALISE = {
+  'teacher': 'Class Teacher', 'class teacher': 'Class Teacher',
+  'subject teacher': 'Subject Teacher', 'arts teacher': 'Subject Teacher',
+  'music teacher': 'Subject Teacher', 'sports coach': 'Subject Teacher',
+  'bursar': 'Bursar', 'accountant': 'Bursar',
+  'head teacher': 'Principal', 'vice principal': 'Principal',
+  'admin': 'Principal', 'principal': 'Principal',
+};
+function _normRole(r) { return ROLE_NORMALISE[(r||'').toLowerCase()] || r || 'Class Teacher'; }
+function _allowedTabs() { return ROLE_TABS[_normRole(userRole)] || null; }
+function _canGo(tab)    { const a = _allowedTabs(); return !a || a.has(tab); }
+
 function canSeeFees() { return ['Principal', 'Bursar'].includes(userRole); }
 function getAssignedClass() { return currentStaff ? currentStaff.assignedClass : null; }
 
 function applyRoleRestrictions() {
-  const links = document.querySelectorAll('.nlink');
-  const isClassTeacher = userRole === 'Class Teacher';
-  const isSubjectTeacher = userRole === 'Subject Teacher';
-  const isBursar = userRole === 'Bursar';
-  links.forEach(l => {
-    l.style.display = '';
-    const tab = l.dataset.t;
-    if (isClassTeacher || isSubjectTeacher) {
-      if (['revenue', 'staff', 'expenses', 'finance', 'aitools'].includes(tab)) l.style.display = 'none';
-    }
-    if (isBursar) {
-      if (['sports', 'arts', 'music', 'health', 'opps'].includes(tab)) l.style.display = 'none';
-    }
+  const allowed = _allowedTabs();
+  document.querySelectorAll('.nlink').forEach(btn => {
+    const tab = btn.dataset.t;
+    btn.style.display = (!allowed || !tab || allowed.has(tab)) ? '' : 'none';
+  });
+  // Principal-only UI elements
+  const principalOnly = ['btn-add-staff','btn-school-settings','sec-settings'];
+  principalOnly.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = (userRole === 'Principal') ? '' : 'none';
   });
 }
 
@@ -964,34 +1232,11 @@ function slSetTab(tab) {
 }
 
 function slForgotPassword() {
-  const phone = '2348145073941'; // AariNAT/Bayo — only he can reset via Portal, not agents
+  const agent = SD.config?.agent;
+  const phone = (agent?.phone || '2348145073941').replace(/\D/g, '');
   const school = SD.config?.schoolName || 'my school';
-  const msg = 'Hello, I am the Principal of ' + school + '. I cannot log into EduBloom — please reset my school password. School ID: ' + (schoolId || 'unknown');
+  const msg = 'Hello, I am the Principal of ' + school + '. I cannot log into EduBloom — please send my school password. School ID: ' + (schoolId || 'unknown');
   window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
-}
-
-// Staff (non-Principal) forgot-password: unlike the Principal, staff can be
-// reset from inside the app by their own Principal (Staff tab → 🔑 Reset).
-// This just points them there, or to AariNAT directly if the Principal is
-// unreachable — NOT the agent, since agents have no reset capability at all.
-function slStaffForgotPassword() {
-  const email = ($('sl-email')?.value || '').trim();
-  const phone = '2348145073941'; // AariNAT/Bayo — only he can help, not agents
-  const school = SD.config?.schoolName || 'my school';
-  const errEl = $('sl-s-err');
-  if (errEl) {
-    errEl.style.color = 'var(--sub)';
-    errEl.textContent = 'Ask your Principal to reset your password from the Staff tab. If you can\'t reach them, tap again to message AariNAT directly.';
-    errEl.style.display = 'block';
-  }
-  // Second tap (or if there's no way to reach the Principal) — message AariNAT directly
-  if (errEl && errEl.dataset.tapped === '1') {
-    const msg = 'Hello, I am a staff member (' + (email||'no email entered') + ') at ' + school + '. I cannot log into EduBloom and cannot reach my Principal — please help reset my password. School ID: ' + (schoolId || 'unknown');
-    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
-    if (errEl) errEl.dataset.tapped = '0';
-    return;
-  }
-  if (errEl) errEl.dataset.tapped = '1';
 }
 
 async function doPrincipalLogin() {
@@ -1014,6 +1259,13 @@ async function doPrincipalLogin() {
   currentStaff = principal; userRole = 'Principal';
   localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, principal, { role: 'Principal', schoolId })));
   _saveAuth(schoolId, principal.email || '');
+  // Silently attempt Firebase Auth so subcollection security rules work for Principal.
+  // Fails gracefully if Principal doesn't have a Firebase Auth account yet —
+  // the flat parent document (public read) still loads the school data.
+  if (principal.email) {
+    const pPlain = $('p-pwd')?.value || '';
+    firebase.auth().signInWithEmailAndPassword(principal.email, pPlain).catch(() => {});
+  }
   const div = $('staff-login'); if (div) div.style.display = 'none';
   startApp();
 }
@@ -1024,6 +1276,25 @@ async function doStaffLogin() {
   const errEl = $('sl-s-err');
   if (errEl) errEl.style.display = 'none';
   if (!email || !pwd) { if (errEl) { errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; } return; }
+
+  // Try real Firebase Auth first (own project, matches the pattern used for admin login).
+  try {
+    const v2Staff = await staffLoginV2(schoolId, email, pwd);
+    const staffRecord = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email) || {
+      name: v2Staff.name, email, role: v2Staff.role, assignedClass: v2Staff.assignedClass, assignedSubjects: v2Staff.assignedSubjects
+    };
+    staffRecord._v2Uid = v2Staff.uid;
+    currentStaff = staffRecord; userRole = _normRole(v2Staff.role || staffRecord.role || 'Class Teacher');
+    localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, currentStaff, { schoolId })));
+    _saveAuth(schoolId, email);
+    const div = $('staff-login'); if (div) div.style.display = 'none';
+    startApp();
+    return;
+  } catch (authErr) {
+    // No real account yet, or wrong password for it — fall through to the legacy check below.
+  }
+
+  // Legacy fallback: hashed password stored on the staff record.
   let staff = null;
   for (const s of (SD.staff || [])) {
     if ((s.email || '').trim().toLowerCase() === email && await _verifyPassword(pwd, s.password || '')) {
@@ -1032,19 +1303,244 @@ async function doStaffLogin() {
     }
   }
   if (!staff) {
-    if (errEl) { errEl.textContent = 'Not recognised. Ask your Principal to check your staff record.'; errEl.style.display = 'block'; }
+    const emailFound = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email);
+    const msg = emailFound
+      ? '❌ Wrong password. Ask your Principal to reset it, or tap Forgot Password below.'
+      : '❌ Email not found in staff list. Ask your Principal to check your staff record.';
+    if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
     return;
   }
-  currentStaff = staff; userRole = staff.role || 'Class Teacher';
+  currentStaff = staff; userRole = _normRole(staff.role || 'Class Teacher');
   localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, staff, { schoolId })));
   _saveAuth(schoolId, email);
   const div = $('staff-login'); if (div) div.style.display = 'none';
   startApp();
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// DATA MODEL — subcollection structure (the ONLY data store for this app)
+//
+//   schools/{id}/students/{studentId}                      → profile (name, class, phone)
+//   schools/{id}/students/{studentId}/private/fees         → totalFee, paid, paymentHistory
+//   schools/{id}/students/{studentId}/scores/{term_sub}    → ca1/ca2/ca3/exam per subject per term
+//   schools/{id}/staff_directory/{uid}                     → Firebase Auth UID, role, assignedClass, assignedSubjects
+//
+// Score doc IDs: "Term1_Mathematics" style — spaces stripped, human-readable.
+// Firestore security rules are drafted in the README (Phase 3) — publish
+// after real-device testing is confirmed passing.
+// ═══════════════════════════════════════════════════════════════════════
+
+function _scoreDocId(term, subject) {
+  return String(term).replace(/\s+/g, '') + '_' + String(subject).replace(/\s+/g, '');
+}
+function _studentsColV2(schoolId) {
+  return db.collection('schools').doc(schoolId).collection('students');
+}
+function _staffDirColV2(schoolId) {
+  return db.collection('schools').doc(schoolId).collection('staff_directory');
+}
+
+// ── Students (profile only — no fees, no scores) ──────────────────────────
+async function loadAllStudentsV2(schoolId, classFilter) {
+  let query = _studentsColV2(schoolId);
+  if (classFilter) query = query.where('class', '==', classFilter);
+  const snap = await query.get();
+  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+async function saveStudentProfileV2(schoolId, student) {
+  const profile = {
+    name: student.name || '', phone: student.phone || '', class: student.class || '',
+    promotion: student.promotion || null,
+    updatedAt: new Date().toISOString()
+  };
+  const docId = student._v2Id || _studentsColV2(schoolId).doc().id;
+  await _studentsColV2(schoolId).doc(docId).set(profile, { merge: true });
+  return docId;
+}
+async function deleteStudentV2(schoolId, studentId) {
+  const studentRef = _studentsColV2(schoolId).doc(studentId);
+  // Delete score sub-documents first
+  const scoresSnap = await studentRef.collection('scores').get();
+  const batch = db.batch();
+  scoresSnap.docs.forEach(doc => batch.delete(doc.ref));
+  batch.delete(studentRef.collection('private').doc('fees'));
+  batch.delete(studentRef);
+  await batch.commit();
+}
+
+// ── Fees (separately gated sub-document — Principal/Bursar only once rules are live) ──
+async function loadStudentFeesV2(schoolId, studentId) {
+  const doc = await _studentsColV2(schoolId).doc(studentId).collection('private').doc('fees').get();
+  return doc.exists ? doc.data() : { totalFee: 0, paid: 0, paymentHistory: [] };
+}
+async function saveStudentFeesV2(schoolId, studentId, feeData) {
+  await _studentsColV2(schoolId).doc(studentId).collection('private').doc('fees')
+    .set({ ...feeData, updatedAt: new Date().toISOString() }, { merge: true });
+}
+
+// ── Scores (one document per student, per term, per subject — this split is
+// what makes per-subject-teacher rules possible; see Phase 3 rule design) ──
+async function saveScoreV2(schoolId, studentId, term, subject, scoreData) {
+  await _studentsColV2(schoolId).doc(studentId).collection('scores').doc(_scoreDocId(term, subject))
+    .set({ term, subject, ca1: scoreData.ca1||0, ca2: scoreData.ca2||0, ca3: scoreData.ca3||0, exam: scoreData.exam||0 }, { merge: true });
+}
+async function loadStudentScoresV2(schoolId, studentId) {
+  const snap = await _studentsColV2(schoolId).doc(studentId).collection('scores').get();
+  const scores = {}; // { term: { subject: {ca1,ca2,ca3,exam} } }
+  snap.docs.forEach(doc => {
+    const d = doc.data();
+    if (!scores[d.term]) scores[d.term] = {};
+    scores[d.term][d.subject] = { ca1: d.ca1||0, ca2: d.ca2||0, ca3: d.ca3||0, exam: d.exam||0 };
+  });
+  return scores;
+}
+
+// ── Staff (real Firebase Auth accounts, keyed by their real uid) ──────────
+async function createStaffAccountV2(schoolId, email, password, staffData) {
+  const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+  await _staffDirColV2(schoolId).doc(cred.user.uid).set({
+    name: staffData.name || '', email, role: staffData.role,
+    assignedClass: staffData.assignedClass || null,       // Class Teacher only
+    assignedSubjects: staffData.assignedSubjects || [],    // Subject Teacher only
+    createdAt: new Date().toISOString()
+  });
+  return cred.user.uid;
+}
+async function staffLoginV2(schoolId, email, password) {
+  const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+  const uid  = cred.user.uid;
+  const doc  = await _staffDirColV2(schoolId).doc(uid).get();
+
+  if (!doc.exists) {
+    // staff_directory write may have failed during addStaff — auto-heal from SD.staff
+    const rec = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email.toLowerCase());
+    if (rec) {
+      const entry = {
+        email, name: rec.name, role: rec.role,
+        assignedClass: rec.assignedClass || null,
+        assignedSubjects: rec.assignedSubjects || [],
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      try { await _staffDirColV2(schoolId).doc(uid).set(entry); } catch(e) { /* non-fatal */ }
+      return { uid, ...entry };
+    }
+    await firebase.auth().signOut();
+    throw new Error('Firebase Auth OK but no staff record at this school. Ask your Principal to re-add your account.');
+  }
+  return { uid, ...doc.data() };
+}
+async function loadStaffDirectoryV2(schoolId) {
+  const snap = await _staffDirColV2(schoolId).get();
+  return snap.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+}
+
+// ── Read path: subcollections → in-memory shape ───────────────────────────
+// Loads all students, fees, and scores from the subcollection structure into
+// the SD in-memory shape that all render functions already understand.
+// Called on every login. Empty subcollections = new school with no students yet.
+async function hydrateFromV2(schoolId) {
+  if (!schoolId || SD.config?._demo) return;
+  try {
+    // Class Teachers must filter by their class — this also makes the Firestore
+    // security rule satisfiable (rule requires resource.data.class == myClass,
+    // which requires a matching where() clause in the query).
+    const classFilter = (userRole === 'Class Teacher' && currentStaff?.assignedClass)
+      ? currentStaff.assignedClass : null;
+
+    const v2Students = await loadAllStudentsV2(schoolId, classFilter);
+
+    const students = [];
+    const scores   = {};
+    for (const s of v2Students) {
+      const fees          = await loadStudentFeesV2(schoolId, s.id);
+      const studentScores = await loadStudentScoresV2(schoolId, s.id);
+      const student = {
+        _v2Id: s.id, name: s.name, phone: s.phone || '', class: s.class || '',
+        totalFee: fees.totalFee || 0, paid: fees.paid || 0,
+        paymentHistory: fees.paymentHistory || []
+      };
+      students.push(student);
+      const sid = s.id;
+      Object.keys(studentScores).forEach(term => {
+        if (!scores[term]) scores[term] = {};
+        scores[term][sid] = studentScores[term];
+      });
+    }
+
+    // Only replace existing data if:
+    // a) We got students back, OR
+    // b) A class filter was applied (0 students in that class is a legitimate result)
+    if (students.length > 0 || classFilter !== null) {
+      SD.students = students;
+      SD.scores   = scores;
+      saveLocal('students', SD.students);
+      saveLocal('scores', SD.scores);
+    }
+    // If 0 results with no filter (auth issue or permission denied returned []),
+    // keep whatever loadSchoolIntoSD already loaded from the flat parent document.
+    console.log(`✅ Hydrated ${students.length} students from V2 (filter: ${classFilter || 'none'})`);
+  } catch(e) {
+    console.warn('hydrateFromV2 failed — keeping flat data:', e.message);
+  }
+}
+
+// ── Staff account claim — staff member sets a password once, which creates
+// their real Firebase Auth account and links it via staff_directory.
+// Their legacy password login continues to work as a fallback.
+async function sendStaffPasswordReset(email) {
+  if (!email) { toast('Enter your email above first.'); return; }
+  try {
+    await firebase.auth().sendPasswordResetEmail(email.trim().toLowerCase());
+    toast('✅ Password reset email sent to ' + email + '. Check your inbox.');
+  } catch(e) {
+    toast('❌ ' + (e.message || 'Could not send reset email. Check the address.'));
+  }
+}
+async function claimStaffAccountV2(schoolId, email, newPassword) {
+  const normEmail = (email || '').trim().toLowerCase();
+  const staffRecord = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === normEmail);
+  if (!staffRecord) throw new Error('No staff record found with that email at this school.');
+  if (newPassword.length < 6) throw new Error('Password needs at least 6 characters (Firebase Auth requirement).');
+  const uid = await createStaffAccountV2(schoolId, normEmail, newPassword, {
+    name: staffRecord.name, role: staffRecord.role,
+    assignedClass: staffRecord.assignedClass || null,
+    assignedSubjects: staffRecord.assignedSubjects || []
+  });
+  staffRecord._v2Uid = uid;
+  await SQ.push('staff', SD.staff);
+  return uid;
+}
+
+function claimAccountUI() {
+  const errEl = $('claim-err'); if (errEl) errEl.style.display = 'none';
+  if ($('claim-email')) $('claim-email').value = '';
+  if ($('claim-pwd')) $('claim-pwd').value = '';
+  openM('claim-account-modal');
+}
+async function submitClaimAccount() {
+  const email = ($('claim-email')?.value || '').trim();
+  const pwd = $('claim-pwd')?.value || '';
+  const errEl = $('claim-err');
+  const btn = $('claim-submit-btn');
+  if (errEl) errEl.style.display = 'none';
+  if (!email || !pwd) {
+    if (errEl) { errEl.textContent = 'Fill in both fields.'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Setting up...'; }
+  try {
+    await claimStaffAccountV2(schoolId, email, pwd);
+    closeM('claim-account-modal');
+    alert('✅ Account claimed. You can now log in with this email + password directly.');
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message || 'Failed — try again.'; errEl.style.display = 'block'; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '🔑 Claim Account'; }
+}
+
 function loadSchoolIntoSD(sid, school) {
   SD.config = school.config || {};
-  SD.students = (school.students || []).map(s => s.class ? { ...s, class: normaliseClassName(s.class) } : s);
+  SD.students = school.students || [];
   SD.staff = school.staff || [];
   SD.expenses = school.expenses || [];
   SD.attendance = school.attendance || {};
@@ -1188,6 +1684,7 @@ async function doLogin() {
         scores: loadLocal('scores', {}), affective: loadLocal('affective', {}),
         opportunities: loadLocal('opportunities', defaultOpps())
       });
+      await hydrateFromV2(sid).catch(() => {});
       const cachedSession = localStorage.getItem(`p_${sid}_staffSession`);
       if (cachedSession) {
         try {
@@ -1241,9 +1738,10 @@ async function doLogin() {
     schoolId = sid;
     _saveAuth(sid, '');
     loadSchoolIntoSD(sid, school);
+    await hydrateFromV2(sid).catch(() => {});
     const fsSession = localStorage.getItem(`p_${sid}_staffSession`);
     if (fsSession) {
-      try { const sess = JSON.parse(fsSession); currentStaff = sess; userRole = sess.role || 'Principal'; startApp(); btn.textContent = '▶ Enter Portal'; btn.disabled = false; return; } catch (e) {}
+      try { const sess = JSON.parse(fsSession); currentStaff = sess; userRole = _normRole(sess.role || 'Principal'); startApp(); btn.textContent = '▶ Enter Portal'; btn.disabled = false; return; } catch (e) {}
     }
     if (SD.staff && SD.staff.length > 0) {
       btn.textContent = '▶ Enter Portal'; btn.disabled = false;
@@ -1291,6 +1789,9 @@ function startApp() {
   applyRoleRestrictions();
   updateLogoBadges(SD.config.logo);
   if (typeof renderBirthdays === 'function') renderBirthdays();
+  // Visible build version — confirms which code is running without needing DevTools
+  const vEl = document.getElementById('build-version');
+  if (vEl) vEl.textContent = 'v20260806-b';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -1319,10 +1820,16 @@ function goDashboard() {
   const backdrop = document.getElementById('navBackdrop');
   if (nav) nav.classList.remove('open');
   if (backdrop) backdrop.classList.remove('on');
-  go('revenue');
+  go(ROLE_DEFAULT_TAB[userRole] || 'revenue');
 }
 
 function go(tab) {
+  // Role gate — silently redirect to default tab if section is not allowed
+  if (userRole && !_canGo(tab)) {
+    const def = ROLE_DEFAULT_TAB[userRole] || 'students';
+    if (tab !== def) { toast(`⛔ Your role (${userRole}) cannot access this section.`); go(def); }
+    return;
+  }
   document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
   document.querySelectorAll('.nlink').forEach(b => b.classList.remove('on'));
   const target = $(`sec-${tab}`); if (target) target.classList.add('on');
@@ -1500,6 +2007,21 @@ async function handleBulkPayment(e) {
   const r = new FileReader();
   r.onload = async ev => {
     const lines = ev.target.result.split(/\r?\n/).filter(x => x.trim());
+    if (!lines.length) { if ($('bulk-feedback')) $('bulk-feedback').textContent = '❌ Empty file.'; return; }
+
+    // Detect bank statement format — col headers like Date, Narration, Reference, Balance
+    const headerRow = lines[0].toLowerCase();
+    const bankHeaders = ['narration', 'reference', 'transaction', 'debit', 'credit', 'value date'];
+    if (bankHeaders.some(h => headerRow.includes(h))) {
+      if ($('bulk-feedback')) $('bulk-feedback').innerHTML =
+        `❌ This looks like a bank statement export, not a payments CSV.<br>
+         The importer needs a simple 2-column file:<br>
+         <strong>StudentName, Amount</strong><br>
+         e.g. <em>ELIZABETH ADESOHIA, 25000</em><br>
+         Export your bank app's CSV, then manually copy student name + amount into a new spreadsheet and save as CSV.`;
+      return;
+    }
+
     let matched = 0, skipped = 0, noMatch = 0;
     const nameScore = (a, b) => {
       const wa = a.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(Boolean);
@@ -1707,6 +2229,19 @@ function renderStudentList() {
     if (clsSel) { clsSel.value = assignedCls; clsSel.disabled = true; }
   }
 
+  // Role context banner — shows who is logged in and what they can see
+  const bannerEl = $('stu-role-banner');
+  if (bannerEl) {
+    if (userRole && userRole !== 'Principal') {
+      const name = currentStaff?.name || userRole;
+      const classInfo = assignedCls ? ` · ${assignedCls} only` : '';
+      bannerEl.style.display = 'flex';
+      bannerEl.innerHTML = `<span style="font-size:0.78rem;color:var(--sub);">👤 ${name} <strong>${userRole}</strong>${classInfo}</span>`;
+    } else {
+      bannerEl.style.display = 'none';
+    }
+  }
+
   if (q) list = list.filter(s => s.name.toLowerCase().includes(q) || (s.phone || '').includes(q));
   if (cls) list = list.filter(s => s.class === cls);
   if (pay === 'paid') list = list.filter(s => (s.totalFee || 0) <= (s.paid || 0));
@@ -1758,7 +2293,15 @@ async function addStudent() {
   const cls = $('ns-class').value.trim(), fee = parseFloat($('ns-fee').value) || SD.config.fee || 50000;
   const dob = $('ns-dob')?.value || '';
   if (!name || !phone) return alert('Name and phone required.');
-  SD.students.push({ name, phone, class: cls, totalFee: fee, paid: 0, scores: {}, swot: {}, dob });
+  const newStudent = { name, phone, class: cls, totalFee: fee, paid: 0, scores: {}, swot: {}, dob };
+  SD.students.push(newStudent);
+  if (schoolId && !SD.config?._demo) {
+    try {
+      const v2Id = await saveStudentProfileV2(schoolId, newStudent);
+      newStudent._v2Id = v2Id;
+      await saveStudentFeesV2(schoolId, v2Id, { totalFee: fee, paid: 0, paymentHistory: [] });
+    } catch (e) { console.warn('addStudent write failed:', e.message); }
+  }
   await SQ.push('students', SD.students); checkTierStatus();
   closeM('add-student-modal');
   $('ns-name').value=''; $('ns-phone').value=''; $('ns-class').value=''; $('ns-fee').value='';
@@ -1768,7 +2311,24 @@ async function addStudent() {
 
 async function deleteStudent(idx) {
   if (!confirm(`Delete ${SD.students[idx]?.name}?`)) return;
+  const v2Id = SD.students[idx]?._v2Id;
+  const sid  = SD.students[idx]?.id ?? idx;
   SD.students.splice(idx, 1);
+
+  // Clean up flat scores for this student across all terms
+  if (SD.scores) {
+    Object.keys(SD.scores).forEach(term => {
+      if (SD.scores[term]) delete SD.scores[term][sid];
+    });
+    saveLocal('scores', SD.scores);
+    SQ.push('scores', SD.scores);
+  }
+
+  // Delete subcollection documents (profile + private/fees + all score docs)
+  if (schoolId && v2Id && !SD.config?._demo) {
+    try { await deleteStudentV2(schoolId, v2Id); } catch (e) { console.warn('deleteStudent subcollection delete failed:', e.message); }
+  }
+
   await SQ.push('students', SD.students); checkTierStatus();
   closeM('student-modal'); renderStudentList(); renderBanner();
 }
@@ -1792,6 +2352,10 @@ function editStudent(idx) {
         <input type="file" id="edit-photo-input" accept="image/*" style="display:none;" onchange="handleEditPhoto(${idx},event)">
       </div>
 
+      <input type="file" accept="image/*" id="edit-scan-input" style="display:none;" onchange="scanStudentFormEdit(${idx},event)">
+      <button class="btn-brand" style="width:100%;margin-bottom:0.3rem;background:linear-gradient(135deg,#7c3aed,#2563eb);font-size:0.82rem;" onclick="$('edit-scan-input').click()">📷 Scan to Fill Missing Fields</button>
+      <div id="edit-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.4rem;text-align:center;"></div>
+
       <label>Full Name</label>
       <input id="edit-s-name" value="${esc(s.name)}">
 
@@ -1802,7 +2366,7 @@ function editStudent(idx) {
       <select id="edit-s-class" onchange="handleClassSelectChange(this)"></select>
 
       <label>Gender</label>
-      <select id="edit-s-gender" style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.6rem;">
+      <select id="edit-s-gender" style="width:100%;background:var(--input,#f1f5f9);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.6rem;">
         <option value="" ${!s.gender?'selected':''}>— Select —</option>
         <option value="Male"   ${s.gender==='Male'  ?'selected':''}>Male</option>
         <option value="Female" ${s.gender==='Female'?'selected':''}>Female</option>
@@ -1824,7 +2388,7 @@ function editStudent(idx) {
         <input id="edit-s-emergency" value="${esc(safety.emergencyPhone||'')}" placeholder="e.g. Uncle's or Aunt's number" style="margin-top:0.2rem;">
 
         <label style="font-size:0.76rem;margin-top:0.35rem;">Authorised Collectors</label>
-        <textarea id="edit-s-collectors" rows="2" placeholder="Names of people allowed to pick up this child, e.g. Mum Fatima, Uncle Tunde, Driver Emeka" style="width:100%;background:#0a1525;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.5rem;font-size:0.78rem;resize:none;margin-top:0.2rem;">${esc(safety.collectors||'')}</textarea>
+        <textarea id="edit-s-collectors" rows="2" placeholder="Names of people allowed to pick up this child, e.g. Mum Fatima, Uncle Tunde, Driver Emeka" style="width:100%;background:var(--input,#f1f5f9);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0.45rem 0.5rem;font-size:0.78rem;resize:none;margin-top:0.2rem;">${esc(safety.collectors||'')}</textarea>
         <div style="font-size:0.68rem;color:var(--sub);margin-top:2px;">Separate names with a comma. The Security Agent checks this list before releasing any child.</div>
 
         <label style="font-size:0.76rem;margin-top:0.35rem;">Medical / Special Notes</label>
@@ -1978,35 +2542,9 @@ let _ocrReviewData = [];
 // roster with a standard Nigerian curriculum list, so the dropdown is useful
 // even for a brand-new school with zero students so far.
 function getKnownClasses() {
-  const existing = [...new Set((SD.students || []).map(s => normaliseClassName(s.class || '').trim().toUpperCase()).filter(Boolean))];
+  const existing = [...new Set((SD.students || []).map(s => (s.class || '').trim().toUpperCase()).filter(Boolean))];
   const defaults = ['DAYCARE','PLAYGROUP','PRE-NURSERY','NURSERY 1','NURSERY 2','KG 1','KG 2','BASIC 1','BASIC 2','BASIC 3','BASIC 4','BASIC 5','BASIC 6','JSS 1','JSS 2','JSS 3','SS 1','SS 2','SS 3'];
   return [...new Set([...existing, ...defaults])].sort();
-}
-
-// Normalise non-standard class names to the Nigerian curriculum standard.
-// Nigerian primary school = BASIC 1-6 only. BASIC 7 does not exist —
-// it maps to JSS 1. BASIC 8 → JSS 2. BASIC 9 → JSS 3.
-function normaliseClassName(raw) {
-  if (!raw) return '';
-  const s = raw.trim().toUpperCase();
-  const overrides = {
-    'BASIC 7': 'JSS 1', 'BASIC7': 'JSS 1',
-    'BASIC 8': 'JSS 2', 'BASIC8': 'JSS 2',
-    'BASIC 9': 'JSS 3', 'BASIC9': 'JSS 3',
-    'PRIMARY 1': 'BASIC 1','PRIMARY 2': 'BASIC 2','PRIMARY 3': 'BASIC 3',
-    'PRIMARY 4': 'BASIC 4','PRIMARY 5': 'BASIC 5','PRIMARY 6': 'BASIC 6',
-    'PRIM 1': 'BASIC 1','PRIM 2': 'BASIC 2','PRIM 3': 'BASIC 3',
-    'PRIM 4': 'BASIC 4','PRIM 5': 'BASIC 5','PRIM 6': 'BASIC 6',
-    'KG': 'KG 1','KINDERGARTEN': 'KG 1','KINDERGARTEN 1': 'KG 1','KINDERGARTEN 2': 'KG 2',
-    'NURSERY': 'NURSERY 1','NUR 1': 'NURSERY 1','NUR 2': 'NURSERY 2',
-    'PRE-NURSERY 1': 'PRE-NURSERY','PRE NURSERY': 'PRE-NURSERY',
-    'DAYCARE': 'DAYCARE','DAY CARE': 'DAYCARE',
-    'JSS1': 'JSS 1','JSS2': 'JSS 2','JSS3': 'JSS 3',
-    'SS1': 'SS 1','SS2': 'SS 2','SS3': 'SS 3',
-    'SSS 1': 'SS 1','SSS 2': 'SS 2','SSS 3': 'SS 3',
-    'SENIOR 1': 'SS 1','SENIOR 2': 'SS 2','SENIOR 3': 'SS 3',
-  };
-  return overrides[s] || raw.trim();
 }
 
 // Fills a <select> with known classes + a "New class…" option, preserving `current`.
@@ -2222,6 +2760,7 @@ function renderTab(tab) {
   else if (tab === 'report') c.innerHTML = buildReport(s);
   else if (tab === 'swot') c.innerHTML = buildSWOT(s, activeIdx);
   else if (tab === 'safety') c.innerHTML = buildSafety(s, activeIdx);
+  else if (tab === 'promotion') c.innerHTML = buildPromotion(s, activeIdx);
 }
 
 // ── PROFILE TAB ───────────────────────────────────────────────────────
@@ -2421,6 +2960,16 @@ async function recordPayment(idx) {
   SD.students[idx].paid = (SD.students[idx].paid || 0) + amt;
   if (!SD.students[idx].paymentHistory) SD.students[idx].paymentHistory = [];
   SD.students[idx].paymentHistory.unshift({ amount: amt, method: $('pay-method')?.value || 'Cash', date: $('pay-date')?.value || new Date().toISOString().split('T')[0], by: userRole });
+  const v2Id = SD.students[idx]?._v2Id;
+  if (schoolId && v2Id && !SD.config?._demo) {
+    try {
+      await saveStudentFeesV2(schoolId, v2Id, {
+        totalFee: SD.students[idx].totalFee || 0,
+        paid: SD.students[idx].paid,
+        paymentHistory: SD.students[idx].paymentHistory
+      });
+    } catch (e) { console.warn('recordPayment write failed:', e.message); }
+  }
   await SQ.push('students', SD.students); checkTierStatus();
   if ($('pay-amt')) $('pay-amt').value = '';
   renderTab('fees'); renderBanner(); renderRevenue();
@@ -2564,7 +3113,64 @@ function buildReport(s) {
   return `<div class="card"><div class="ct">📋 Print Actions</div>
     <button class="btn-brand" style="width:100%;" onclick="printReportCard(activeIdx, '${term}')">🖨️ Open Printed Report Card</button>
     <p style="font-size:0.76rem;color:var(--sub);margin-top:0.5rem;">Generates a full report card for ${esc(term)} including scores, position, and behavioural ratings.</p>
+    <button class="btn-brand" style="width:100%;margin-top:0.6rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="printPromotionReportCard(activeIdx)">🎓 Open Annual Promotion Report</button>
+    <p style="font-size:0.76rem;color:var(--sub);margin-top:0.5rem;">Summarizes all 3 terms into one final card with cumulative average, position, and the promotion decision.</p>
     </div>`;
+}
+
+// ── PROMOTION TAB ──────────────────────────────────────────────────────
+// Decision belongs to the Class Teacher of this student's specific class —
+// the Principal can always see it, but doesn't enter it themselves.
+function _canDecidePromotion(s) {
+  if (userRole === 'Principal') return true; // sees everything, can override if needed
+  return userRole === 'Class Teacher' && getAssignedClass() === s.class;
+}
+function buildPromotion(s, idx) {
+  const promo = s.promotion || {};
+  const canDecide = _canDecidePromotion(s);
+  const readOnlyNote = canDecide ? '' :
+    `<div style="background:var(--s2);border-radius:8px;padding:0.6rem;font-size:0.76rem;color:var(--sub);margin-bottom:0.7rem;">
+      🔒 Only ${esc(s.class)}'s Class Teacher can set this decision. You can view it here.
+    </div>`;
+  return `<div class="card">
+    <div class="ct">🎓 End-of-Year Promotion Decision</div>
+    ${readOnlyNote}
+    <label style="font-size:0.8rem;font-weight:600;">Academic Year</label>
+    <input type="text" id="promo-year" value="${esc(promo.year || SD.config.session || '')}" placeholder="e.g. 2025/2026" ${canDecide?'':'disabled'}>
+    <label style="font-size:0.8rem;font-weight:600;margin-top:0.5rem;display:block;">Decision</label>
+    <select id="promo-decision" ${canDecide?'':'disabled'}>
+      <option value="" ${!promo.decision?'selected':''}>— Not yet decided —</option>
+      <option value="Promoted" ${promo.decision==='Promoted'?'selected':''}>Promoted</option>
+      <option value="Promoted on Trial" ${promo.decision==='Promoted on Trial'?'selected':''}>Promoted on Trial</option>
+      <option value="Repeat" ${promo.decision==='Repeat'?'selected':''}>Repeat Class</option>
+    </select>
+    <label style="font-size:0.8rem;font-weight:600;margin-top:0.5rem;display:block;">Next Class (if promoted)</label>
+    <input type="text" id="promo-nextclass" value="${esc(promo.nextClass || '')}" placeholder="e.g. JSS 2B" ${canDecide?'':'disabled'}>
+    <label style="font-size:0.8rem;font-weight:600;margin-top:0.5rem;display:block;">Class Teacher's Comment</label>
+    <textarea id="promo-comment" rows="3" placeholder="Brief note for the promotion report card" ${canDecide?'':'disabled'}>${esc(promo.comment || '')}</textarea>
+    ${promo.decidedBy ? `<p style="font-size:0.72rem;color:var(--sub);margin-top:0.4rem;">Last set by ${esc(promo.decidedBy)} on ${promo.decidedAt ? new Date(promo.decidedAt).toLocaleDateString() : '—'}</p>` : ''}
+    ${canDecide ? `<button class="btn-brand" style="width:100%;margin-top:0.6rem;" onclick="savePromotionDecision(${idx})">💾 Save Decision</button>` : ''}
+  </div>`;
+}
+async function savePromotionDecision(idx) {
+  const s = SD.students[idx]; if (!s) return;
+  if (!_canDecidePromotion(s)) return alert("Only this class's Class Teacher (or the Principal) can set this.");
+  const decision = $('promo-decision')?.value || '';
+  if (!decision) return alert('Select a decision first.');
+  s.promotion = {
+    year: $('promo-year')?.value.trim() || SD.config.session || '',
+    decision,
+    nextClass: $('promo-nextclass')?.value.trim() || '',
+    comment: $('promo-comment')?.value.trim() || '',
+    decidedBy: currentStaff?.name || userRole,
+    decidedAt: new Date().toISOString()
+  };
+  if (schoolId && s._v2Id && !SD.config?._demo) {
+    try { await saveStudentProfileV2(schoolId, s); } catch (e) { console.warn('promotion write failed:', e.message); }
+  }
+  await SQ.push('students', SD.students);
+  toast('✅ Promotion decision saved');
+  renderTab('promotion');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2730,9 +3336,22 @@ function updateAffective(idx, term, key, val) {
   renderTab('scores');
 }
 
-function saveScores(idx) {
+async function saveScores(idx) {
   saveLocal('scores', SD.scores);
   SQ.push('scores', SD.scores);
+  const v2Id = SD.students[idx]?._v2Id;
+  const sid = SD.students[idx]?.id || idx;
+  if (schoolId && v2Id && !SD.config?._demo) {
+    const writes = [];
+    Object.keys(SD.scores).forEach(term => {
+      const subjMap = SD.scores[term]?.[sid];
+      if (!subjMap) return;
+      Object.keys(subjMap).forEach(subject => {
+        writes.push(saveScoreV2(schoolId, v2Id, term, subject, subjMap[subject]));
+      });
+    });
+    try { await Promise.all(writes); } catch (e) { console.warn('saveScores write failed:', e.message); }
+  }
   toast('✅ Scores saved!');
 }
 
@@ -2888,6 +3507,24 @@ function scorecardSwitchClass(cls) { const el=$('scorecard-content'); if(!el)ret
 function scorecardSwitchView(view) { const el=$('scorecard-content'); if(!el)return; el.dataset.view=view; renderScorecard(); }
 
 // ── Print Report Card (single) ───────────────────────────────────────
+// ── Report card visual theme — "classic" (default, unchanged look) or "bold" ──
+function _reportCardThemeCSS() {
+  const theme = SD.config?.reportCardTheme || 'classic';
+  if (theme !== 'bold') return ''; // classic = no override, exactly the original look
+  return `
+    body{background:#fff;}
+    .hdr{background:#1e2a5e;color:#fbbf24;border-bottom:none;border-radius:10px;padding:16px 10px;margin-bottom:14px;}
+    .hdr h1{color:#fbbf24;font-weight:900;}
+    .hdr h2{color:#fde68a;}
+    .hdr .motto{color:#c7d2fe;}
+    .sb{background:#1e2a5e;border-color:#1e2a5e;}
+    .sv{color:#fbbf24;}
+    th{background:#1e2a5e;color:#fbbf24;}
+    .st{background:#fbbf24;color:#1e2a5e;}
+    .sig-box{border-top-color:#1e2a5e;}
+  `;
+}
+
 function printReportCard(idx, term) {
   const s = SD.students[idx]; if (!s) return;
   const sid = s.id || idx;
@@ -2977,6 +3614,7 @@ function printReportCard(idx, term) {
     .watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);
       font-size:80px;color:rgba(0,0,0,0.04);font-weight:900;pointer-events:none;z-index:0;white-space:nowrap;}
     @media print{button{display:none;}.watermark{position:fixed;}}
+    ${_reportCardThemeCSS()}
   </style></head><body>
   <div class="watermark">${esc(cfg.schoolName||'EduBloom')}</div>
 
@@ -3081,6 +3719,129 @@ function printReportCard(idx, term) {
     <div>📅 <b>Next Term Begins:</b> ${esc(nextTermDate)}</div>
     <div>🏫 <b>${esc(cfg.schoolName||'')}</b> — Powered by EduBloom 🌸</div>
   </div>
+
+  <div style="text-align:center;margin-top:12px;">
+    <button onclick="window.print()" style="padding:8px 22px;font-size:13px;cursor:pointer;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-weight:700;">🖨️ Print / Save as PDF</button>
+  </div>
+  </body></html>`);
+  w.document.close();
+}
+
+// ── ANNUAL PROMOTION REPORT — summarizes all 3 terms into one final card ──
+function printPromotionReportCard(idx) {
+  const s = SD.students[idx]; if (!s) return;
+  const sid = s.id || idx;
+  const subs = SD.config.subjects || ['English Language','Mathematics','Basic Science & Technology',
+    'Social Studies','Civic Education','Cultural & Creative Arts','Computer Science',
+    'Physical & Health Education','Agricultural Science','National Values Education',
+    'French Language','Home Economics','Business Studies','Religious Studies'];
+  const cfg = SD.config;
+  const promo = s.promotion || {};
+  const classStudents = SD.students.filter(st => st.class === s.class);
+
+  const { cumSub, avg: myAvg } = calcCumulative(sid, subs);
+  const ranked = classStudents.map(st => {
+    const stid = st.id || SD.students.indexOf(st);
+    const { avg } = calcCumulative(stid, subs);
+    return { name: st.name, avg };
+  }).sort((a,b) => b.avg - a.avg);
+  const myPos = (ranked.findIndex(r => r.name === s.name) + 1) || '–';
+
+  const termAvgs = ['Term 1','Term 2','Term 3'].map(term => {
+    const { avg } = calcStudentTermStats(sid, term, subs);
+    return { term, avg };
+  });
+
+  const rows = subs.map(sub => {
+    const cumAvg = cumSub[sub] || 0;
+    const perTerm = ['Term 1','Term 2','Term 3'].map(term => {
+      const td = (SD.scores[term]||{})[sid] || {};
+      if (!_hasScoreEntry(td, sub)) return '';
+      return _capScoreEntry(td[sub]).tot || '';
+    });
+    const { g } = getGrade(cumAvg);
+    return `<tr><td>${esc(sub)}</td><td>${perTerm[0]}</td><td>${perTerm[1]}</td><td>${perTerm[2]}</td>
+      <td style="font-weight:800;color:${cumAvg>=70?'green':cumAvg>=50?'#333':'red'};">${cumAvg||'–'}</td>
+      <td style="font-weight:700;">${cumAvg>0?g:'–'}</td></tr>`;
+  }).join('');
+
+  const daysPresent = Object.values(SD.attendance||{}).filter(day => day[s.name]==='Present').length;
+  const daysAbsent  = Object.values(SD.attendance||{}).filter(day => day[s.name]==='Absent').length;
+  const { g: overallGrade } = getGrade(myAvg);
+  const decisionColor = promo.decision === 'Repeat' ? '#dc2626' : promo.decision === 'Promoted on Trial' ? '#f59e0b' : '#16a34a';
+
+  const w = window.open('', '_blank', 'width=820,height=1150');
+  if (!w) return alert('Please allow popups to print.');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Annual Promotion Report — ${esc(s.name)}</title>
+  <style>
+    *{box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#111;font-size:11.5px;background:#fff;}
+    .hdr{text-align:center;border-bottom:3px double #333;padding-bottom:10px;margin-bottom:12px;}
+    .hdr h1{font-size:19px;margin:4px 0;letter-spacing:.5px;}
+    .hdr h2{font-size:13px;margin:2px 0;color:#555;font-weight:700;}
+    .ig{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-bottom:10px;font-size:11px;}
+    .ig div{padding:2px 0;border-bottom:1px dotted #ddd;}
+    .sm{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:8px 0;}
+    .sb{border:2px solid #e5e7eb;border-radius:6px;padding:5px;text-align:center;}
+    .sv{font-size:16px;font-weight:900;color:#1d4ed8;}
+    table{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px;}
+    th,td{border:1px solid #bbb;padding:3px 5px;text-align:center;}
+    td:first-child, th:first-child{text-align:left;}
+    th{background:#f3f4f6;font-size:10.5px;font-weight:700;}
+    .st{font-weight:800;font-size:11.5px;background:#1e3a5f;color:#fff;padding:4px 7px;margin:8px 0 3px;border-radius:3px;}
+    .decision-box{border:3px solid ${decisionColor};border-radius:8px;padding:12px;text-align:center;margin:12px 0;background:${decisionColor}10;}
+    .decision-box .label{font-size:11px;color:#555;font-weight:700;}
+    .decision-box .value{font-size:20px;font-weight:900;color:${decisionColor};margin:4px 0;}
+    .rg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+    .rb{border:1.5px solid #bbb;border-radius:6px;padding:8px;min-height:50px;}
+    .rb-label{font-weight:800;font-size:11px;margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:3px;}
+    .sig-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:14px;font-size:10.5px;}
+    .sig-box{border-top:1.5px solid #333;padding-top:4px;text-align:center;}
+    @media print{button{display:none;}}
+    ${_reportCardThemeCSS()}
+  </style></head><body>
+
+  <div class="hdr">
+    ${cfg.logoUrl?`<img src="${cfg.logoUrl}" style="height:55px;margin-bottom:5px;">` : `<div style="font-size:28px;margin-bottom:3px;">🏫</div>`}
+    <h1>${esc(cfg.schoolName||'School')}</h1>
+    <h2>ANNUAL PROMOTION REPORT — ${esc(promo.year || cfg.session || '')}</h2>
+  </div>
+
+  <div class="ig">
+    <div><b>Student:</b> ${esc(s.name)}</div><div><b>Class:</b> ${esc(s.class||'')}</div>
+    <div><b>Admission No:</b> ${esc(s.admissionNo||'–')}</div><div><b>Position in Class:</b> ${myPos} of ${classStudents.length}</div>
+    <div><b>Days Present (full year):</b> ${daysPresent}</div><div><b>Days Absent:</b> ${daysAbsent}</div>
+  </div>
+
+  <div class="sm">
+    <div class="sb"><div class="sv">${termAvgs[0].avg||'–'}</div>Term 1 Avg</div>
+    <div class="sb"><div class="sv">${termAvgs[1].avg||'–'}</div>Term 2 Avg</div>
+    <div class="sb"><div class="sv">${termAvgs[2].avg||'–'}</div>Term 3 Avg</div>
+    <div class="sb"><div class="sv">${myAvg||'–'}</div>Cumulative Avg</div>
+  </div>
+
+  <div class="st">CUMULATIVE ACADEMIC PERFORMANCE — ALL 3 TERMS</div>
+  <table><thead><tr><th>Subject</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Cumulative</th><th>Grade</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <p style="font-size:10px;color:#777;">Overall Cumulative Average: <b>${myAvg}</b> · Overall Grade: <b>${overallGrade}</b></p>
+
+  <div class="decision-box">
+    <div class="label">END-OF-YEAR DECISION</div>
+    <div class="value">${esc(promo.decision || 'Not yet decided')}</div>
+    ${promo.nextClass ? `<div style="font-size:12px;color:#333;">Proceeding to: <b>${esc(promo.nextClass)}</b></div>` : ''}
+  </div>
+
+  <div class="rg">
+    <div class="rb"><div class="rb-label">Class Teacher's Comment</div>${esc(promo.comment || '____________________')}</div>
+    <div class="rb"><div class="rb-label">Principal's Comment</div>____________________</div>
+  </div>
+
+  <div class="sig-row">
+    <div class="sig-box">Class Teacher<br>Signature</div>
+    <div class="sig-box">Principal<br>Signature</div>
+    <div class="sig-box">Parent / Guardian<br>Signature & Date</div>
+  </div>
+  ${promo.decidedBy ? `<p style="font-size:9.5px;color:#999;margin-top:8px;">Decision recorded by ${esc(promo.decidedBy)} on ${promo.decidedAt ? new Date(promo.decidedAt).toLocaleDateString() : '—'}</p>` : ''}
 
   <div style="text-align:center;margin-top:12px;">
     <button onclick="window.print()" style="padding:8px 22px;font-size:13px;cursor:pointer;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-weight:700;">🖨️ Print / Save as PDF</button>
@@ -3468,9 +4229,8 @@ function renderStaff() {
         <div style="font-weight:700;font-size:0.88rem;">${esc(s.name)}</div>
         <div style="font-size:0.72rem;color:var(--sub);">${esc(s.email||'')} · ${esc(s.role||'')}${s.assignedClass?' · '+esc(s.assignedClass):''}</div>
       </div>
-      <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;">
+      <div style="display:flex;gap:5px;flex-shrink:0;">
         <button onclick="editStaff(${i})" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
-        ${userRole==='Principal'?`<button onclick="resetStaffPassword(${i})" style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#b45309;white-space:nowrap;">🔑 Reset Pwd</button>`:''}
         ${s.role!=='Principal'?`<button onclick="deleteStaff(${i})" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:0.78rem;color:#dc2626;white-space:nowrap;">🗑️</button>`:''}
       </div>
     </div>`).join('');
@@ -3485,7 +4245,7 @@ async function addStaff() {
   const assignedSubjectsRaw = ($('sf-subjects')?.value || '').trim();
   const assignedSubjects = assignedSubjectsRaw ? assignedSubjectsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
   if (!name || !email || !pwd) return alert('Fill all fields.');
-  if (pwd.length < 4) return alert('Password min 4 chars.');
+  if (pwd.length < 6) return alert('Password min 6 chars (Firebase Auth requirement).');
   if (role === 'Class Teacher' && !assignedClass) return alert('Assign a class for this Class Teacher.');
   if ((SD.staff||[]).find(s => s.email === email)) return alert('Email already registered.');
   const isPrem = SD.config.plan === 'premium';
@@ -3493,6 +4253,15 @@ async function addStaff() {
   if (!SD.staff) SD.staff = [];
     const hashedPwd = await _hashPassword(pwd);
   SD.staff.push({ name, email, password: hashedPwd, role, assignedClass: assignedClass||null, assignedSubjects });
+  if (schoolId && !SD.config?._demo) {
+    try {
+      const uid = await createStaffAccountV2(schoolId, email, pwd, { name, role, assignedClass: assignedClass||null, assignedSubjects });
+      SD.staff[SD.staff.length-1]._v2Uid = uid;
+      // createUserWithEmailAndPassword signs in as the new staff member — sign back out
+      // so the Principal's session is not replaced by the newly created account.
+      try { await firebase.auth().signOut(); } catch(e) {}
+    } catch (e) { console.warn('addStaff Firebase Auth failed — legacy login still works:', e.message); }
+  }
   await SQ.push('staff', SD.staff);
   closeM('add-staff-modal');
   $('sf-name').value=''; $('sf-email').value=''; $('sf-pwd').value='';
@@ -3550,28 +4319,6 @@ async function deleteStaff(idx) {
   SD.staff.splice(idx,1);
   await SQ.push('staff',SD.staff); saveLocal('staff',SD.staff);
   renderStaff(); toast('🗑️ Staff removed.');
-}
-
-// Principal-only: issue a brand-new password for any staff member (including
-// themself). Passwords are SHA-256 hashed on save — this does NOT reveal the
-// old password (that's impossible by design), it replaces it with a new one
-// the Principal then shares with that staff member directly.
-async function resetStaffPassword(idx) {
-  if (userRole !== 'Principal') { alert('Only the Principal can reset passwords.'); return; }
-  const s = (SD.staff||[])[idx]; if (!s) return;
-  const newPwd = prompt(`New password for ${s.name} (min 4 characters):`);
-  if (newPwd === null) return; // cancelled
-  if (!newPwd || newPwd.trim().length < 4) { alert('Password must be at least 4 characters.'); return; }
-  s.password = await _hashPassword(newPwd.trim());
-  await SQ.push('staff', SD.staff); saveLocal('staff', SD.staff);
-  renderStaff();
-  toast(`✅ Password reset for ${s.name}`);
-  if (confirm(`Send the new password to ${s.name} via WhatsApp now?`)) {
-    const phone = (s.phone || SD.config?.whatsapp || '').replace(/\D/g,'');
-    const msg = `Hello ${s.name},\n\nYour EduBloom staff password has been reset by your Principal.\n\nNew password: ${newPwd.trim()}\n\nLogin at: https://school.edubloom.com.ng\nSchool ID: ${schoolId}\nEmail: ${s.email||'(ask your Principal)'}\n\nPlease keep this safe.`;
-    if (phone) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-    else alert('No phone number on file for ' + s.name + '. Share the new password with them directly:\n\n' + newPwd.trim());
-  }
 }
 
 // ── Expenses ─────────────────────────────────────────────────────────────
@@ -4057,31 +4804,13 @@ function populateScoreOCRSelectors(){
 }
 function socrPickPhoto(){$('socr-img-input')?.click();}
 
-function _buildScoreOcrPrompt(sub, termMode){
-  // termMode: 'all' = read all 3 terms, '1'/'2'/'3' = read only that term
+function _buildScoreOcrPrompt(sub, termMode) {
   if (termMode === 'all') {
-    return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}.
-The sheet typically shows THREE terms side by side as separate column blocks: "1ST TERM", "2ND TERM", "3RD TERM".
-Within EACH term's block, the columns are: 1st CA | 2nd CA | 3rd CA | Exam — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
-Read EVERY student row and ALL THREE terms. If a cell is blank/illegible, use 0.
-If the sheet only has one or two terms, fill the missing terms with zeros.
-Return ONLY valid JSON, no markdown, no explanation — an array where each entry has the student name plus t1, t2, t3 objects:
-[{"name":"SURNAME FIRSTNAME","t1":{"ca1":8,"ca2":9,"ca3":7,"exam":58},"t2":{"ca1":7,"ca2":8,"ca3":9,"exam":62},"t3":{"ca1":0,"ca2":0,"ca3":0,"exam":0}},...]
-Match names exactly as written (all caps).`;
+    return buildOcrPrompt('score_sheet_all', { subject: sub });
   } else {
-    const termNum = termMode;
-    const termLabel = termNum === '1' ? '1ST TERM' : termNum === '2' ? '2ND TERM' : '3RD TERM';
-    return `You are reading a Nigerian school score sheet (broadsheet/register) for subject: ${sub}.
-The sheet may show MULTIPLE terms side by side as separate column blocks (e.g. "1ST TERM", "2ND TERM", "3RD TERM").
-ONLY read the columns under the "${termLabel}" block — ignore other terms' columns entirely.
-Within that term's block, the columns are: 1st CA | 2nd CA | 3rd CA | Exam — each CA is out of 10 (three CAs = 30% total) and Exam is out of 70.
-Read every student row. If a CA or exam cell is blank/illegible, use 0.
-Return ONLY valid JSON, no markdown, no explanation:
-[{"name":"SURNAME FIRSTNAME","ca1":8,"ca2":9,"ca3":7,"exam":58},...]
-Match names exactly as written (all caps).`;
+    return buildOcrPrompt('score_sheet_single', { subject: sub, termNum: String(termMode) });
   }
 }
-
 function _parseScoreOcrJson(raw){
   let text=(raw||'[]').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
   const cb=text.match(/```(?:json)?\s*([\s\S]*?)```/); if(cb) text=cb[1].trim();
@@ -4092,7 +4821,17 @@ function _parseScoreOcrJson(raw){
 async function _groqScoreOCR(b64, mime, prompt){
   const groqKey=getGroqKey();
   if(!groqKey) throw new Error('No Groq key configured');
-  const raw = await callGroqVision('data:'+mime+';base64,'+b64, prompt, groqKey, 4000);
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),60000);
+  let r;
+  try {
+    r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
+      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens: 4096,
+      messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
+    })});
+  } finally { clearTimeout(timer); }
+  if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('Groq '+r.status+': '+(ed.error?.message||r.statusText)); }
+  const d=await r.json();
+  const raw=d.choices?.[0]?.message?.content||'[]';
   const parsed=_parseScoreOcrJson(raw);
   if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries');
   return parsed;
@@ -4668,8 +5407,11 @@ Read the student's name (usually written at the top) and their total score/marks
 Return ONLY valid JSON: {"name":"Student Full Name","score":72}
 If you cannot read the name, use "Unknown". If you cannot read the score, use 0.`;
       const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-        model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:300,
-        messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
+        model: GROQ_OCR_MODEL, temperature:0.2, max_tokens:4096, reasoning_format:'hidden',
+        messages:[
+          {role:'system',content:'You are a JSON data extraction tool. Output ONLY valid JSON — no explanation, no markdown.'},
+          {role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}
+        ]
       })});
       const d=await r.json();
       let raw=(d.choices?.[0]?.message?.content||'{"name":"Unknown","score":0}').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
@@ -5231,6 +5973,7 @@ function loadSettings() {
   const sf = $('set-fee'); if(sf) sf.value = cfg.fee||50000;
   const st = $('set-term'); if(st) st.value = cfg.currentTerm||'Term 1';
   const ss = $('set-session'); if(ss) ss.value = cfg.session||'2025/2026';
+  const rt = $('s-report-theme'); if(rt) rt.value = cfg.reportCardTheme || 'classic';
   const isPrem = cfg.plan==='premium';
   const planEl=$('settings-plan'); if(planEl) planEl.textContent=isPrem?'PREMIUM ✨':'BASIC';
   const slEl=$('settings-staff-limit'); if(slEl) slEl.textContent=isPrem?'Unlimited':'3';
@@ -5338,7 +6081,7 @@ async function scanSubjectList(event) {
   if (!navigator.onLine) { show('❌ No internet connection.'); return; }
   show('📸 Reading subject list...');
   try {
-    const resized = await _resizeFeeImage(file, 1200);
+    const resized = await _resizeFeeImage(file, 800);
     const key = await _getFeeGroqKey();
     if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
     const prompt = `You are reading a photograph of a Nigerian school curriculum sheet, timetable, or list of subject names.
@@ -5399,6 +6142,7 @@ async function saveSettings() {
   SD.config.fee         = parseFloat($('set-fee')?.value)||50000;
   SD.config.currentTerm = $('set-term')?.value||'Term 1';
   SD.config.session     = $('set-session')?.value.trim()||'';
+  SD.config.reportCardTheme = $('s-report-theme')?.value || 'classic';
   const pwd = $('set-pwd')?.value.trim();
   if (pwd) {
     const pr = (SD.staff||[]).find(s=>s.role==='Principal');
@@ -5549,7 +6293,7 @@ async function handleFeeRegisterPhoto(event) {
 
   show('📸 Resizing image...');
   let resized;
-  try { resized = await _resizeFeeImage(file, 1200); }
+  try { resized = await _resizeFeeImage(file, 800); }
   catch(e) { show('❌ Could not read image: ' + e.message); return; }
 
   show('🔑 Fetching AI key...');
@@ -5603,66 +6347,160 @@ function _resizeFeeImage(file, maxPx) {
 // Gated behind SD.config.plan === 'premium', same mechanism as BloomCollect.
 // ═══════════════════════════════════════════════════════════════════════
 
-async function _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, maxTokens, _retry) {
+// ── HuggingFace Qwen2.5-VL — cascade fallback when Groq fails ────────────
+// Same prompt, different model. No key needed for free tier (rate-limited).
+// With hfApiKey set in portal admin settings, limits are higher.
+async function _callHFGenericVision(base64, mimeType, prompt) {
+  const HF_URL = 'https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-7B-Instruct/v1/chat/completions';
+  const hfKey  = getHFKey ? getHFKey() : (window.HF_API_KEY || '');
+  const hdrs   = { 'Content-Type': 'application/json' };
+  if (hfKey) hdrs['Authorization'] = 'Bearer ' + hfKey;
+  const body = JSON.stringify({
+    model: 'Qwen/Qwen2.5-VL-7B-Instruct',
+    max_tokens: 4096, temperature: 0.1,
+    messages: [{ role: 'user', content: [
+      { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
+      { type: 'text', text: prompt }
+    ]}]
+  });
+  let resp = await fetch(HF_URL, { method: 'POST', headers: hdrs, body });
+  // Handle cold start (model loading)
+  if (resp.status === 503) {
+    const errData = await resp.json().catch(() => ({}));
+    const wait = Math.min((errData.estimated_time || 20) * 1000, 35000);
+    console.log('[HF] Cold start — waiting', Math.round(wait / 1000) + 's');
+    await new Promise(r => setTimeout(r, wait));
+    resp = await fetch(HF_URL, { method: 'POST', headers: hdrs, body });
+  }
+  if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error('HuggingFace ' + resp.status + ': ' + (err.error?.message || '')); }
+  const data = await resp.json();
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+  raw = raw.replace(/```(?:json)?\s*/gi, '').replace(/```\s*$/gi, '').trim();
+  window._lastHFRaw = raw;
+  try { return JSON.parse(raw); } catch(e) {}
+  const extracted = _extractJSONObject(raw);
+  if (extracted) { try { return JSON.parse(extracted); } catch(e) {} }
+  throw new Error('HuggingFace: could not parse response');
+}
+
+// ── OCR Cascade — Groq → HuggingFace ─────────────────────────────────────
+// Tries each engine in order. First with a parseable result wins.
+// onProgress(msg) is called with a status string as each engine is attempted.
+// This is the same pattern as bloom-agent's buildLedgerCascade — first
+// engine wins, next tried only on failure, surfacing per-field retry only
+// when ALL engines have failed.
+async function _callScanCascade(base64, mimeType, prompt, onProgress) {
+  // ── Engine 1: Groq ───────────────────────────────────────────────────────
+  if (onProgress) onProgress('📸 Reading with Groq…');
+  try {
+    const groqKey = await _getFeeGroqKey();
+    if (groqKey) {
+      const result = await _callGroqGenericVision(groqKey, base64, mimeType, prompt, 4096);
+      if (result) return { result, provider: 'Groq' };
+    }
+  } catch(e) { console.warn('[OCR Cascade] Groq:', e.message); }
+
+  // ── Engine 2: HuggingFace Qwen2.5-VL ────────────────────────────────────
+  if (onProgress) onProgress('⚡ Groq busy — trying HuggingFace Qwen…');
+  try {
+    const result = await _callHFGenericVision(base64, mimeType, prompt);
+    if (result) return { result, provider: 'HuggingFace' };
+  } catch(e) { console.warn('[OCR Cascade] HuggingFace:', e.message); }
+
+  // ── All providers failed ─────────────────────────────────────────────────
+  throw new Error('All OCR providers failed — use the 📷 retry buttons below for each missing field, or type values manually.');
+}
+
+// ── Brace-matching JSON extractor — more robust than regex ─────────────
+// Handles explanation text before/after JSON, nested objects, etc.
+function _extractJSONObject(text) {
+  let depth = 0, start = -1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '{') { if (depth === 0) start = i; depth++; }
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+async function _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxTokens, _retry) {
   if (_retry === undefined) _retry = 0;
   const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
     body: JSON.stringify({
       model: 'qwen/qwen3.6-27b',
-      max_tokens: maxTokens || 800,
+      max_tokens: maxTokens || 4096,
       temperature: 0,
-      reasoning_effort: 'none',
-      response_format: { type: 'json_object' },
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
-          { type: 'text', text: systemPrompt }
-        ]
-      }]
+      reasoning_format: 'hidden',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a JSON data extraction tool. Your output must be ONLY a valid JSON object — no explanations, no introductions, no markdown, no text of any kind outside the JSON. If you cannot determine a value, use null or "UNCLEAR" as specified in the prompt. You must always output the JSON object even if the image quality is poor.'
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
+            { type: 'text', text: userPrompt }
+          ]
+        }
+      ]
     })
   });
 
   if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
-    if (_retry >= 4) throw new Error('Groq rate-limited after multiple retries — try again shortly.');
+    if (_retry >= 3) throw new Error('Groq rate-limited after multiple retries — try again shortly.');
     const retryAfter = resp.headers.get('retry-after');
     let waitMs = parseFloat(retryAfter) * 1000;
-    if (!waitMs || isNaN(waitMs)) waitMs = 20000;
-    waitMs = Math.min(Math.max(waitMs, 3000), 65000);
+    if (!waitMs || isNaN(waitMs)) waitMs = 15000;
+    waitMs = Math.min(Math.max(waitMs, 3000), 60000);
     await new Promise(r => setTimeout(r, waitMs));
-    return _callGroqGenericVision(apiKey, base64, mimeType, systemPrompt, maxTokens, _retry + 1);
+    return _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxTokens, _retry + 1);
   }
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
   }
+
   const data = await resp.json();
   let raw = (data.choices?.[0]?.message?.content || '').trim();
+
+  // Strip reasoning blocks if any leaked through
   raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // Strip markdown fences
   raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-  try { return JSON.parse(raw); }
-  catch(e) {
-    // 1. Outermost { }
-    const m1 = raw.match(/\{[\s\S]*\}/);
-    if (m1) { try { return JSON.parse(m1[0]); } catch(e2) {} }
-    // 2. Find first { and last } and try that slice
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    if (start !== -1 && end > start) {
-      try { return JSON.parse(raw.slice(start, end + 1)); } catch(e3) {}
-    }
-    throw new Error('Could not read the photo. Please try again with a flatter, well-lit, closer shot.');
+
+  // Store for debugging (inspect via window._lastGroqRaw in browser console)
+  window._lastGroqRaw = raw;
+
+  // Attempt 1: parse directly
+  try { return JSON.parse(raw); } catch(e) {}
+
+  // Attempt 2: extract the outermost JSON object by brace-matching
+  const jsonStr = _extractJSONObject(raw);
+  if (jsonStr) { try { return JSON.parse(jsonStr); } catch(e) {} }
+
+  // Attempt 3: fix common Groq formatting issues then parse
+  if (jsonStr) {
+    try {
+      const fixed = jsonStr
+        .replace(/,\s*([}\]])/g, '$1')   // trailing commas
+        .replace(/:\s*undefined/g, ':null'); // undefined values
+      return JSON.parse(fixed);
+    } catch(e) {}
   }
+
+  console.error('[EduBloom] Groq parse failed. Raw response (first 400 chars):', raw.slice(0, 400));
+  throw new Error('Could not read document. Tap console (F12) to see what Groq returned, or try a clearer photo.');
 }
 
-// Shared reading discipline — same never-guess-a-status principle that
-// fixed the ledger payment-status bug in bloom-agent-v2, applied here too.
-// _OCR_DISCIPLINE — aliased to the fuller READING_DISCIPLINE ported from bloom-agent-v2
-// All 5 scan prompts reference this via ${_OCR_DISCIPLINE}
-const _OCR_DISCIPLINE = READING_DISCIPLINE;
+// _OCR_DISCIPLINE kept as alias for backward compatibility with _buildRetryPrompt
+const _OCR_DISCIPLINE = OCR_CORE_DISCIPLINE;
 
-function _isPremium() { return (SD.config && SD.config.plan === 'premium') || (window._demoMode === true); }
+function _isPremium() { return true; /* TEMP BYPASS - matches production School-Bloom, Bayo verifying premium features across both. Do not restore until he confirms. */ }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
 function _gateScan(prefix, scanInputId) {
   if (_isPremium()) { return true; }
@@ -5699,7 +6537,7 @@ async function scanExpenseReceipt(event) {
   if (!navigator.onLine) { show('❌ No internet connection.'); return; }
   show('📸 Reading receipt...');
   try {
-    const resized = await _resizeFeeImage(file, 1000);
+    const resized = await _resizeFeeImage(file, 800);
     const key = await _getFeeGroqKey();
     if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
     const prompt = `You are reading a photograph of a Nigerian school expense receipt or payment teller/slip.
@@ -5738,7 +6576,7 @@ async function scanPaymentReceipt(event, idx) {
   if (!navigator.onLine) { show('❌ No internet connection.'); return; }
   show('📸 Reading payment slip...');
   try {
-    const resized = await _resizeFeeImage(file, 1000);
+    const resized = await _resizeFeeImage(file, 800);
     const key = await _getFeeGroqKey();
     if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
     const prompt = `You are reading a photograph of a Nigerian bank payment teller, POS slip, transfer receipt, or cash receipt for a school fee payment.
@@ -5776,43 +6614,172 @@ Output ONLY: {"amount":0,"date":"","method":"","payer":"","recipient":"","refere
   }
 }
 
-// ── 3. Student admission form / ID scan ─────────────────────────────────
+// ── Universal student info prompt — reads ANY document format ────────────
+// Tells Groq what DATA to find, not what FORMAT to expect. Handles formal
+// admission forms, handwritten notebook pages, register tables, ID cards,
+// WhatsApp screenshots — all without any format assumptions.
+const _STUDENT_INFO_PROMPT = buildOcrPrompt('student_info');
+
+// ── Targeted retry prompts — one per field ────────────────────────────────
+// Used when the first scan misses a specific field. Narrower focus = better hit rate.
+function _buildRetryPrompt(fieldKey) {
+  const discipline = `Do NOT guess. If you cannot clearly see it, output UNCLEAR. Output ONLY valid JSON.`;
+  const map = {
+    name:         `Look ONLY for a Nigerian student's full name. Nigerian names: Yoruba (Adeoye, Ogunsola), Hausa (Musa, Aisha), Igbo (Emeka, Chioma). Could be under "Name:", "Student:", or in a column "Names". ${discipline} Output ONLY: {"name":""}`,
+    parent_phone: `Look ONLY for a Nigerian phone number. Starts with 07, 08, or 09 (11 digits, e.g. 07085369494) or +234. Could be near "Phone:", "WhatsApp:", "Tel:", "Parent:", or column "Phone No". ${discipline} Output ONLY: {"parent_phone":""}`,
+    class:        `Look ONLY for a student's class or grade. Nigerian classes: Basic 1-6, Primary 1-6, JSS 1-3, SSS 1-3, Nursery 1-2, KG. Could be near "Class:", "Form:", "Grade:", or column "Class". ${discipline} Output ONLY: {"class":""}`,
+    fee:          `Look ONLY for a school fee amount in Naira. Near "Fee:", "Amount:", "School Fee:", "Termly Fee:", ₦ symbol, or column "Fee". Return as integer only (e.g. 36000). ${discipline} Output ONLY: {"fee":null}`,
+    dob:          `Look ONLY for a date of birth. Near "D.O.B", "Date of Birth", "Born:", "DOB:". Return raw date text exactly as written. ${discipline} Output ONLY: {"dob":""}`,
+  };
+  return map[fieldKey] || '';
+}
+
+// ── Field maps: scan result key → HTML input ID ───────────────────────────
+const _SCAN_MAP_ADD  = { name:'ns-name', parent_phone:'ns-phone', class:'ns-class', fee:'ns-fee', dob:'ns-dob' };
+const _SCAN_MAP_EDIT = { name:'edit-s-name', parent_phone:'edit-s-phone', class:'edit-s-class', fee:'edit-s-fee', dob:'edit-s-dob' };
+
+// ── Fill form inputs from scan result, return what was found vs unclear ───
+function _fillStudentFromResult(result, fieldMap) {
+  const found = [], unclear = [];
+  const r = result || {};
+  const ok = (v) => v && v !== 'UNCLEAR' && v !== null;
+
+  if (fieldMap.name) {
+    if (ok(r.name)) { $(fieldMap.name).value = r.name; found.push('name'); }
+    else unclear.push('name');
+  }
+  if (fieldMap.parent_phone) {
+    if (ok(r.parent_phone)) { $(fieldMap.parent_phone).value = r.parent_phone.replace(/\D/g,''); found.push('phone'); }
+    else unclear.push('phone');
+  }
+  if (fieldMap.class) {
+    if (ok(r.class)) {
+      const el = $(fieldMap.class);
+      const opt = el ? [...el.options].find(o => o.value.toLowerCase() === r.class.toLowerCase()) : null;
+      if (opt) { el.value = opt.value; found.push('class'); } else unclear.push('class');
+    } else unclear.push('class');
+  }
+  if (fieldMap.fee) {
+    if (ok(r.fee) && Number(r.fee) > 0) { $(fieldMap.fee).value = Number(r.fee); found.push('fee'); }
+    else unclear.push('fee');
+  }
+  if (fieldMap.dob) {
+    if (ok(r.dob)) {
+      const parsed = _parseNigerianDate(r.dob);
+      if (parsed) { $(fieldMap.dob).value = parsed; found.push('dob'); }
+      else unclear.push('dob');
+    } else unclear.push('dob');
+  }
+  return { found, unclear };
+}
+
+// ── Render field-by-field scan feedback with per-field retry buttons ──────
+function _renderScanFeedback(fbEl, found, unclear, fieldMap, fbElId) {
+  if (!fbEl) return;
+  fbEl.style.display = 'block';
+  const labels = { name:'Name', parent_phone:'Phone', class:'Class', fee:'Fee', dob:'DOB' };
+  const mapJson = encodeURIComponent(JSON.stringify(fieldMap));
+  let html = '';
+  if (found.length)
+    html += `<div style="color:#22c55e;font-size:0.76rem;margin-bottom:0.25rem;">✅ Filled: ${found.join(', ')}</div>`;
+  if (unclear.length) {
+    html += `<div style="font-size:0.76rem;color:#f59e0b;margin-bottom:0.15rem;">⚠️ Not found — retry or type manually:</div>`;
+    unclear.forEach(f => {
+      const key = f === 'phone' ? 'parent_phone' : f;
+      html += `<div style="display:flex;align-items:center;gap:0.35rem;margin-bottom:0.2rem;">
+        <span style="font-size:0.75rem;color:var(--sub);min-width:40px;">${labels[key]||f}</span>
+        <button onclick="_triggerRetryField('${key}','${mapJson}','${fbElId}')"
+          style="font-size:0.68rem;padding:2px 8px;border-radius:5px;background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;cursor:pointer;">📷 Retry</button>
+      </div>`;
+    });
+  }
+  if (!found.length && !unclear.length)
+    html = '<span style="color:var(--danger);font-size:0.76rem;">❌ Nothing found. Try a clearer, flatter photo.</span>';
+  fbEl.innerHTML = html;
+}
+
+// ── Trigger a targeted retry scan for one missing field ───────────────────
+function _triggerRetryField(fieldKey, mapJson, fbElId) {
+  let inp = document.getElementById('_retry-field-input');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.id = '_retry-field-input'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+  }
+  inp.value = '';
+  inp.onchange = (e) => _doRetryField(e, fieldKey, mapJson, fbElId);
+  inp.click();
+}
+
+async function _doRetryField(event, fieldKey, mapJson, fbElId) {
+  const file = event.target.files[0]; if (!file) return;
+  const fb = document.getElementById(fbElId);
+  const note = m => { if (fb) fb.innerHTML += `<div style="font-size:0.75rem;color:var(--sub);margin-top:0.2rem;">${m}</div>`; };
+  note('📸 Scanning for ' + fieldKey + '...');
+  try {
+    const resized = await _resizeFeeImage(file, 800);
+    const key = await _getFeeGroqKey(); if (!key) { note('❌ Groq key not found.'); return; }
+    const prompt = _buildRetryPrompt(fieldKey); if (!prompt) { note('❌ Unknown field.'); return; }
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 4096);
+    const fieldMap = JSON.parse(decodeURIComponent(mapJson));
+    const value = result[fieldKey];
+    const el = fieldMap[fieldKey] ? $(fieldMap[fieldKey]) : null;
+    if (!value || value === 'UNCLEAR' || !el) {
+      note(`<span style="color:#f59e0b;">Still couldn't read ${fieldKey} — please type it manually.</span>`);
+      return;
+    }
+    if (fieldKey === 'parent_phone') el.value = value.replace(/\D/g,'');
+    else if (fieldKey === 'fee') { if (Number(value) > 0) el.value = Number(value); }
+    else if (fieldKey === 'dob') { const p = _parseNigerianDate(value); if (p) el.value = p; }
+    else if (fieldKey === 'class') {
+      const opt = [...el.options].find(o => o.value.toLowerCase() === value.toLowerCase());
+      if (opt) el.value = opt.value;
+    }
+    else el.value = value;
+    note(`<span style="color:#22c55e;">✅ ${fieldKey} filled!</span>`);
+  } catch(e) { note('❌ Retry failed — try typing manually.'); }
+}
+
+// ── 3. Student admission scan — universal, any document format ────────────
 async function scanStudentForm(event) {
   if (!_isPremium()) { _gateScan('ns'); return; }
   const file = event.target.files[0]; if (!file) return;
   event.target.value = '';
   const fb = document.getElementById('ns-scan-fb');
-  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.innerHTML = `<span style="font-size:0.76rem;color:var(--sub);">${m}</span>`; } };
   if (!navigator.onLine) { show('❌ No internet connection.'); return; }
-  show('📸 Reading admission form...');
+  show('📸 Reading document...');
   try {
-    const resized = await _resizeFeeImage(file, 1200);
+    const resized = await _resizeFeeImage(file, 800);
     const key = await _getFeeGroqKey();
     if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
-    const prompt = `You are reading a photograph of a Nigerian school student admission form or student ID card.
-Extract:
-  name         = the student's full name (text, Nigerian names)
-  parent_phone = a parent/guardian WhatsApp or phone number if visible (digits only)
-  class        = the class/grade the student is being admitted into, if stated (text, e.g. "Basic 4", "JSS 1", "Nursery 2")
-  dob          = date of birth if visible (raw text as written)
-${_OCR_DISCIPLINE}
-Output ONLY: {"name":"","parent_phone":"","class":"","dob":""}`;
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 400);
-    if (fb) fb.style.display = 'none';
-    if ($('ns-name') && result.name && result.name !== 'UNCLEAR') $('ns-name').value = result.name;
-    if ($('ns-phone') && result.parent_phone && result.parent_phone !== 'UNCLEAR') $('ns-phone').value = result.parent_phone.replace(/\D/g,'');
-    if ($('ns-class') && result.class && result.class !== 'UNCLEAR') {
-      const opt = [...$('ns-class').options].find(o => o.value.toLowerCase() === result.class.toLowerCase());
-      if (opt) $('ns-class').value = opt.value;
-    }
-    if ($('ns-dob') && result.dob && result.dob !== 'UNCLEAR') {
-      const parsed = _parseNigerianDate(result.dob);
-      if (parsed) $('ns-dob').value = parsed;
-    }
-    show('✅ Filled from form — please verify before saving.');
-    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 4000);
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, _STUDENT_INFO_PROMPT, 4096);
+    const { found, unclear } = _fillStudentFromResult(result, _SCAN_MAP_ADD);
+    _renderScanFeedback(fb, found, unclear, _SCAN_MAP_ADD, 'ns-scan-fb');
   } catch(e) {
-    show('❌ ' + (e.message || 'Could not read form. Try a clearer photo.'));
+    show('❌ ' + (e.message || 'Could not read document. Try a clearer photo.'));
+  }
+}
+
+// ── 3b. Scan to fill missing fields on existing student (Edit modal) ─────
+async function scanStudentFormEdit(idx, event) {
+  if (!_isPremium()) { _gateScan('ns'); return; }
+  const file = event.target.files[0]; if (!file) return;
+  event.target.value = '';
+  const fb = document.getElementById('edit-scan-fb');
+  const show = m => { if (fb) { fb.style.display = 'block'; fb.innerHTML = `<span style="font-size:0.76rem;color:var(--sub);">${m}</span>`; } };
+  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
+  show('📸 Reading document...');
+  try {
+    const resized = await _resizeFeeImage(file, 800);
+    const key = await _getFeeGroqKey();
+    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, _STUDENT_INFO_PROMPT, 4096);
+    const { found, unclear } = _fillStudentFromResult(result, _SCAN_MAP_EDIT);
+    _renderScanFeedback(fb, found, unclear, _SCAN_MAP_EDIT, 'edit-scan-fb');
+  } catch(e) {
+    show('❌ ' + (e.message || 'Could not read document. Try a clearer photo.'));
   }
 }
 
@@ -5828,7 +6795,7 @@ async function scanStaffID(event) {
   if (!navigator.onLine) { show('❌ No internet connection.'); return; }
   show('📸 Reading staff ID/CV...');
   try {
-    const resized = await _resizeFeeImage(file, 1200);
+    const resized = await _resizeFeeImage(file, 800);
     const key = await _getFeeGroqKey();
     if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
     const prompt = `You are reading a photograph of a staff ID card or CV/resume for a Nigerian school employee.
@@ -5840,7 +6807,7 @@ Extract ALL of the following:
 
 ${_OCR_DISCIPLINE}
 Output ONLY: {"name":"","email":"","role":"","phone":""}`;
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 400);
+    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 4096);
     if (fb) fb.style.display = 'none';
     if ($('sf-name') && result.name && result.name !== 'UNCLEAR') $('sf-name').value = result.name;
     if ($('sf-email') && result.email && result.email !== 'UNCLEAR') $('sf-email').value = result.email;
@@ -5863,255 +6830,45 @@ Output ONLY: {"name":"","email":"","role":"","phone":""}`;
 }
 
 // ── 4. Groq Vision call with Nigerian fee ledger system prompt ────────
-// ── Fee register OCR — prompt + parse ported verbatim from bloom-agent-v2
-// (the version proven on real Nigerian school registers — do not simplify)
-const READING_DISCIPLINE=[
-  'READING DISCIPLINE — apply to every field, always:',
-  '- Transcribe exactly what is written. Do not paraphrase or "clean up" text.',
-  '- For NUMBERS: read digit by digit, not at a glance. Common handwriting',
-  '  confusions to double-check: 7 vs 1, 0 vs 6, 4 vs 9, 3 vs 8, 5 vs 6/8.',
-  '- For STATUS fields: actively scan for explicit keywords, ticks, or',
-  '  strikethroughs BEFORE deciding a value. Never pick a default status',
-  '  just because nothing else is obviously visible — that produces a',
-  '  confidently wrong answer, which is worse than no answer.',
-  '- If a field is illegible or you are not confident, output "UNCLEAR"',
-  '  for that field rather than guessing a plausible-looking value.'
-].join('\n');
-
-const LEDGER_PROMPT=[
-  'You are reading the LEFT ~62% of a Nigerian SCHOOL FEES LEDGER (handwritten).',
-  'This image is cropped — the 2nd and 3rd payment-installment columns are',
-  'NOT visible. Do not look for them. The 1st part-payment/teller columns ARE visible.',
-  'The columns you can see are:',
-  '  Col 1: SERIAL NO (1, 2, 3...)',
-  '  Col 2: SURNAME (family name — all caps)',
-  '  Col 3: FIRSTNAME (given name — all caps)',
-  '  Col 4: BALANCE FROM LAST TERM (debt carried forward — 0 or blank means none)',
-  '  Col 5: CURRENT TERM FEES (the fee charged this term, e.g. 24000, 26000, 28000)',
-  '  Col 6: TOTAL (col4 + col5 = everything this student owes)',
-  '  Col 7: 1ST PART PAYMENT (an amount, OR a handwritten status word)',
-  '  Col 8: TELLER NO / RECEIPT NO (often overwritten with a status word instead of a number)',
-  '',
-  READING_DISCIPLINE,
-  '',
-  'PAYMENT STATUS — this is the field that was getting this wrong before:',
-  'Look in columns 7-8 (and the space around/above/below them — handwriting is',
-  'often diagonal or overflows its cell) for any of these words or close variants:',
-  '  "FULLY PAID", "FULL PAID", "FULLY", "PAID", "F/PAID", "PART PAYMENT"',
-  'Decide payment_status using this priority:',
-  '  1. If "FULLY PAID"/"FULL PAID"/"FULLY"+"PAID" appears anywhere on the row -> "PAID"',
-  '  2. Else if a part-payment amount is visible and it is LESS than the total -> "PARTIAL"',
-  '  3. Else if the row is completely blank in columns 7-8 with no annotation -> "UNCLEAR"',
-  '  4. Only mark "OWING" if there is clear evidence of a remaining unpaid amount',
-  '     (a positive number written as still-owed, or an explicit note) — never as a',
-  '     silent default just because you found nothing else.',
-  'When in doubt between OWING and UNCLEAR, choose UNCLEAR — a wrong confident',
-  '"OWING" tells a parent who already paid that they still owe money.',
-  '',
-  'YOUR TASK: For every numbered student row return:',
-  '  name           = SURNAME + space + FIRSTNAME',
-  '  balance_bf     = col 4 value (integer, 0 if blank or dash)',
-  '  termFees       = col 5 value (integer)',
-  '  total          = col 6 value (integer)',
-  '  payment_status = one of "PAID", "PARTIAL", "OWING", "UNCLEAR" (see rules above)',
-  '  ocr_confidence  = "HIGH", "MEDIUM", or "LOW" — your confidence in this row overall',
-  '  detected_class = class label at the top of the page (e.g. K-G, BASIC FOUR, NURSERY 1, BASIC THREE)',
-  '  year           = year written at top of ledger (e.g. 2026)',
-  '  term           = term number at top of ledger (e.g. 3)',
-  '',
-  'Nigerian SURNAMES (common): OGUNDETI, OYERINDE, OLATUNDE, OBASA, OKENDINMI, ILELABOYE,',
-  'AFOLABI, OLIYIDE, KOLANDLE, ADEGUNLE, ADEOYE, SABIU, OGUNLADE, ALIMI, JOHN, AKINOLA,',
-  'KASALI, ALAWODE, OYESANWO, OGUNDEYI, ALAO, AKINWANDE, OLAWALE, ODEREYE, AKINBELE,',
-  'ADEBAYO, AYANDIYA, SHONIPE, GBELEKALE, FAFIOLU, DADA, MOSES, OYEBOLA, ADERIBIGBE,',
-  'LAWAL, OLAYINOLA, IDOWU, ATAJA, AWOLOWO, AKINDELE, OGUNSOLA',
-  '',
-  'Nigerian FIRSTNAMES (common): SALAM, OYEDEPO, WAJUD, MICHEAL, IBRAHIM, RAHMON, AISHAT,',
-  'CHRISTIANA, AFEEZ, DOMINION, SAMUEL, MALEEK, FATHIA, INIOLUWA, QUARIBAT, AWAL, GOLD,',
-  'TOHEEB, GODWIN, ELIZABETH, TIBESIMI, WASLAT, MOZEED, DEBORAH, SHINDARA, GABRIEL,',
-  'RASAQ, ENOCH, ABIGEAL, KOREDE, ADEMIDE, AMINDAT, WIQUYAT, ISREA, DORCAS, MARIAM,',
-  'CYNTHIA, AMINAT, FATOBI, MUSTEQEEM, GIFT, SUCCESS, RASHEEDAT, KOREDE',
-  '',
-  'RULES:',
-  '1. Every numbered row = one student. Read ALL rows. A page typically has 10-30 students.',
-  '2. Crossed-out numbers: ignore the crossed-out value, read the correction written nearby.',
-  '3. SELF-CHECK before finalizing each row: total must equal balance_bf + termFees.',
-  '   If they do not match, re-read that row\'s digits and correct before moving on.',
-  '4. Return ONLY valid JSON — no markdown fences, no explanation text.',
-  '',
-  'EXAMPLE OUTPUT:',
-  '{"detected_class":"K-G","year":"2026","term":"3","students":[',
-  '{"name":"OLIYIDE GODWIN","balance_bf":0,"termFees":24000,"total":24000,"payment_status":"PAID","ocr_confidence":"HIGH"},',
-  '{"name":"KASALI RASAQ","balance_bf":5000,"termFees":24000,"total":29000,"payment_status":"PARTIAL","ocr_confidence":"MEDIUM"},',
-  '{"name":"JOHN DEBORAH","balance_bf":3000,"termFees":26000,"total":29000,"payment_status":"UNCLEAR","ocr_confidence":"LOW"}',
-  ']}'
-].join('\n');
-
-function parseLedgerJSON(text){
-  text=text.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
-  window._lastOCRRaw=text;
-  let parsed={};
-  try{parsed=JSON.parse(text);}
-  catch(e){
-    const m=text.match(/\{[\s\S]*\}/);
-    try{parsed=m?JSON.parse(m[0]):{};}catch(e2){parsed={};}
-  }
-  let students=Array.isArray(parsed.students)?parsed.students:[];
-  // Safety net: if the whole-JSON parse produced nothing (e.g. the response
-  // got cut off mid-array because it hit the token limit), salvage whatever
-  // complete {..."name":...} objects exist in the raw text rather than
-  // losing every student on that page.
-  if(!students.length){
-    const objMatches=text.match(/\{[^{}]*"name"[^{}]*\}/g)||[];
-    objMatches.forEach(m=>{
-      try{const o=JSON.parse(m);if(o&&o.name)students.push(o);}catch(e){}
-    });
-    if(students.length)console.warn('[parseLedgerJSON] Recovered '+students.length+' students from truncated/invalid JSON');
-  }
-  const result={
-    detected_class:parsed.detected_class||'',
-    term:parsed.term||'',
-    year:parsed.year||'',
-    students
-  };
-  parseLedgerJSON._lastResult=result;
-  return result;
-}
-
-
-let groqRateState={remainingTokens:null,resetMs:0};
-function parseGroqDuration(v){
-  if(!v)return 0;
-  v=String(v).trim();
-  if(v.endsWith('ms'))return parseFloat(v);
-  if(v.endsWith('s'))return parseFloat(v)*1000;
-  return parseFloat(v)*1000||0;
-}
-function updateGroqRateState(resp){
-  try{
-    const remaining=resp.headers.get('x-ratelimit-remaining-tokens');
-    const reset=resp.headers.get('x-ratelimit-reset-tokens');
-    if(remaining!==null)groqRateState.remainingTokens=parseInt(remaining);
-    if(reset!==null)groqRateState.resetMs=parseGroqDuration(reset);
-  }catch(e){/* headers not available in this environment — ignore */}
-}
-
-async function callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry){
-  if(_retry===undefined)_retry=0;
-  if(!maxTokens)maxTokens=600;
-  const base64=imageDataUrl.split(',')[1];
-  const mimeType=imageDataUrl.split(';')[0].split(':')[1]||'image/jpeg';
-  // qwen/qwen3.6-27b is the current reliable free-tier Groq vision model.
-  // llama-4-scout / llama-4-maverick / llama-3.2-90b-vision-preview are deprecated
-  // and return 400s — this was why signboard OCR stopped working.
-  const model='qwen/qwen3.6-27b';
-  const controller=new AbortController();
-  const fetchTimer=setTimeout(()=>controller.abort(),45000);
-  let resp;
-  try{
-    resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
-      method:'POST',
-      signal:controller.signal,
-      headers:{'Authorization':'Bearer '+apiKey,'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model,
-        messages:[{role:'user',content:[
-          {type:'image_url',image_url:{url:'data:'+mimeType+';base64,'+base64}},
-          {type:'text',text:prompt}
-        ]}],
-        temperature:0,
-        max_tokens:maxTokens,
-        reasoning_effort:'none',
-        response_format:{type:'json_object'}
-      })
-    });
-    clearTimeout(fetchTimer);
-    updateGroqRateState(resp);
-  }catch(fetchErr){
-    clearTimeout(fetchTimer);
-    if(_retry<2){
-      await new Promise(r=>setTimeout(r,1500));
-      return callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry+1);
-    }
-    throw new Error(fetchErr.name==='AbortError'?'Groq timed out':fetchErr.message);
-  }
-  if(resp.status===429||resp.status===503||resp.status===529){
-    // A fixed 3s backoff was nowhere near long enough — Groq's free-tier
-    // rate limit is a rolling per-MINUTE window, not a per-few-seconds one.
-    // That mismatch is what caused a different random page to fail on every
-    // run of the same 5 photos: whichever page happened to land right as
-    // the TPM budget ran out got a 429, retried for only ~6 seconds total,
-    // then gave up. Respect the server's own Retry-After header — it knows
-    // exactly how long is left in the window — and allow more attempts
-    // since this is a fully recoverable, expected condition, not an error.
-    const retryAfterHeader=resp.headers.get('retry-after');
-    let waitMs=parseFloat(retryAfterHeader)*1000;
-    if(!waitMs||isNaN(waitMs))waitMs=20000; // no header given — assume a full window
-    waitMs=Math.min(Math.max(waitMs,3000),65000); // clamp 3s-65s
-    if(_retry>=4){const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||'Groq rate-limited after multiple retries');}
-    console.warn('[Groq] rate-limited (attempt '+(_retry+1)+'), waiting '+Math.round(waitMs/1000)+'s per Retry-After');
-    await new Promise(r=>setTimeout(r,waitMs));
-    return callGroqVision(imageDataUrl,prompt,apiKey,maxTokens,_retry+1);
-  }
-  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||'Groq '+resp.status);}
-  const data=await resp.json();
-  let text=data.choices?.[0]?.message?.content||'';
-  text=text.replace(/<ildo>[\s\S]*?<\/ildo>/gi,'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
-  console.log('[Groq] '+model+' responded ('+text.length+' chars, budget '+maxTokens+')');
-  return text;
-}
-
-function fileToDataUrl(file){
-  return new Promise((resolve,reject)=>{
-    const r=new FileReader();r.onload=e=>resolve(e.target.result);r.onerror=reject;r.readAsDataURL(file);
-  });
-}
-
-// ── Boot ───────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded',()=>{
-  SQ.ping();
-  const saved=localStorage.getItem('ag2_agent');
-  if(saved){
-    try{
-      agent=JSON.parse(saved);
-      if(agent&&agent.id){
-        startApp();
-        if(db&&!agent._guest){const p=normPhone(agent.phone||'');const l=p.startsWith('234')?'0'+p.slice(3):p;refreshBg(agent.id,p,l).catch(()=>{});}
-        return;
-      }
-    }catch(e){localStorage.removeItem('ag2_agent');}
-  }
-  $('login').style.display='flex';$('login').style.flexDirection='column';
-  $('app').style.display='none';
-});
-
-// Adapter: keeps the existing School-Bloom call signature unchanged
 async function _callGroqFeeVision(apiKey, base64, mimeType) {
-  const dataUrl = 'data:' + mimeType + ';base64,' + base64;
-  const rawText = await callGroqVision(dataUrl, LEDGER_PROMPT, apiKey, 4096);
-  const parsed  = parseLedgerJSON(rawText);
-  // Remap V2 field names to the shape _showFeeImportReview already expects
-  const students = (parsed.students || []).map(s => ({
-    sn:        null,
-    surname:   (s.name || '').split(' ')[0]  || '',
-    firstname: (s.name || '').split(' ').slice(1).join(' ') || '',
-    bal_bf:    s.balance_bf  ?? null,
-    term_fees: s.termFees    ?? null,
-    total:     s.total       ?? null,
-    pmt1: null, bal1: null, date1: null,
-    pmt2: null, bal2: null, date2: null,
-    pmt3: null, bal3: null, date3: null,
-    status: s.payment_status === 'PAID'    ? 'FULLY PAID'  :
-            s.payment_status === 'PARTIAL' ? 'Partial'     :
-            s.payment_status === 'UNCLEAR' ? 'No Payment'  : 'No Payment'
-  }));
-  return {
-    class:    parsed.detected_class || '',
-    term:     parsed.term           || '',
-    year:     parsed.year           || '',
-    students
-  };
+  const prompt = buildOcrPrompt('fee_ledger');
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify({
+      model: 'qwen/qwen3.6-27b',
+      max_tokens: 4096,
+      temperature: 0.1,
+      reasoning_format: 'hidden',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a JSON data extraction tool. Output ONLY valid JSON — no markdown, no explanation text, no fences. If you cannot read a value, use null.'
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }
+      ]
+    })
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
+  }
+  const data = await resp.json();
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  window._lastGroqRaw = raw;
+  try { return JSON.parse(raw); } catch(e) {}
+  const extracted = _extractJSONObject(raw);
+  if (extracted) { try { return JSON.parse(extracted); } catch(e) {} }
+  throw new Error('Could not parse fee register response. Try a clearer, straighter photo of the register.');
 }
-
 
 // ── 5. Show review modal before importing ─────────────────────────────
 function _showFeeImportReview(data) {
@@ -6313,6 +7070,7 @@ async function _confirmFeeImport(matched) {
       commsLog:     loadLocal('commsLog', []),
       opportunities:loadLocal('opportunities', defaultOpps())
     });
+    hydrateFromV2(auth.schoolId).catch(() => {}); // non-blocking — offline-first startup shouldn't wait on this
     // Restore staff session if cached — otherwise show role selector
     const cachedSession = localStorage.getItem(`p_${auth.schoolId}_staffSession`);
     if (cachedSession) {
