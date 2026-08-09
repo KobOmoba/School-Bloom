@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="style.css">
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <style>
 /* ── Password Eye Toggle ──────────────────────────────────── */
 .pwd-wrap{position:relative;display:flex;align-items:center;}
@@ -149,12 +150,15 @@ function toggleEye(inputId, btn) {
     <!-- Principal panel -->
     <div id="sl-panel-p">
       <label style="font-size:0.82rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;display:block;">School Password</label>
-      <input type="password" id="sl-p-pwd" placeholder="Enter password (e.g. bloom2026)"
-        style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.95rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
-        onkeydown="if(event.key==='Enter')doPrincipalLogin()">
+      <div class="pwd-wrap">
+        <input type="password" id="sl-p-pwd" placeholder="Enter password (e.g. bloom2026)"
+          style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.95rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
+          onkeydown="if(event.key==='Enter')doPrincipalLogin()">
+        <button type="button" class="eye-btn" onclick="toggleEye('sl-p-pwd',this)" tabindex="-1">👁️</button>
+      </div>
       <div id="sl-p-err" class="err" style="display:none;"></div>
       <button class="btn-brand" onclick="doPrincipalLogin()" style="width:100%;margin-top:0.4rem;padding:0.7rem;font-size:0.95rem;">🔓 Enter as Principal</button>
-      <button type="button" onclick="slForgotPassword()" style="width:100%;background:transparent;border:none;color:var(--sub);font-size:0.78rem;margin-top:0.5rem;cursor:pointer;text-decoration:underline;">Forgot password? Contact AariNAT via WhatsApp</button>
+      <button type="button" onclick="slForgotPassword()" style="width:100%;background:transparent;border:none;color:var(--sub);font-size:0.78rem;margin-top:0.5rem;cursor:pointer;text-decoration:underline;">Forgot password? Contact agent via WhatsApp</button>
     </div>
 
     <!-- Staff panel -->
@@ -164,12 +168,15 @@ function toggleEye(inputId, btn) {
         style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.9rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
         onkeydown="if(event.key==='Enter')document.getElementById('sl-pwd').focus()">
       <label style="font-size:0.82rem;font-weight:700;color:var(--sub);margin-bottom:0.3rem;display:block;">Password</label>
-      <input type="password" id="sl-pwd" placeholder="Your staff password"
-        style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.9rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
-        onkeydown="if(event.key==='Enter')doStaffLogin()">
+      <div class="pwd-wrap">
+        <input type="password" id="sl-pwd" placeholder="Your staff password"
+          style="width:100%;padding:0.65rem 0.8rem;border:1.5px solid var(--border);border-radius:10px;font-size:0.9rem;background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:0.5rem;"
+          onkeydown="if(event.key==='Enter')doStaffLogin()">
+        <button type="button" class="eye-btn" onclick="toggleEye('sl-pwd',this)" tabindex="-1">👁️</button>
+      </div>
       <div id="sl-s-err" class="err" style="display:none;"></div>
       <button class="btn-brand" onclick="doStaffLogin()" style="width:100%;margin-top:0.4rem;padding:0.7rem;font-size:0.95rem;">🔓 Enter as Staff</button>
-      <button type="button" onclick="slStaffForgotPassword()" style="width:100%;background:transparent;border:none;color:var(--sub);font-size:0.78rem;margin-top:0.5rem;cursor:pointer;text-decoration:underline;">Forgot password? Ask your Principal to reset it</button>
+      <button type="button" onclick="sendStaffPasswordReset(document.getElementById('sl-email')?.value)" style="width:100%;background:transparent;border:none;color:var(--sub);font-size:0.78rem;margin-top:0.5rem;cursor:pointer;text-decoration:underline;">🔑 Forgot password? Send reset email to my inbox</button>
     </div>
 
     <button type="button" onclick="logout()" style="width:100%;background:transparent;border:1px solid var(--border);border-radius:9px;padding:0.5rem;font-size:0.8rem;color:var(--sub);margin-top:1rem;cursor:pointer;">← Back / Change School</button>
@@ -232,9 +239,10 @@ function toggleEye(inputId, btn) {
         <input type="file" id="bulk-csv" accept=".csv,.xlsx,.xls,.txt,*/*" style="display:none;" onchange="handleBulkPayment(event)">
         <input type="file" id="logo-file-input" accept="image/*,.heic,.heif,*/*" style="display:none;" onchange="handleLogoUpload(event)">
         <button class="btn-outline" onclick="document.getElementById('bulk-csv').click()">📂 Upload Bank Statement CSV</button>
+        <p style="font-size:0.75rem;color:var(--sub);margin-top:0.3rem;">CSV must have two columns: <strong>StudentName</strong> and <strong>Amount</strong>. Student names must match exactly as registered in the app.</p>
         <div id="bulk-feedback" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);"></div>
         <div style="border-top:1px solid var(--border);margin-top:0.75rem;padding-top:0.75rem;">
-          <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;">Or scan a photo of your physical handwritten fee register — Groq AI reads it and imports all payments automatically.</p>
+          <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;">Scan your <strong>multi-column fee ledger book</strong> — the register with columns for S/N, Names, Balance B/F, Term Fee, Payments, and Dates. AI reads all rows and imports payments automatically. <em>Not for simple student lists — use Add Student for those.</em></p>
           <input type="file" id="fee-register-input" accept="image/*" style="display:none;" onchange="handleFeeRegisterPhoto(event)">
           <button class="btn-brand" style="background:linear-gradient(135deg,#0891b2,#0e7490);width:100%;" onclick="document.getElementById('fee-register-input').click()">📸 Scan Physical Fee Register</button>
           <div id="fee-scan-fb" style="font-size:0.78rem;margin-top:0.5rem;color:var(--money);display:none;"></div>
@@ -930,7 +938,43 @@ function toggleEye(inputId, btn) {
           <button class="btn-brand btn-sm" onclick="addSubjectFromInput()">+ Add</button>
         </div>
         <textarea id="set-subjects" rows="2" placeholder="Subjects list (auto-updated above)" style="font-size:0.72rem;color:var(--sub);"></textarea>
+        <label style="font-size:0.8rem;font-weight:600;display:block;margin:0.7rem 0 0.3rem;">Report Card Design</label>
+        <select id="s-report-theme" style="width:100%;margin-bottom:0.6rem;">
+          <option value="classic">Classic — clean, soft blue</option>
+          <option value="bold">Bold — color-blocked, high contrast</option>
+        </select>
         <button class="btn-brand" onclick="saveSettings()">💾 Save Settings</button>
+      </div>
+
+      <div class="card" style="margin-top:0.75rem;">
+        <div class="ct">🔑 Staff Account Setup</div>
+        <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.6rem;">
+          Staff members tap this once to create their real login — enter your registered email and choose a password.
+        </p>
+        <button class="btn-brand" style="width:100%;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="claimAccountUI()">🔑 Claim a Staff Account</button>
+      </div>
+
+      <div class="modal" id="claim-account-modal">
+        <div class="mbox" style="max-width:380px;">
+          <div class="mhead">
+            <div style="font-weight:800;font-size:1rem;">🔑 Claim Your Account</div>
+            <button class="mclose" onclick="closeM('claim-account-modal')">×</button>
+          </div>
+          <div style="padding:1rem;">
+            <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.8rem;">
+              Enter your staff email (as registered by the Principal) and choose a new password — this becomes your real login going forward.
+            </p>
+            <label style="font-size:0.8rem;font-weight:600;">Your Staff Email</label>
+            <input type="email" id="claim-email" placeholder="you@school.edu.ng" autocomplete="off">
+            <label style="font-size:0.8rem;font-weight:600;margin-top:0.6rem;display:block;">New Password (6+ characters)</label>
+            <div class="pwd-wrap">
+              <input type="password" id="claim-pwd" placeholder="Choose a password" autocomplete="off">
+              <button type="button" class="eye-btn" onclick="toggleEye('claim-pwd',this)" tabindex="-1">👁️</button>
+            </div>
+            <div id="claim-err" style="display:none;color:var(--danger);font-size:0.78rem;margin-top:0.5rem;"></div>
+            <button class="btn-brand" id="claim-submit-btn" style="width:100%;margin-top:0.8rem;" onclick="submitClaimAccount()">🔑 Claim Account</button>
+          </div>
+        </div>
       </div>
 
       <!-- AI OCR Status Card -->
@@ -1079,6 +1123,7 @@ function toggleEye(inputId, btn) {
       <button class="ptab" data-pt="scores" onclick="setTab('scores')">📚 Scores</button>
       <button class="ptab" data-pt="report" onclick="setTab('report')">📋 Report Card</button>
       <button class="ptab" data-pt="swot" onclick="setTab('swot')">🧠 SWOT</button>
+      <button class="ptab" data-pt="promotion" onclick="setTab('promotion')">🎓 Promotion</button>
     </div>
     <div id="profile-content"></div>
     <button class="btn-ghost" style="margin-top:0.65rem;color:var(--danger);border-color:var(--danger);" onclick="deleteStudent(activeIdx)">🗑️ Remove Student</button>
@@ -1119,7 +1164,12 @@ function toggleEye(inputId, btn) {
       <button type="button" class="eye-btn" onclick="toggleEye('sf-pwd',this)" tabindex="-1">👁️</button>
     </div>
     <label>Role</label>
-    <select id="sf-role"><option>Teacher</option><option>Bursar</option><option>Head Teacher</option><option>Vice Principal</option><option>Admin</option><option>Sports Coach</option><option>Arts Teacher</option><option>Music Teacher</option></select>
+    <select id="sf-role" onchange="onRoleChange(this)">
+      <option value="Class Teacher">Class Teacher</option>
+      <option value="Subject Teacher">Subject Teacher</option>
+      <option value="Bursar">Bursar</option>
+      <option value="Principal">Principal</option>
+    </select>
     <button class="btn-brand" onclick="addStaff()">✅ Add Staff</button>
   </div>
 </div>
@@ -1270,7 +1320,7 @@ function toggleEye(inputId, btn) {
   </div>
 </div>
 
-<script src="app.js?v=20260802-forgotpwd"></script>
+<script src="app.js?v=20260809-step4port"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
