@@ -1,3 +1,24 @@
+## 2026-08-10 — Bug fix: Scan Score Sheet review table not rendering
+
+**Bug:** `_renderScoreOcrPreview` used `isAllTerms` and `termNum` without declaring
+them in its own scope. Every other function that uses these variables declares them
+locally from `termMode`, but this one was missing the two lines. Result: `isAllTerms`
+was `undefined`, `termsToShow` became `[NaN]`, the table loop silently produced nothing.
+The status message showed ("✅ Found 11 entries") but the review table was blank.
+
+**Fix:** Added the two missing declarations at the top of `_renderScoreOcrPreview`:
+```
+const isAllTerms=(termMode==='all'||!termMode);
+const termNum=isAllTerms?'1':(termMode||'1');
+```
+
+**Applied to:** School-Bloom (production) + bloom-school-v2 (sandbox) — same bug in both.
+**Cache-bust:** `?v=20260810-scorefix` in School-Bloom index.html.
+**Verified by:** Bayo tested on FUTURE PROMISE COMPREHENSIVE COLLEGE — scan found 11 entries
+but review table was blank. Fix resolves the blank table.
+
+---
+
 # EduBloom School Management Portal
 
 **Production site:** [school.edubloom.com.ng](https://school.edubloom.com.ng)
