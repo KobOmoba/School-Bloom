@@ -1,3 +1,32 @@
+## 2026-08-10 — Bug fix: Score OCR reads names but not numbers
+
+**Root cause:** `_groqScoreOCR` was missing `reasoning_format:'hidden'` in its
+Groq API call. The `qwen/qwen3.6-27b` model generates internal thinking tokens
+which, without `reasoning_format:'hidden'`, are streamed into the response and
+counted against the `max_tokens: 4096` budget. For a score sheet with 11 students
+× 3 terms × 4 scores = 132 numbers to extract, the thinking tokens consumed
+most of the 4096 token budget, leaving the actual JSON score output truncated
+or empty.
+
+The student roster OCR (`groqVisionOCR`) already had `reasoning_format:'hidden'`
+— which is why names read correctly. Only `_groqScoreOCR` was missing it.
+
+Every other Groq call in the codebase already uses `reasoning_format:'hidden'`:
+- `groqVisionOCR` (line ~588) ✅
+- exam script OCR (line ~5410) ✅  
+- generic Groq call (line ~6437) ✅
+- fee ledger OCR (line ~6842) ✅
+- `_groqScoreOCR` (line 4828) ← was missing, now fixed ✅
+
+**Fix:** Added `reasoning_format:'hidden'` to the `_groqScoreOCR` Groq API body.
+
+**Applied to:** School-Bloom (production) + bloom-school-v2 (sandbox).
+**Cache-bust:** `?v=20260810-scorefix2` in School-Bloom index.html.
+**Confirmed by:** Bayo — Groq key was working (names read), so the problem
+was specifically in the score-specific OCR call, not the API key.
+
+---
+
 ## 2026-08-10 — Bug fix: Scan Score Sheet review table not rendering
 
 **Bug:** `_renderScoreOcrPreview` used `isAllTerms` and `termNum` without declaring
