@@ -4865,7 +4865,7 @@ function _renderScoreOcrPreview(rows, classStudents, termMode){
   const termsToShow = isAllTerms ? [1, 2, 3] : [parseInt(termNum)];
   for (const t of termsToShow) {
     const tKey = 't' + t;
-    pHTML += `<div id="socr-term-${t}-panel" style="display:block;">`;
+    pHTML += `<div id="socr-term-${t}-panel" style="display:${(isAllTerms && t !== 1) ? 'none' : 'block'};">`;
     if (!isAllTerms) {
       const tLabel = t === 1 ? 'Term 1' : t === 2 ? 'Term 2' : 'Term 3';
       pHTML += `<p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;font-weight:600;">${tLabel}</p>`;
@@ -5239,17 +5239,31 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, t
   }
   const b64 = processedDataURL.split(',')[1];
 
-  // ── Step 1: Groq Vision — reads names AND numbers directly off the sheet ──
+  // ── Step 1: Check Groq key before attempting OCR ──
+  const _groqKey = getGroqKey();
+  if (!_groqKey) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ No Groq API key — go to <b>Settings → API Keys</b> and paste your Groq key to enable auto-read. Using manual entry below.</span>';
+    return null;
+  }
+
+  // ── Step 2: Groq Vision — reads names AND numbers directly off the sheet ──
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
     const rows = await _groqScoreOCR(b64, mime, prompt);
     if (rows && rows.length) return { rows, fromTesseract: false };
+    // Groq returned empty — likely a formatting mismatch rather than an error
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Groq could not find scores in this image. Try a closer, well-lit photo with the score columns clearly visible.</span>';
   } catch (e1) {
     console.warn('Groq score OCR failed:', e1.message);
+    const reason = e1.message?.includes('401') || e1.message?.includes('invalid_api_key')
+      ? 'Groq API key rejected — go to <b>Settings → API Keys</b> and update it.'
+      : e1.message?.includes('rate') || e1.message?.includes('429')
+      ? 'Groq rate limit hit — wait a moment and try again.'
+      : 'Groq scan failed (' + (e1.message || 'unknown error') + '). Try a clearer photo or enter manually.';
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--warn);">⚠️ ${reason}</span>`;
   }
 
-    // ── Groq-only: no fallback engines ──
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">⚠️ Groq scan failed. Check image quality and retry.</span>';
+  // ── Groq-only: no fallback engines ──
   return null;
 }
 
