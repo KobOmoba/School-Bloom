@@ -215,11 +215,11 @@ function _deskew(binaryMat) {
   }
 }
 
-function resizeImageForOCR(dataURL) {
+function resizeImageForOCR(dataURL, maxPx) {
   return new Promise(async resolve => {
     const img = new Image();
     img.onload = async () => {
-      const MAX = 1000;
+      const MAX = maxPx || 1000;
       let w = img.width, h = img.height;
       if (w > MAX || h > MAX) {
         if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
@@ -371,18 +371,25 @@ const OCR_SCHEMAS = {
     }
   },
 
-  // ── 3a. Score sheet — read all 3 terms ────────────────────────────
+  // ── 3a. Score sheet — read all available terms ──────────────────────
   score_sheet_all: {
-    intro: (p) => `You are reading a Nigerian school CA/exam score sheet (broadsheet) for subject: ${p && p.subject ? p.subject : 'unknown subject'}.`,
+    intro: (p) => `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}.`,
     usesAdaptiveStructure: true,
     domainRules: [
       'DOMAIN RULES:',
-      '- The sheet has THREE term blocks side by side: "1ST TERM", "2ND TERM", "3RD TERM".',
-      '- Within each block: 1st CA | 2nd CA | 3rd CA (each /10) | Exam (/70).',
-      '- Read EVERY student row and ALL THREE terms.',
-      '- If the sheet only shows one or two terms, fill the missing terms with zeros.',
+      '- Nigerian score sheets come in many formats — adapt to whatever is on this page:',
+      '  a) Broadsheet: all 3 terms side by side (1ST TERM | 2ND TERM | 3RD TERM)',
+      '  b) Single-term sheet: only one term visible (fill t1, leave t2/t3 as zeros)',
+      '  c) Two-term sheet: two terms visible (fill t1 and t2, leave t3 as zeros)',
+      '  d) Portrait layout: terms stacked vertically — read each section as a term block',
+      '- Within each term block look for score columns (labels vary by school):',
+      '  1st CA (CA1, TEST1, /10) | 2nd CA (CA2, TEST2, /10) | 3rd CA (CA3, TEST3, /10) | Exam (/70)',
+      '  If only 2 CA columns exist, put them in ca1/ca2 and set ca3 to 0.',
+      '- Read EVERY student row without skipping.',
+      '- Blank or illegible score cell = 0 (never null, never skip).',
       '- Names: SURNAME FIRSTNAME, all caps.',
-      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.'
+      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.',
+      '- Ignore the S/N column, any TOTAL row, and any AVERAGE row at the bottom.'
     ],
     referenceData: NIGERIAN_NAME_REFERENCE,
     outputShape: [{
@@ -398,17 +405,21 @@ const OCR_SCHEMAS = {
     intro: (p) => {
       const labels = { '1': '1ST TERM', '2': '2ND TERM', '3': '3RD TERM' };
       const label = labels[p && p.termNum] || '1ST TERM';
-      return `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}. Read ONLY the ${label} columns.`;
+      return `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}. Extract ONLY the ${label} columns.`;
     },
     usesAdaptiveStructure: true,
     domainRules: [
       'DOMAIN RULES:',
-      '- The sheet may show multiple terms — read ONLY the columns under the',
-      '  requested term block; ignore all other terms\' columns.',
-      '- Within that term: 1st CA | 2nd CA | 3rd CA (each /10) | Exam (/70).',
+      '- The sheet may show one, two, or three term blocks — extract ONLY the requested',
+      '  term block; ignore all other term columns entirely.',
+      '- Within the requested term block (labels vary by school):',
+      '  1st CA (CA1, TEST1, /10) | 2nd CA (CA2, TEST2, /10) | 3rd CA (CA3, TEST3, /10) | Exam (/70)',
+      '  If only 2 CA columns exist, put them in ca1/ca2 and set ca3 to 0.',
       '- Blank or illegible score cell = 0.',
+      '- Read EVERY student row.',
       '- Names: SURNAME FIRSTNAME, all caps.',
-      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.'
+      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.',
+      '- Ignore S/N, TOTAL, and AVERAGE rows.'
     ],
     referenceData: NIGERIAN_NAME_REFERENCE,
     outputShape: [{ name: 'SURNAME FIRSTNAME', ca1: 0, ca2: 0, ca3: 0, exam: 0 }]
@@ -4821,19 +4832,23 @@ function _parseScoreOcrJson(raw){
 async function _groqScoreOCR(b64, mime, prompt){
   const groqKey=getGroqKey();
   if(!groqKey) throw new Error('No Groq key configured');
-  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),60000);
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),90000);
   let r;
   try {
     r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens: 4096, reasoning_format:'hidden',
+      model: GROQ_OCR_MODEL,
+      temperature: 0.1,
+      max_tokens: 8192,
+      reasoning_format: 'hidden',
       messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
     })});
   } finally { clearTimeout(timer); }
   if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('Groq '+r.status+': '+(ed.error?.message||r.statusText)); }
   const d=await r.json();
   const raw=d.choices?.[0]?.message?.content||'[]';
+  console.log('[Score OCR] Groq raw (first 400 chars):', raw.slice(0,400));
   const parsed=_parseScoreOcrJson(raw);
-  if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries');
+  if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries — raw: '+raw.slice(0,200));
   return parsed;
 }
 
@@ -4865,7 +4880,7 @@ function _renderScoreOcrPreview(rows, classStudents, termMode){
   const termsToShow = isAllTerms ? [1, 2, 3] : [parseInt(termNum)];
   for (const t of termsToShow) {
     const tKey = 't' + t;
-    pHTML += `<div id="socr-term-${t}-panel" style="display:block;">`;
+    pHTML += `<div id="socr-term-${t}-panel" style="display:${(isAllTerms && t !== 1) ? 'none' : 'block'};">`;
     if (!isAllTerms) {
       const tLabel = t === 1 ? 'Term 1' : t === 2 ? 'Term 2' : 'Term 3';
       pHTML += `<p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;font-weight:600;">${tLabel}</p>`;
@@ -5231,7 +5246,8 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, t
   let processedDataURL = dataURL;
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Enhancing image (OpenCV)...</span>';
-    processedDataURL = await resizeImageForOCR(dataURL);
+    // Score sheets need higher resolution — numbers in small cells need more pixels.
+    processedDataURL = await resizeImageForOCR(dataURL, 1800);
     mime = 'image/jpeg';
   } catch (preErr) {
     console.warn('[Score OCR] OpenCV preprocess failed, using raw:', preErr.message);
@@ -5239,17 +5255,31 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, t
   }
   const b64 = processedDataURL.split(',')[1];
 
-  // ── Step 1: Groq Vision — reads names AND numbers directly off the sheet ──
+  // ── Step 1: Check Groq key before attempting OCR ──
+  const _groqKey = getGroqKey();
+  if (!_groqKey) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ No Groq API key — go to <b>Settings → API Keys</b> and paste your Groq key to enable auto-read. Using manual entry below.</span>';
+    return null;
+  }
+
+  // ── Step 2: Groq Vision — reads names AND numbers directly off the sheet ──
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
     const rows = await _groqScoreOCR(b64, mime, prompt);
     if (rows && rows.length) return { rows, fromTesseract: false };
+    // Groq returned empty — likely a formatting mismatch rather than an error
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Groq could not find scores in this image. Try a closer, well-lit photo with the score columns clearly visible.</span>';
   } catch (e1) {
     console.warn('Groq score OCR failed:', e1.message);
+    const reason = e1.message?.includes('401') || e1.message?.includes('invalid_api_key')
+      ? 'Groq API key rejected — go to <b>Settings → API Keys</b> and update it.'
+      : e1.message?.includes('rate') || e1.message?.includes('429')
+      ? 'Groq rate limit hit — wait a moment and try again.'
+      : 'Groq scan failed (' + (e1.message || 'unknown error') + '). Try a clearer photo or enter manually.';
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--warn);">⚠️ ${reason}</span>`;
   }
 
-    // ── Groq-only: no fallback engines ──
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">⚠️ Groq scan failed. Check image quality and retry.</span>';
+  // ── Groq-only: no fallback engines ──
   return null;
 }
 
