@@ -4843,6 +4843,8 @@ function _renderScoreOcrPreview(rows, classStudents, termMode){
   const statusEl=$('socr-status');
   if(statusEl) statusEl.innerHTML=`<span style="color:var(--money);">✅ Found ${rows.length} entries — all 3 terms. Review before saving:</span>`;
   const actionRow=$('socr-action-row'); if(actionRow) actionRow.style.display='flex';
+  const isAllTerms=(termMode==='all'||!termMode);
+  const termNum=isAllTerms?'1':(termMode||'1');
 
   // Build a 3-term tabbed preview. Each row has t1/t2/t3 objects.
   // Normalize: if rows have flat ca1/ca2/ca3/exam (Tesseract fallback), wrap into t1.
