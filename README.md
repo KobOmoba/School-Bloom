@@ -194,3 +194,37 @@ When score OCR fails, the status message now indicates the specific reason:
 - `_isPremium()`: currently `return true` (TEMP BYPASS) — do not restore without Bayo go-ahead
 - Password recovery: routes to Bayo/AariNAT only, never agents
 - **Update README after every action, same session, no exceptions**
+
+
+---
+
+## 2026-08-10 — Strategic Decision: Basic Tier Eliminated
+
+**Bayo's decision:** Basic tier completely eliminated. All schools are now Premium.
+New slogan: **GIVE YOUR SCHOOL THE PREMIUM EXPERIENCE**
+
+> "We can't chase both basic and premium markets at the same time."
+
+### Changes — `app.js`
+- `_isPremium()` permanently returns `true` — the "TEMP BYPASS" comment replaced with
+  the permanent rationale: *"All schools are Premium — basic tier eliminated per Bayo's
+  decision 2026-08-10."* No conditional logic remains.
+- All `_gateScan()` and feature-gate calls already pass through (since `_isPremium()` is
+  always true). No other JS changes needed.
+
+### Changes — `index.html`
+- **Login subtitle** updated to: `GIVE YOUR SCHOOL THE PREMIUM EXPERIENCE`
+- **planBadge** — `plan-basic` class and "Basic" text removed; now `plan-premium` / "Premium"
+- **Settings plan label** — "Current Plan: Basic" → "Plan: ✨ Premium" (green)
+- **Finance AI label** — "Basic" → "Premium"
+- **staff-upgrade div** — removed entirely (the "Upgrade to Premium for unlimited staff" block)
+- **upgrade-modal** — removed entirely (both instances, including orphaned fragment)
+- **"Upgrade to Premium" buttons** — removed from settings section and opportunity scout
+- **opp-premium-cta** (opportunity scout upgrade prompt) — removed
+- **premium nudge boxes** (ns, sf, exp, subj) — removed
+- **opp-plan-badge "PREMIUM" span** — removed (redundant)
+- **"How do I upgrade to Premium?"** FAQ entry — removed
+
+### Commits
+- `0cea5ec` — app.js: _isPremium permanent
+- `64d0f23` — index.html: slogan + all premium UI cleanup
