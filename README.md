@@ -228,3 +228,100 @@ New slogan: **GIVE YOUR SCHOOL THE PREMIUM EXPERIENCE**
 ### Commits
 - `0cea5ec` — app.js: _isPremium permanent
 - `64d0f23` — index.html: slogan + all premium UI cleanup
+
+
+---
+
+## 2026-08-11 — Finance AI Setup Agent (complete rebuild)
+
+### Problem statement
+The old Finance AI received 7 data points as context (school name, student count, 3 totals,
+net, term). It could not answer specific questions because it had no salary data, no cash
+position, no per-class breakdown, and no payment details. Proprietors were not intimidated by
+the concept — they were intimidated by not knowing what to put in. The solution is an agent
+that gathers the missing information conversationally, one question at a time.
+
+---
+
+### Data gaps audited and addressed
+
+| Category | Was captured | Now captured |
+|---|---|---|
+| Fee per student | `totalFee` + `paid` ✅ | Same, plus per-class fee map (`classFees`) |
+| Cash/bank balance | ❌ Nothing | `SD.config.cashBalance` + `cashBalanceDate` |
+| Staff salaries | ❌ Nothing | `SD.staff[].salary` (monthly amount) |
+| Salary pay date | ❌ Nothing | `SD.config.salaryPayDay` (day of month) |
+| Per-class breakdown | ❌ Single flat fee | `SD.config.classFees` per class |
+| Upcoming big expenses | ❌ Nothing | `SD.config.upcomingExpenses[]` (notes) |
+| Finance AI context | 7-word string | Full structured brief (see below) |
+
+---
+
+### New: `_financeAudit()` — completeness checker
+Checks 5 conditions: fee set, cash balance recorded, staff salaries set, pay date set,
+students exist. Returns a `score` (0–100%). Progress bar in Finance section shows this score.
+
+### New: `buildRichFinanceContext()` — full financial brief
+Replaces the 7-word string. Now passes to the AI:
+- Fee collection: expected, collected, outstanding, collection rate
+- Per-class breakdown: every class with its own expected/collected/owed
+- Top 6 defaulters by name, class, and balance
+- Cash position with date of last entry
+- Monthly payroll total and pay date
+- Projected net after next payroll (cash + collected − expenses − salaries)
+- Staff and individual salaries
+- Expenses by category (sorted by amount)
+- Upcoming expenses noted by proprietor
+
+### New: `FSA` — Finance Setup Agent
+Conversational wizard that gathers missing financial data without forms or overwhelm.
+
+**Flow:**
+1. Proprietor opens Finance section → completeness score checked
+2. If < 100% and no prior data: `FSA.start()` auto-launches
+3. Agent greets proprietor by first name (from staff records)
+4. Asks ONE question at a time in this order:
+   - Fee structure: "same for all classes or different?" → handles both paths
+   - If "different": goes class by class ("Fee for JSS 1?", "Fee for JSS 2?", etc.)
+   - Cash balance: "how much in bank and hand right now?"
+   - For each staff member with no salary: "[Name]'s monthly salary?"
+   - Salary pay date: "what day of month?"
+5. Each answer is immediately saved to Firestore via `SQ.push()`
+6. Progress bar updates after each answer
+7. On completion: shows financial snapshot summary → loads dashboard
+
+**Key UX decisions:**
+- Never asks more than one thing at a time
+- Accepts natural language ("end of month", "same", "different", "none")
+- Shows what it calculated from each answer immediately (e.g. "✅ ₦35,000 set for all 11 students")
+- "Skip setup — show dashboard" escape hatch always visible
+- "🔄 Update Setup Info" button on dashboard to re-run anytime
+
+### Upgraded: `runFinanceAgent()`
+Now includes:
+- Salary capacity check: compares (cash + collected) vs monthly payroll
+- `canPaySalary` flag used in health cards
+- Uses `buildRichFinanceContext()` for the AI insight prompt
+- Richer BloomAgents log entry with cash and payroll data
+
+### New: Finance health cards (4 cards in 2×2 grid)
+- 💰 Fee collected vs target (colour-coded by %)
+- 🏦 Cash balance with date
+- ✅/🔴 Payroll capacity (green if safe, red if at risk)
+- 📉 Expenses recorded
+
+### New: Suggested questions (Finance dashboard)
+Four one-tap question buttons:
+- "Top defaulters"
+- "Can I pay salaries?"
+- "Worst-paying class"
+- "Net position"
+
+### Finance section layout (new states)
+- **Setup state** (`#finance-setup`): chat UI with input, shown on first open if no data
+- **Empty state** (`#finance-empty`): "Start Finance Setup" button, shown if explicitly dismissed
+- **Dashboard** (`#finance-analysis`): stats + health cards + chat + suggested questions
+
+### Commits
+- `7d6d575` — app.js: FSA agent + rich context + upgraded runFinanceAgent
+- `cb3e683` — index.html: setup chat UI + health cards + suggested questions panel
