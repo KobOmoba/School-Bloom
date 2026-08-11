@@ -386,26 +386,77 @@ function toggleEye(inputId, btn) {
     <!-- 10. FINANCE AI -->
     <section id="sec-finance" class="sec">
       <div class="card" style="border-left:4px solid #8b5cf6;">
-        <div class="ct">🤖 Finance AI Advisor</div>
-        <div id="finance-empty" class="ai-empty">
-          <div class="ai-icon">📊</div>
-          <h4 style="color:var(--sub);margin-bottom:0.5rem;">No Financial Data Yet</h4>
-          <p style="font-size:0.82rem;color:var(--sub);margin-bottom:0.75rem;">Upload a CSV with your school's income and expenses to get AI-powered insights.</p>
-          <button class="btn-brand" onclick="$('finance-csv').click()">📤 Upload Financial Data CSV</button>
-          <input type="file" id="finance-csv" accept=".csv,.xlsx,.xls,.txt,*/*" style="display:none;" onchange="handleFinanceUpload(event)">
-          <p style="font-size:0.72rem;color:var(--sub);margin-top:0.5rem;">CSV columns: Date, Description, Amount, Type (income/expense)</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+          <div class="ct" style="margin-bottom:0;">💰 Finance AI Advisor</div>
+          <span class="plan-badge plan-premium" style="font-size:0.65rem;">✨ PREMIUM</span>
         </div>
+
+        <!-- Progress bar — always visible when setup is in progress -->
+        <div id="fsa-progress-wrap" style="margin-bottom:0.75rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+            <span id="fsa-bar-label" style="font-size:0.7rem;color:var(--sub);">Finance AI setup</span>
+            <button onclick="FSA.start()" style="font-size:0.68rem;background:none;border:none;color:var(--brand);cursor:pointer;padding:0;">▶ Run Setup</button>
+          </div>
+          <div style="background:var(--border);border-radius:4px;height:5px;">
+            <div id="fsa-bar" style="background:linear-gradient(90deg,#8b5cf6,#3b82f6);height:5px;border-radius:4px;width:0%;transition:width 0.4s;"></div>
+          </div>
+        </div>
+
+        <!-- SETUP AGENT — shown during setup conversation -->
+        <div id="finance-setup" style="display:none;">
+          <div id="fsa-chat" style="max-height:340px;overflow-y:auto;margin-bottom:0.75rem;padding-right:2px;"></div>
+          <div style="display:flex;gap:6px;">
+            <input id="fsa-input" type="text" placeholder="Type your answer here…"
+              style="flex:1;font-size:0.85rem;"
+              onkeydown="if(event.key==='Enter')FSA.handleAnswer()">
+            <button class="btn-brand" onclick="FSA.handleAnswer()" style="padding:0.5rem 1rem;white-space:nowrap;">Send →</button>
+          </div>
+          <button class="btn-ghost" style="margin-top:0.5rem;font-size:0.75rem;" onclick="FSA._showDashboard()">Skip setup — show dashboard</button>
+        </div>
+
+        <!-- EMPTY STATE — no data and setup not started -->
+        <div id="finance-empty" class="ai-empty" style="display:none;">
+          <div class="ai-icon">📊</div>
+          <h4 style="color:var(--sub);margin-bottom:0.4rem;">Finance AI Ready to Set Up</h4>
+          <p style="font-size:0.82rem;color:var(--sub);margin-bottom:0.75rem;">Let me ask you a few quick questions to understand your school's finances — no forms, no confusion.</p>
+          <button class="btn-brand" onclick="FSA.start()">▶ Start Finance Setup</button>
+        </div>
+
+        <!-- ANALYSIS DASHBOARD — shown when setup complete or data exists -->
         <div id="finance-analysis" style="display:none;">
+          <!-- Live summary stats -->
           <div class="stats" style="margin-bottom:0.65rem;">
-            <div class="stat"><div class="sn" id="ai-projection" style="font-size:1rem;">₦0</div><div class="sl">Next Term Projection</div></div>
-            <div class="stat"><div class="sn" id="ai-anomalies" style="color:var(--danger);">0</div><div class="sl">Large Transactions</div></div>
+            <div class="stat"><div class="sn" id="ai-projection" style="font-size:1rem;">₦0</div><div class="sl">Fee Target</div></div>
+            <div class="stat"><div class="sn" id="ai-anomalies" style="color:var(--danger);">0</div><div class="sl">Large Expenses</div></div>
           </div>
           <div class="ai-rec" id="ai-recommendation">Analysing your data...</div>
-          <div id="ai-chat-area" style="margin-top:0.65rem;"></div>
-          <label style="margin-top:0.5rem;">Ask the AI a question about your finances</label>
-          <input type="text" id="ai-question" placeholder="e.g. How can I increase collection rate?">
-          <button class="btn-brand" onclick="askFinanceAI()">💬 Ask AI</button>
-          <button class="btn-ghost" style="margin-top:0.4rem;" onclick="$('finance-csv').click()">📤 Re-upload Data</button>
+
+          <!-- Quick financial health cards -->
+          <div id="finance-health-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0.65rem 0;"></div>
+
+          <!-- Chat with Finance AI -->
+          <div id="ai-chat-area" style="max-height:220px;overflow-y:auto;margin:0.65rem 0;"></div>
+          <div style="display:flex;gap:6px;margin-top:0.5rem;">
+            <input type="text" id="ai-question"
+              placeholder="e.g. Can I pay salaries this month?"
+              style="flex:1;font-size:0.82rem;"
+              onkeydown="if(event.key==='Enter')askFinanceAI()">
+            <button class="btn-brand" onclick="askFinanceAI()" style="padding:0.5rem 0.9rem;white-space:nowrap;">Ask →</button>
+          </div>
+
+          <!-- Suggested questions -->
+          <div style="margin-top:0.5rem;display:flex;flex-wrap:wrap;gap:5px;">
+            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='Who are my top 5 defaulters and how much do they owe?';askFinanceAI()">Top defaulters</button>
+            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='Can I pay salaries this month based on what I have collected?';askFinanceAI()">Can I pay salaries?</button>
+            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='Which class has the worst fee collection rate?';askFinanceAI()">Worst-paying class</button>
+            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='How much will I have left after paying salaries and expenses?';askFinanceAI()">Net position</button>
+          </div>
+
+          <div style="display:flex;gap:6px;margin-top:0.65rem;">
+            <button class="btn-ghost" style="flex:1;font-size:0.75rem;" onclick="FSA.start()">🔄 Update Setup Info</button>
+            <button class="btn-ghost" style="flex:1;font-size:0.75rem;" onclick="$('finance-csv').click()">📤 Import Bank Statement</button>
+          </div>
+          <input type="file" id="finance-csv" accept=".csv,.xlsx,.xls,.txt,*/*" style="display:none;" onchange="handleFinanceUpload(event)">
         </div>
       </div>
     </section>
