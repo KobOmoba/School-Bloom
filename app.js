@@ -1848,7 +1848,8 @@ function go(tab) {
   const fn = {
     revenue: renderRevenue, students: renderStudentList, staff: renderStaff,
     sports: loadSports, arts: renderArts, music: renderMusic, health: renderHealth,
-    alumni: renderAlumni, expenses: renderExpenses, finance: checkFinance,
+    alumni: renderAlumni, expenses: renderExpenses,
+    finance: () => { checkFinance(); const score=_financeScore(); if(score<100&&!((SD.students||[]).some(s=>s.paid>0)||(SD.expenses||[]).length>0)){ FSA.start(); } else { const bar=$('fsa-bar'); if(bar) bar.style.width=score+'%'; } },
     comms: renderComms, analytics: renderAnalytics, security: () => {},
     support: renderSupport, settings: loadSettings, opps: renderOpps,
     scorecard: renderScorecard,
@@ -5855,60 +5856,356 @@ function renderCommsHistory(){
     <div style="margin-top:2px;">${esc(l.desc)}</div></div>`).join('');
 }
 
-// ── Finance AI ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// FINANCE AI — Setup Agent + Rich Context
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── Data audit ────────────────────────────────────────────────────────────
+function _financeAudit(){
+  const s=SD.students||[], cfg=SD.config||{}, staff=SD.staff||[], exp=SD.expenses||[];
+  const classes=[...new Set(s.map(x=>x.class).filter(Boolean))];
+  return {
+    feeSet:      s.length>0 && s.some(x=>(x.totalFee||0)>0),
+    cashBalance: cfg.cashBalance!=null && cfg.cashBalance>=0,
+    staffSalary: staff.length===0 || staff.every(x=>(x.salary||0)>0),
+    payDay:      !!cfg.salaryPayDay || staff.length===0,
+    hasStudents: s.length>0,
+    missingStaff: staff.filter(x=>!(x.salary>0)),
+    classes, staff, s, cfg, exp
+  };
+}
+
+function _financeScore(){
+  const a=_financeAudit();
+  const checks=[a.feeSet, a.cashBalance, a.staffSalary, a.payDay, a.hasStudents];
+  return Math.round(checks.filter(Boolean).length/checks.length*100);
+}
+
+// ── Rich context builder ───────────────────────────────────────────────────
+function buildRichFinanceContext(){
+  const s=SD.students||[], cfg=SD.config||{}, staff=SD.staff||[], expenses=SD.expenses||[];
+  const totalExpected=s.reduce((t,x)=>t+(x.totalFee||0),0);
+  const totalCollected=s.reduce((t,x)=>t+(x.paid||0),0);
+  const totalOutstanding=totalExpected-totalCollected;
+  const rate=totalExpected>0?Math.round(totalCollected/totalExpected*100):0;
+  const classes=[...new Set(s.map(x=>x.class).filter(Boolean))];
+  const classSummary=classes.map(cls=>{
+    const cs=s.filter(x=>x.class===cls);
+    const exp=cs.reduce((t,x)=>t+(x.totalFee||0),0);
+    const col=cs.reduce((t,x)=>t+(x.paid||0),0);
+    return `  ${cls}: ${cs.length} students | expected ₦${exp.toLocaleString()} | collected ₦${col.toLocaleString()} | owed ₦${(exp-col).toLocaleString()}`;
+  }).join('\n');
+  const defaulters=s.filter(x=>(x.totalFee||0)-(x.paid||0)>0)
+    .sort((a,b)=>((b.totalFee||0)-(b.paid||0))-((a.totalFee||0)-(a.paid||0))).slice(0,6)
+    .map(x=>`  ${x.name} (${x.class||'—'}): owes ₦${((x.totalFee||0)-(x.paid||0)).toLocaleString()}`).join('\n');
+  const totalSalary=staff.reduce((t,m)=>t+(m.salary||0),0);
+  const staffLines=staff.map(m=>`  ${m.name} (${m.role}): ₦${(m.salary||0).toLocaleString()}/month`).join('\n');
+  const cashBal=cfg.cashBalance!=null?`₦${cfg.cashBalance.toLocaleString()} as of ${cfg.cashBalanceDate||'?'}`:'not recorded';
+  const projNet=(cfg.cashBalance||0)+totalCollected-totalSalary;
+  const totalExp=expenses.reduce((t,e)=>t+(e.amount||0),0);
+  const byCategory={};
+  expenses.forEach(e=>{const c=e.category||'Other';byCategory[c]=(byCategory[c]||0)+e.amount;});
+  const expLines=Object.entries(byCategory).sort((a,b)=>b[1]-a[1])
+    .map(([c,a])=>`  ${c}: ₦${a.toLocaleString()}`).join('\n');
+  const upcoming=(cfg.upcomingExpenses||[]).map(e=>`  ${e.note}`).join('\n');
+  return [
+    `SCHOOL: ${cfg.schoolName||'School'} | TERM: ${cfg.currentTerm||'Term 1'} | STUDENTS: ${s.length}`,
+    ``,
+    `FEE COLLECTION:`,
+    `  Expected this term: ₦${totalExpected.toLocaleString()}`,
+    `  Collected so far:   ₦${totalCollected.toLocaleString()}`,
+    `  Outstanding:        ₦${totalOutstanding.toLocaleString()}`,
+    `  Collection rate:    ${rate}%`,
+    ``,
+    `PER-CLASS BREAKDOWN:\n${classSummary||'  No classes set'}`,
+    ``,
+    `TOP DEFAULTERS (highest balance first):\n${defaulters||'  None — all paid'}`,
+    ``,
+    `CASH POSITION:`,
+    `  Current balance: ${cashBal}`,
+    `  Monthly payroll: ₦${totalSalary.toLocaleString()}`,
+    `  Salary pay date: ${cfg.salaryPayDay?cfg.salaryPayDay+'th of month':'not set'}`,
+    `  Projected net after next payroll: ₦${projNet.toLocaleString()}`,
+    ``,
+    `STAFF & SALARIES:\n${staffLines||'  None recorded'}`,
+    ``,
+    `EXPENSES THIS TERM (₦${totalExp.toLocaleString()} total):\n${expLines||'  None recorded'}`,
+    upcoming?`\nUPCOMING EXPENSES:\n${upcoming}`:'',
+  ].filter(x=>x!==undefined).join('\n').trim();
+}
+
+// ── Finance Setup Agent ────────────────────────────────────────────────────
+const FSA={
+  _steps:[], _idx:0, _waitingFor:null,
+  _classQueue:[], _classIdx:0,
+
+  _chat(text, isUser=false){
+    const a=$('fsa-chat'); if(!a) return;
+    const d=document.createElement('div');
+    if(isUser){
+      d.style.cssText='background:var(--s2);padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:0.82rem;text-align:right;';
+      d.innerHTML=`<b>You:</b> ${esc(text)}`;
+    } else {
+      d.style.cssText='background:rgba(124,58,237,0.09);border-left:3px solid var(--brand);padding:10px 14px;border-radius:8px;margin-bottom:8px;font-size:0.82rem;line-height:1.65;white-space:pre-line;';
+      d.innerHTML=`<b style="color:var(--brand);">Finance AI:</b><br>${text.replace(/\n/g,'<br>')}`;
+    }
+    a.appendChild(d); a.scrollTop=a.scrollHeight;
+  },
+
+  _progress(){
+    const score=_financeScore();
+    const bar=$('fsa-bar'), lbl=$('fsa-bar-label');
+    if(bar) bar.style.width=score+'%';
+    if(lbl) lbl.textContent=`Finance AI setup ${score}% complete`;
+  },
+
+  _buildSteps(){
+    const a=_financeAudit();
+    const steps=[];
+    if(!a.feeSet && a.hasStudents) steps.push({id:'fee',type:'fee'});
+    if(!a.cashBalance) steps.push({id:'cash',type:'cash'});
+    a.missingStaff.forEach((m,i)=>steps.push({id:'sal_'+i,type:'salary',m,idx:(SD.staff||[]).indexOf(m)}));
+    if(!a.payDay && (SD.staff||[]).length>0) steps.push({id:'payday',type:'payday'});
+    return steps;
+  },
+
+  _question(step){
+    const cfg=SD.config||{}, school=cfg.schoolName||'your school';
+    switch(step.type){
+      case 'fee':   return `To track collection accurately, I need to know the school fee this term.\n\nIs it the same for all classes, or do different classes pay different amounts?\n(Reply "same" or "different")`;
+      case 'cash':  return `To know if you can meet your obligations this term, I need your current cash position.\n\nHow much money does ${school} have right now — bank and hand combined?\n(Type a number, e.g. 250000)`;
+      case 'salary':return `What is ${step.m.name}'s monthly salary?\n(${step.m.role} — type a number, e.g. 45000)`;
+      case 'payday':return `On what day of the month do you usually pay staff salaries?\n(Type a number like 25, or say "end of month")`;
+    }
+  },
+
+  async _save(step, text){
+    switch(step.type){
+      case 'fee':{
+        const t=text.toLowerCase();
+        if(t.includes('same')||t.includes('all')){
+          this._waitingFor='fee_amount';
+          this._chat('Got it — same fee for all students. How much is it per term?\n(Type the amount, e.g. 35000)');
+          return null;
+        } else if(t.includes('diff')||t.includes('class')){
+          this._classQueue=[...new Set((SD.students||[]).map(x=>x.class).filter(Boolean))];
+          this._classIdx=0;
+          if(this._classQueue.length){
+            this._waitingFor='class_fee';
+            this._chat(`Good. Let's go class by class.\n\nWhat is the term fee for ${this._classQueue[0]}?`);
+          }
+          return null;
+        }
+        const n=parseFloat(text.replace(/[^0-9.]/g,''));
+        if(n>0){ await this._applyFlatFee(n); return `✅ ₦${n.toLocaleString()} set for all students.`; }
+        return `I didn't catch that. Please reply with "same" or "different".`;
+      }
+      case 'cash':{
+        const n=parseFloat(text.replace(/[^0-9.]/g,''));
+        if(n>=0){
+          SD.config.cashBalance=n;
+          SD.config.cashBalanceDate=new Date().toISOString().split('T')[0];
+          await SQ.push('config',SD.config);
+          return `✅ Cash position: ₦${n.toLocaleString()} recorded.\n\nThis lets me tell you whether you can cover payroll next month.`;
+        }
+        return `Please type a number, e.g. 250000 (write 0 if you have nothing right now — that's still useful to know).`;
+      }
+      case 'salary':{
+        const n=parseFloat(text.replace(/[^0-9.]/g,''));
+        if(n>0){
+          SD.staff[step.idx].salary=n;
+          await SQ.push('staff',SD.staff);
+          return `✅ ${step.m.name}: ₦${n.toLocaleString()}/month`;
+        }
+        return `Please type the salary amount, e.g. 45000`;
+      }
+      case 'payday':{
+        const match=text.match(/\d+/);
+        const day=match?parseInt(match[0]):(text.toLowerCase().includes('end')?30:null);
+        if(day&&day>=1&&day<=31){
+          SD.config.salaryPayDay=day;
+          await SQ.push('config',SD.config);
+          return `✅ Salary date: ${day===30||day===31?'End of month':day+'th'} of each month.`;
+        }
+        return `Please type the day number (e.g. 25) or say "end of month".`;
+      }
+    }
+    return null;
+  },
+
+  async _applyFlatFee(amt){
+    (SD.students||[]).forEach(s=>{ if(!(s.totalFee>0)) s.totalFee=amt; });
+    SD.config.fee=amt;
+    await SQ.push('config',SD.config); await SQ.push('students',SD.students);
+  },
+
+  async start(){
+    const score=_financeScore();
+    if(score>=100){ this._showDashboard(); return; }
+    $('finance-empty').style.display='none';
+    $('finance-analysis').style.display='none';
+    $('finance-setup').style.display='block';
+    this._steps=this._buildSteps(); this._idx=0;
+    this._progress();
+    const name=(SD.staff||[]).find(x=>x.role==='Principal')?.name?.split(' ')[0]||'';
+    this._chat(
+      `Hello${name?' '+name:''}! 👋\n\nI'm your Finance Setup Assistant. I need to ask you a few short questions before I can give you real financial insights.\n\nI'll go one at a time — no forms, no confusion. Ready? Here we go.`
+    );
+    setTimeout(()=>this._nextQuestion(),700);
+  },
+
+  _nextQuestion(){
+    if(this._idx>=this._steps.length){ this._complete(); return; }
+    this._chat(this._question(this._steps[this._idx]));
+  },
+
+  async handleAnswer(){
+    const inp=$('fsa-input'); if(!inp) return;
+    const text=inp.value.trim(); if(!text) return;
+    inp.value=''; this._chat(text,true);
+
+    // Mid-flow: flat fee amount
+    if(this._waitingFor==='fee_amount'){
+      const n=parseFloat(text.replace(/[^0-9.]/g,''));
+      if(n>0){
+        await this._applyFlatFee(n);
+        this._chat(`✅ ₦${n.toLocaleString()} set for all ${(SD.students||[]).length} students.`);
+        this._waitingFor=null; this._idx++; this._progress();
+        setTimeout(()=>this._nextQuestion(),500);
+      } else { this._chat(`Please type a number, e.g. 35000`); }
+      return;
+    }
+
+    // Mid-flow: class fees
+    if(this._waitingFor==='class_fee'){
+      const n=parseFloat(text.replace(/[^0-9.]/g,''));
+      const cls=this._classQueue[this._classIdx];
+      if(n>0){
+        if(!SD.config.classFees) SD.config.classFees={};
+        SD.config.classFees[cls]=n;
+        (SD.students||[]).forEach(s=>{ if(s.class===cls&&!(s.totalFee>0)) s.totalFee=n; });
+        await SQ.push('config',SD.config); await SQ.push('students',SD.students);
+        this._classIdx++;
+        if(this._classIdx<this._classQueue.length){
+          this._chat(`✅ ${cls}: ₦${n.toLocaleString()}\n\nWhat is the fee for ${this._classQueue[this._classIdx]}?`);
+        } else {
+          const summary=Object.entries(SD.config.classFees).map(([c,f])=>`${c}: ₦${f.toLocaleString()}`).join('\n');
+          this._chat(`✅ All class fees saved:\n${summary}`);
+          this._waitingFor=null; this._idx++; this._progress();
+          setTimeout(()=>this._nextQuestion(),500);
+        }
+      } else { this._chat(`Please type the amount for ${cls}, e.g. 35000`); }
+      return;
+    }
+
+    const step=this._steps[this._idx]; if(!step) return;
+    const response=await this._save(step,text);
+    if(response===null) return;
+    if(response.startsWith('✅')){
+      this._chat(response); this._idx++; this._progress();
+      setTimeout(()=>this._nextQuestion(),500);
+    } else {
+      this._chat(response);
+    }
+  },
+
+  _complete(){
+    this._progress();
+    const s=SD.students||[], staff=SD.staff||[], cfg=SD.config||{};
+    const totalFee=s.reduce((t,x)=>t+(x.totalFee||0),0);
+    const totalSal=staff.reduce((t,m)=>t+(m.salary||0),0);
+    const cash=cfg.cashBalance!=null?`₦${cfg.cashBalance.toLocaleString()}`:'not recorded';
+    this._chat(
+      `✅ Setup complete! Here's your financial snapshot:\n\n` +
+      `💰 Term fee target: ₦${totalFee.toLocaleString()}\n` +
+      `🏦 Current cash: ${cash}\n` +
+      `👥 Monthly payroll: ₦${totalSal.toLocaleString()}\n\n` +
+      `Running your full Finance AI analysis now...`
+    );
+    setTimeout(()=>this._showDashboard(),1500);
+  },
+
+  _showDashboard(){
+    const setup=$('finance-setup'), empty=$('finance-empty'), analysis=$('finance-analysis');
+    if(setup) setup.style.display='none';
+    if(empty) empty.style.display='none';
+    if(analysis){ analysis.style.display='block'; }
+    checkFinance(); runLiveFinanceSummary(); BloomAgents.runFinanceAgent();
+  }
+};
+
+// ── Finance entry point ────────────────────────────────────────────────────
 function checkFinance(){
-  const hasData=(SD.expenses||[]).length>0||(SD.students||[]).some(s=>s.paid>0);
-  if(hasData){
-    const fe=$('finance-empty'),fa=$('finance-analysis');
-    if(fe) fe.style.display='none'; if(fa) fa.style.display='block';
+  const score=_financeScore();
+  const hasPayments=(SD.students||[]).some(s=>s.paid>0);
+  const hasExpenses=(SD.expenses||[]).length>0;
+  const hasAnyData=hasPayments||hasExpenses;
+
+  const fe=$('finance-empty'), fa=$('finance-analysis'), fs=$('finance-setup');
+  if(score>=100||hasAnyData){
+    if(fe) fe.style.display='none';
+    if(fs) fs.style.display='none';
+    if(fa) fa.style.display='block';
     runLiveFinanceSummary();
   } else {
-    const fe=$('finance-empty'),fa=$('finance-analysis');
-    if(fe) fe.style.display='block'; if(fa) fa.style.display='none';
+    // Show setup agent
+    if(fa) fa.style.display='none';
+    if(fe) fe.style.display='none';
+    if(fs) fs.style.display='block';
   }
 }
 
 function runLiveFinanceSummary(){
   const s=SD.students||[];
-  const exp=s.reduce((a,x)=>a+(x.totalFee||0),0),col=s.reduce((a,x)=>a+(x.paid||0),0);
+  const exp=s.reduce((a,x)=>a+(x.totalFee||0),0), col=s.reduce((a,x)=>a+(x.paid||0),0);
   const expenses=(SD.expenses||[]).reduce((a,e)=>a+(e.amount||0),0);
+  const staff=SD.staff||[];
+  const totalSal=staff.reduce((t,m)=>t+(m.salary||0),0);
+  const cash=(SD.config||{}).cashBalance;
   const el1=$('ai-projection'); if(el1) el1.textContent=fmt(exp);
   const el2=$('ai-anomalies'); if(el2) el2.textContent=(SD.expenses||[]).filter(e=>e.amount>100000).length;
   const recEl=$('ai-recommendation');
   if(recEl){
     const pct=exp>0?(col/exp*100):0;
-    if(pct<50) recEl.innerHTML=`⚠️ <b>Budget Warning:</b> Fee collection is at <b>${Math.round(pct)}%</b>. Recovering outstanding balances must be prioritized.`;
-    else recEl.innerHTML=`✅ <b>Insight:</b> Fee collection is at <b>${Math.round(pct)}%</b>. Keep monitoring ledger expenditures. Net liquid: ${fmt(col-expenses)}.`;
+    const netCash=(cash||0)+col-expenses-totalSal;
+    if(pct<50) recEl.innerHTML=`⚠️ <b>Warning:</b> Collection at <b>${Math.round(pct)}%</b>. ${col<totalSal?`Current collections (₦${fmt(col)}) won't cover next payroll (₦${fmt(totalSal)}). Chase defaulters immediately.`:'Recovering outstanding balances is critical.'}`;
+    else recEl.innerHTML=`✅ <b>${Math.round(pct)}% collected.</b> Net liquid position: ${fmt(netCash>=0?netCash:netCash)}${netCash<0?' <span style="color:#ef4444;">(deficit)</span>':''}`;
   }
+  // Update setup progress bar if visible
+  const bar=$('fsa-bar'); if(bar) bar.style.width=_financeScore()+'%';
 }
 
-function handleFinanceUpload(event){if(event.target.files[0]){toast('Statement imported. Running budget analysis.');checkFinance();}}
 
 async function askFinanceAI(){
   const qInput=$('ai-question'),q=qInput?.value.trim(); if(!q) return;
   const chatArea=$('ai-chat-area');
   if(chatArea){const uMsg=document.createElement('div');uMsg.style.cssText='background:var(--s2);padding:8px;border-radius:8px;margin-bottom:5px;font-size:0.8rem;';uMsg.innerHTML=`<b>You:</b> ${esc(q)}`;chatArea.appendChild(uMsg);}
   if(qInput) qInput.value='';
-  const s=SD.students||[];
-  const exp=s.reduce((a,x)=>a+(x.totalFee||0),0),col=s.reduce((a,x)=>a+(x.paid||0),0);
-  const expenses=(SD.expenses||[]).reduce((a,e)=>a+(e.amount||0),0);
-  const context=`School: ${SD.config.schoolName||'School'}, Students: ${s.length}, Expected: ${fmt(exp)}, Collected: ${fmt(col)}, Expenses: ${fmt(expenses)}, Net: ${fmt(col-expenses)}, Term: ${SD.config.currentTerm||'Term 1'}`;
-  // Use Groq for finance AI (text-only chat completion — same key as OCR)
+  // Use rich context — includes salary, cash position, per-class breakdown
+  const context=buildRichFinanceContext();
   try{
-    const groqKey = getGroqKey();
-    if (!groqKey) throw new Error('No Groq key configured');
-    const prompt=`You are EduBloom's Finance Advisor for Nigerian schools. School data: ${context}. Question: ${q}\n\nGive a direct, practical answer in 3-4 sentences. Use ₦ for amounts.`;
+    const groqKey=getGroqKey();
+    if(!groqKey) throw new Error('No Groq key configured');
+    const prompt=`You are EduBloom's Finance Advisor for a Nigerian school. You have full financial data:\n\n${context}\n\nPrincipal's question: ${q}\n\nGive a direct, specific, practical answer using the real numbers above. Use ₦ for amounts. 3-5 sentences max. If the question can't be answered from the data, say what specific information you'd need.`;
     const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model:'llama-3.3-70b-versatile', temperature:0.3, max_tokens:300,
+      model:'llama-3.3-70b-versatile', temperature:0.3, max_tokens:400,
       messages:[{role:'user',content:prompt}]
     })});
     const d=await r.json();
     const reply=d.choices?.[0]?.message?.content||'Could not get a response.';
     if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> ${esc(reply)}`;chatArea.appendChild(bMsg);chatArea.scrollTop=chatArea.scrollHeight;}
   }catch(e){
-    if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> Connection error. Please check your internet.`;chatArea.appendChild(bMsg);}
+    if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> ${e.message||'Connection error.'}`;chatArea.appendChild(bMsg);}
   }
 }
+
+// Update Finance Agent to use rich context and include salary/cash
+
+
+
+
+function handleFinanceUpload(event){if(event.target.files[0]){toast('Statement imported. Running budget analysis.');checkFinance();}}
+
 
 // ── Analytics ───────────────────────────────────────────────────────────────
 function renderAnalytics(){
@@ -7197,58 +7494,69 @@ const BloomAgents = {
   async runFinanceAgent() {
     const students = SD.students || [];
     if (!students.length) return;
+    const cfg = SD.config || {}, staff = SD.staff || [], expenses = SD.expenses || [];
 
-    const overdue = students.filter(s => ((s.totalFee || 0) - (s.paid || 0)) > 0);
-    const totalOwed = overdue.reduce((t, s) => t + (s.totalFee || 0) - (s.paid || 0), 0);
-    const totalExpected = students.reduce((t, s) => t + (s.totalFee || 0), 0);
-    const totalCollected = students.reduce((t, s) => t + (s.paid || 0), 0);
-    const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+    const overdue = students.filter(s => ((s.totalFee||0)-(s.paid||0)) > 0);
+    const totalOwed = overdue.reduce((t,s)=>t+(s.totalFee||0)-(s.paid||0), 0);
+    const totalExpected = students.reduce((t,s)=>t+(s.totalFee||0), 0);
+    const totalCollected = students.reduce((t,s)=>t+(s.paid||0), 0);
+    const collectionRate = totalExpected>0 ? Math.round(totalCollected/totalExpected*100) : 0;
+    const critical = overdue.filter(s=>((s.totalFee||0)-(s.paid||0))/(s.totalFee||1)>0.5);
+    const totalSalary = staff.reduce((t,m)=>t+(m.salary||0), 0);
+    const cashBalance = cfg.cashBalance || 0;
+    const canPaySalary = (cashBalance + totalCollected) >= totalSalary;
+    const totalExpenses = expenses.reduce((t,e)=>t+(e.amount||0), 0);
 
-    // Auto-flag critical defaulters (owe > 50% of their fee)
-    const critical = overdue.filter(s => ((s.totalFee||0)-(s.paid||0)) / (s.totalFee||1) > 0.5);
-
-    // Update finance agent panel
+    // Stats panel
     const panel = document.getElementById('ai-finance-panel');
     if (panel) {
       panel.innerHTML = `
-        <div class="ai-agent-stat">
-          <span class="ai-stat-val" style="color:${collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'}">${collectionRate}%</span>
-          <span class="ai-stat-lbl">Collection Rate</span>
-        </div>
-        <div class="ai-agent-stat">
-          <span class="ai-stat-val" style="color:#ef4444">${overdue.length}</span>
-          <span class="ai-stat-lbl">Defaulters</span>
-        </div>
-        <div class="ai-agent-stat">
-          <span class="ai-stat-val" style="color:#f59e0b">${fmt(totalOwed)}</span>
-          <span class="ai-stat-lbl">Outstanding</span>
-        </div>
-        <div class="ai-agent-stat">
-          <span class="ai-stat-val" style="color:#22c55e">${fmt(totalCollected)}</span>
-          <span class="ai-stat-lbl">Collected</span>
-        </div>`;
+        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:${collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'}">${collectionRate}%</span><span class="ai-stat-lbl">Collection Rate</span></div>
+        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:#ef4444">${overdue.length}</span><span class="ai-stat-lbl">Defaulters</span></div>
+        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:#f59e0b">${fmt(totalOwed)}</span><span class="ai-stat-lbl">Outstanding</span></div>
+        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:#22c55e">${fmt(totalCollected)}</span><span class="ai-stat-lbl">Collected</span></div>`;
     }
 
-    // AI insight — only if Groq key set
+    // Health cards
+    const cardsEl = document.getElementById('finance-health-cards');
+    if (cardsEl) {
+      const payrollStatus = totalSalary===0
+        ? {icon:'⚠️',label:'No salaries set',col:'#f59e0b'}
+        : canPaySalary ? {icon:'✅',label:'Can cover payroll',col:'#22c55e'}
+                       : {icon:'🔴',label:'Payroll at risk',col:'#ef4444'};
+      cardsEl.innerHTML = [
+        {icon:'💰',label:'Fee collected',val:fmt(totalCollected),sub:`of ${fmt(totalExpected)} target`,col:collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'},
+        {icon:'🏦',label:'Cash balance',val:cfg.cashBalance!=null?fmt(cfg.cashBalance):'Not set',sub:cfg.cashBalanceDate?`as of ${cfg.cashBalanceDate}`:'tap Setup to add',col:cfg.cashBalance!=null?(cfg.cashBalance>0?'#22c55e':'#ef4444'):'#6b7280'},
+        {icon:payrollStatus.icon,label:'Payroll capacity',val:totalSalary?fmt(totalSalary)+'/mo':'—',sub:payrollStatus.label,col:payrollStatus.col},
+        {icon:'📉',label:'Expenses recorded',val:fmt(totalExpenses),sub:`${expenses.length} transactions`,col:'var(--text)'},
+      ].map(c=>`<div style="background:var(--s2);border-radius:10px;padding:10px 12px;">
+        <div style="font-size:1rem;margin-bottom:2px;">${c.icon}</div>
+        <div style="font-weight:800;font-size:0.88rem;color:${c.col};">${c.val}</div>
+        <div style="font-size:0.68rem;color:var(--sub);margin-top:1px;">${c.label}</div>
+        <div style="font-size:0.65rem;color:var(--sub);opacity:0.75;">${c.sub}</div>
+      </div>`).join('');
+    }
+
+    // Rich AI insight
     const key = getGroqKey();
-    if (key && overdue.length > 0) {
+    if (key && students.length > 0) {
       try {
+        const richCtx = buildRichFinanceContext();
         const insight = await BloomAgents._gemini(
           `You are EduBloom's Finance AI for a Nigerian school.
-Data: ${overdue.length} students owe fees. Total outstanding: ₦${totalOwed.toLocaleString()}. Collection rate: ${collectionRate}%.
-${critical.length} are critical defaulters (>50% unpaid).
-Classes with most defaults: ${[...new Set(overdue.map(s=>s.class||'Unknown'))].slice(0,3).join(', ')}.
+${richCtx}
 
-In 2 short sentences (max 30 words each), give the principal ONE urgent action and ONE prediction about end-of-term collection. Be direct, use Nigerian school context.`, 120);
+In 2 short sentences (max 35 words each): give the principal ONE urgent action and ONE prediction. Use the real numbers above. Be direct.`, 130);
         const insightEl = document.getElementById('ai-finance-insight');
         if (insightEl && insight) insightEl.textContent = insight;
       } catch(e) { console.warn('Finance AI insight failed:', e.message); }
     }
 
-    BloomAgents._log('💰 Finance Agent', `Scanned ${students.length} students`, `${overdue.length} defaulters · ₦${totalOwed.toLocaleString()} outstanding · ${collectionRate}% collected`);
+    BloomAgents._log('💰 Finance Agent',
+      `${collectionRate}% collected · ${overdue.length} defaulters · ${canPaySalary?'payroll OK':'payroll at risk'}`,
+      `₦${totalCollected.toLocaleString()} of ₦${totalExpected.toLocaleString()} · cash: ${cfg.cashBalance!=null?fmt(cfg.cashBalance):'?'} · payroll: ${fmt(totalSalary)}/mo`);
 
-    // Return data for use by other agents
-    return { overdue, critical, totalOwed, collectionRate };
+    return { overdue, critical, totalOwed, collectionRate, canPaySalary, totalSalary, cashBalance };
   },
 
   // Auto-batch send WA reminders to all defaulters (called by agent, confirmed by human)
