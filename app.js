@@ -6532,7 +6532,7 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxT
 // _OCR_DISCIPLINE kept as alias for backward compatibility with _buildRetryPrompt
 const _OCR_DISCIPLINE = OCR_CORE_DISCIPLINE;
 
-function _isPremium() { return true; /* TEMP BYPASS - matches production School-Bloom, Bayo verifying premium features across both. Do not restore until he confirms. */ }
+function _isPremium() { return true; /* All schools are Premium — basic tier eliminated per Bayo's decision 2026-08-10. */ }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
 function _gateScan(prefix, scanInputId) {
   if (_isPremium()) { return true; }
