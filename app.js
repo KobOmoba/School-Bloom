@@ -2078,23 +2078,58 @@ async function handleBulkPayment(e) {
 }
 
 function sendReminder(idx) {
-  const s = SD.students[idx]; const owe = (s.totalFee || 0) - (s.paid || 0);
-  const sn = SD.config.schoolName || 'School Management';
-  const msg = `Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
-  if (s.phone) window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`, '_blank');
-  else alert('No phone number for this student.');
+  const s = SD.students[idx];
+  const owe = (s.totalFee || 0) - (s.paid || 0);
+  if (owe <= 0) return toast('This student has no outstanding balance.');
+  const sn  = SD.config.schoolName || 'Your School';
+  const bd  = SD.config.bankDetails || {};
+  const hasBankDetails = !!(bd.bankName && bd.accountNumber && bd.accountName);
+  const term = SD.config.currentTerm ? `${SD.config.currentTerm}` : 'this term';
+
+  // Payment instructions block — included if bank details are set (BloomCollect zero-cost)
+  const payBlock = hasBankDetails
+    ? `\n💳 *Payment Instructions*\nBank: *${bd.bankName}*\nAccount Number: *${bd.accountNumber}*\nAccount Name: *${bd.accountName}*\nReference: *${s.name.toUpperCase()}*\n\nPlease use your child's full name as the transfer reference so we can confirm payment quickly.`
+    : `\nPlease visit the school or contact us to arrange payment.`;
+
+  const msg =
+`*${sn}* — Fee Reminder 🌸
+
+Dear Parent/Guardian of *${s.name}* (${s.class || 'our student'}),
+
+We hope this message finds you well.
+
+📋 *Fee Summary — ${term}*
+Total Fee:   *${fmt(s.totalFee || 0)}*
+Paid:        *${fmt(s.paid || 0)}*
+Outstanding: *${fmt(owe)}*
+${payBlock}
+
+Once payment is made, please send us your transfer receipt or debit alert on this number so we can update your child's record immediately.
+
+Thank you for your continued support. 🙏
+– *${sn}*
+school.edubloom.com.ng`;
+
+  const phone = (s.phone || '').replace(/\D/g, '');
+  if (phone) {
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    logComm('Fee Reminder', `Sent to ${s.name} — ₦${owe.toLocaleString()} outstanding`);
+  } else {
+    // No phone — copy to clipboard so staff can send manually
+    navigator.clipboard?.writeText(msg).then(() =>
+      toast('📋 No phone number — message copied to clipboard. Paste it manually.')
+    ).catch(() => alert(msg));
+  }
 }
 
 function sendAllReminders() {
-  const overdue = SD.students.filter(s => (s.totalFee || 0) - (s.paid || 0) > 0);
-  if (!overdue.length) return alert('No overdue students!');
+  const overdue = (SD.students || []).filter(s => (s.totalFee || 0) - (s.paid || 0) > 0);
+  if (!overdue.length) return toast('✅ No outstanding balances — everyone is paid up!');
   const withPhone = overdue.filter(s => s.phone);
-  if (withPhone.length > 0) { startBulkWA(); return; }
-  const sn = SD.config.schoolName || 'School';
-  const total = overdue.reduce((t, s) => t + (s.totalFee || 0) - (s.paid || 0), 0);
-  const msg = `Dear Parents of ${sn},\n\nThis is a reminder that *${overdue.length} students* have outstanding fee balances this term.\n\nTotal outstanding: *${fmt(total)}*\n\nKindly ensure prompt payment.\n\n– ${sn}`;
-  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
-  logComm('Fee Reminder Broadcast', `Sent to ${overdue.length} overdue parents. Total: ${fmt(total)}`);
+  const noPhone   = overdue.filter(s => !s.phone);
+  if (!withPhone.length) return alert(`None of the ${overdue.length} defaulters have phone numbers recorded. Add phone numbers in the Students section first.`);
+  if (!confirm(`📲 Send fee reminders to ${withPhone.length} parents via WhatsApp?\n${noPhone.length > 0 ? `(${noPhone.length} students have no phone — skipped)` : ''}\n\nMessages will open one at a time. Tap OK to start.`)) return;
+  startBulkWA();
 }
 
 // ── Students list / CRUD ──────────────────────────────────────────────────
@@ -5539,9 +5574,15 @@ function renderBulkWA(){
   if($('bwa-owe')) $('bwa-owe').textContent=fmt(owe);
   if($('bwa-phone')) $('bwa-phone').textContent=s.phone;
   const sn=SD.config.schoolName||'School Management';
-  const msg=`Dear Parent,\n\nFriendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
+  const bd=SD.config.bankDetails||{};
+  const hasBD=!!(bd.bankName&&bd.accountNumber&&bd.accountName);
+  const term=SD.config.currentTerm||'this term';
+  const payBlock=hasBD
+    ?`\n💳 *Payment Instructions*\nBank: *${bd.bankName}*\nAccount: *${bd.accountNumber}*\nName: *${bd.accountName}*\nReference: *${s.name.toUpperCase()}*\n\nSend your receipt/alert to this number after payment.`
+    :`\nPlease visit the school office to make payment.`;
+  const msg=`*${sn}* — Fee Reminder 🌸\n\nDear Parent/Guardian of *${s.name}* (${s.class||'our student'}),\n\n📋 *Fee Summary — ${term}*\nTotal Fee:   *${fmt(s.totalFee||0)}*\nPaid:        *${fmt(s.paid||0)}*\nOutstanding: *${fmt(owe)}*\n${payBlock}\n\nThank you for your continued support. 🙏\n– *${sn}*`;
   const btn=$('bwa-open-btn');
-  if(btn) btn.onclick=()=>window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
+  if(btn) btn.onclick=()=>{ window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank'); logComm('Fee Reminder',`Sent to ${s.name} — ${fmt(owe)} outstanding`); };
 }
 function nextBulkWA(){_bulkWAIdx++;if(_bulkWAIdx>=_bulkWAStudents.length){alert('Bulk sequence completed.');closeBulkWA();}else renderBulkWA();}
 function closeBulkWA(){closeM('bulk-wa-modal');}
@@ -7986,7 +8027,7 @@ In 2 short sentences (max 35 words each): give the principal ONE urgent action a
       return {
         name: s.name,
         phone: s.phone,
-        msg: `Dear Parent,\n\n*${schoolName}* 🌸\n\nThis is an automated fee reminder.\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Outstanding:* *${fmt(owe)}*\n\nPlease pay promptly to avoid disruption to your child's learning.\n\nReply to this message for payment options.\n\nThank you.\n– EduBloom Finance Agent`
+        msg: (()=>{ const bd=SD.config.bankDetails||{}; const hasBD=!!(bd.bankName&&bd.accountNumber&&bd.accountName); const payBlock=hasBD?`\n💳 *Payment Instructions*\nBank: *${bd.bankName}*\nAccount: *${bd.accountNumber}*\nName: *${bd.accountName}*\nReference: *${s.name.toUpperCase()}*\n\nSend your receipt to this number after payment.`:`\nPlease contact the school to arrange payment.`; return `*${schoolName}* — Fee Reminder 🌸\n\nDear Parent/Guardian of *${s.name}* (${s.class||'our student'}),\n\n📋 *Fee Summary — ${SD.config.currentTerm||'This Term'}*\nTotal Fee:   *${fmt(s.totalFee||0)}*\nPaid:        *${fmt(s.paid||0)}*\nOutstanding: *${fmt(owe)}*\n${payBlock}\n\nThank you for your continued support. 🙏\n– *${schoolName}*`; })()
       };
     });
     openAgentReminderModal(messages);
