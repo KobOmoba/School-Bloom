@@ -1853,7 +1853,13 @@ function go(tab) {
     comms: renderComms, analytics: renderAnalytics, security: () => {},
     support: renderSupport, settings: loadSettings, opps: renderOpps,
     scorecard: renderScorecard,
-    aitools: () => { if (typeof renderAITools === 'function') renderAITools(); }
+    ai: () => { renderMorningAlertStatus(); if(typeof renderAITools==='function') renderAITools(); },
+    aitools: () => { if(typeof renderAITools==='function') renderAITools(); },
+    // ── New sub-pages ──
+    profile:    renderProfilePage,
+    scores:     () => { initScoresPage(); },
+    attendance: () => { initAttendancePage(); },
+    payroll:    renderPayrollPage,
   };
   if (fn[tab]) fn[tab]();
 }
@@ -2269,7 +2275,7 @@ function renderStudentList() {
     const pbt = owe <= 0 ? 'Paid' : s.paid > 0 ? 'Partial' : 'Unpaid';
     const feeBadge = canSeeFees() ? `<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}` : '';
     return `<div class="stu-row" style="display:flex;align-items:center;gap:0.4rem;">
-      <div style="flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;cursor:pointer;" onclick="openProfile(${idx})">
+      <div style="flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;cursor:pointer;" onclick="openProfilePage(${idx})">
         <div class="stu-av" style="${s.photo?'background:none;padding:0;overflow:hidden;':''}">${s.photo?`<img src="${esc(s.photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`:s.name.charAt(0).toUpperCase()}</div>
         <div style="flex:1;min-width:0;">
           <div class="stu-name">${esc(s.name)}</div>
@@ -6199,7 +6205,17 @@ async function askFinanceAI(){
   }
 }
 
-// Update Finance Agent to use rich context and include salary/cash
+// One-tap question shortcut — pre-fills + fires immediately
+function askFinanceQ(question) {
+  const inp = $('ai-question');
+  if (inp) inp.value = question;
+  // Scroll the chat area into view
+  const chat = $('ai-chat-area');
+  if (chat) chat.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  askFinanceAI();
+}
+
+// Update Finance Agent to use rich context — salary capacity, cash position, per-class breakdown, health cards
 
 
 
@@ -6207,7 +6223,408 @@ async function askFinanceAI(){
 function handleFinanceUpload(event){if(event.target.files[0]){toast('Statement imported. Running budget analysis.');checkFinance();}}
 
 
-// ── Analytics ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// SUB-PAGES: Profile · Scores · Attendance · Payroll
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── Student Profile Page ───────────────────────────────────────────────────
+let _profileIdx = null;
+
+function openProfilePage(idx) {
+  _profileIdx = idx;
+  go('profile');
+}
+
+function renderProfilePage() {
+  const idx = _profileIdx;
+  const s = idx !== null ? (SD.students || [])[idx] : null;
+  if (!s) {
+    // No student selected — show pick prompt
+    $('profile-header-card').innerHTML = '<p style="color:var(--sub);text-align:center;padding:1rem;">No student selected.<br><button class="btn-brand btn-sm" style="margin-top:0.5rem;" onclick="go(\'students\')">← Go to Students</button></p>';
+    $('profile-breadcrumb').textContent = 'Select a student from the Students page';
+    $('profile-tab-content').innerHTML = '';
+    return;
+  }
+  // Breadcrumb
+  $('profile-breadcrumb').textContent = s.name + (s.class ? ' · ' + s.class : '');
+  // Avatar
+  const av = $('profile-avatar');
+  if (av) {
+    if (s.photo) av.innerHTML = `<img src="${esc(s.photo)}" style="width:56px;height:56px;object-fit:cover;border-radius:50%;">`;
+    else av.textContent = s.name.charAt(0).toUpperCase();
+  }
+  $('profile-name').textContent = s.name;
+  $('profile-meta').innerHTML = `${esc(s.class||'No class')} · ${s.phone||'No phone'} · ${s.gender||''} ${s.dob?'· DOB: '+s.dob:''}`.trim().replace(/·\s*·/g,'·');
+  switchProfileTab('fees', document.querySelector('.profile-tab[data-ptab="fees"]'));
+}
+
+function switchProfileTab(tab, btn) {
+  document.querySelectorAll('.profile-tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const s = _profileIdx !== null ? (SD.students||[])[_profileIdx] : null;
+  if (!s) return;
+  const el = $('profile-tab-content'); if (!el) return;
+
+  if (tab === 'fees') {
+    const owe = (s.totalFee||0) - (s.paid||0);
+    const hist = (s.paymentHistory||[]).slice(0,10);
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:0.5rem;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:0.75rem;">
+          <div><div style="font-weight:800;font-size:1rem;color:#22c55e;">${fmt(s.paid||0)}</div><div style="font-size:0.68rem;color:var(--sub);">Paid</div></div>
+          <div><div style="font-weight:800;font-size:1rem;color:#ef4444;">${fmt(owe)}</div><div style="font-size:0.68rem;color:var(--sub);">Owing</div></div>
+          <div><div style="font-weight:800;font-size:1rem;">${fmt(s.totalFee||0)}</div><div style="font-size:0.68rem;color:var(--sub);">Total Fee</div></div>
+        </div>
+        <div style="background:var(--border);border-radius:4px;height:6px;margin-bottom:0.65rem;">
+          <div style="background:#22c55e;height:6px;border-radius:4px;width:${s.totalFee?Math.round((s.paid||0)/s.totalFee*100):0}%;"></div>
+        </div>
+        <button class="btn-brand btn-sm" onclick="recordPaymentForStudent(${_profileIdx})">💰 Record Payment</button>
+        <button class="btn-ghost btn-sm" style="margin-left:4px;" onclick="sendFeeReminderSingle(${_profileIdx})">📱 Send Reminder</button>
+      </div>
+      <div class="card">
+        <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">Payment History</div>
+        ${hist.length ? hist.map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.78rem;">
+          <span>${p.date||'—'} <span style="color:var(--sub);">${p.method||''}</span></span>
+          <span style="color:#22c55e;font-weight:700;">${fmt(p.amount||0)}</span>
+        </div>`).join('') : '<p style="color:var(--sub);font-size:0.78rem;">No payments recorded yet.</p>'}
+      </div>`;
+  }
+
+  else if (tab === 'scores') {
+    const scores = s.scores || {};
+    const terms = ['t1','t2','t3'];
+    const termLabels = {t1:'Term 1',t2:'Term 2',t3:'Term 3'};
+    let html = '';
+    terms.forEach(t => {
+      const termData = scores[t] || {};
+      const subjects = Object.keys(termData);
+      if (!subjects.length) return;
+      html += `<div class="card" style="margin-bottom:0.5rem;"><div style="font-weight:700;margin-bottom:0.4rem;">${termLabels[t]}</div>`;
+      subjects.forEach(sub => {
+        const d = termData[sub]||{};
+        const total = (d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0);
+        html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
+          <span>${esc(sub)}</span>
+          <span style="color:${total>=50?'#22c55e':total>=40?'#f59e0b':'#ef4444'};font-weight:700;">${total}/100</span>
+        </div>`;
+      });
+      html += '</div>';
+    });
+    el.innerHTML = html || '<div class="card"><p style="color:var(--sub);font-size:0.82rem;">No scores recorded yet. Go to 📝 Scores to enter them.</p></div>';
+  }
+
+  else if (tab === 'attendance') {
+    const att = s.attendance || {};
+    const dates = Object.keys(att).sort().reverse().slice(0,20);
+    el.innerHTML = `<div class="card">
+      <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">Recent Attendance (last 20 days)</div>
+      ${dates.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;">
+        ${dates.map(d=>`<div title="${d}" style="padding:3px 7px;border-radius:5px;font-size:0.7rem;background:${att[d]==='present'?'rgba(34,197,94,0.15)':att[d]==='late'?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)'};color:${att[d]==='present'?'#22c55e':att[d]==='late'?'#f59e0b':'#ef4444'};">
+          ${d.slice(5)} ${att[d]==='present'?'✓':att[d]==='late'?'L':'✗'}
+        </div>`).join('')}
+      </div>` : '<p style="color:var(--sub);font-size:0.78rem;">No attendance data yet.</p>'}
+    </div>`;
+  }
+
+  else if (tab === 'swot') {
+    const sw = s.swot || {};
+    const fields = [{k:'strengths',label:'💪 Strengths',col:'#22c55e'},{k:'weaknesses',label:'⚠️ Weaknesses',col:'#f59e0b'},{k:'opportunities',label:'🚀 Opportunities',col:'#3b82f6'},{k:'threats',label:'🔴 Threats',col:'#ef4444'}];
+    el.innerHTML = `<div class="card">
+      ${fields.map(f=>`<div style="margin-bottom:0.6rem;">
+        <div style="font-weight:700;font-size:0.8rem;color:${f.col};margin-bottom:3px;">${f.label}</div>
+        <div style="font-size:0.8rem;color:var(--text);">${esc(sw[f.k]||'—')}</div>
+      </div>`).join('')}
+      <button class="btn-brand btn-sm" style="margin-top:0.25rem;" onclick="editStudent(${_profileIdx});go('students')">✏️ Edit SWOT</button>
+    </div>`;
+  }
+}
+
+function editStudentFromProfile() {
+  if (_profileIdx === null) return;
+  go('students');
+  setTimeout(() => editStudent(_profileIdx), 200);
+}
+
+function recordPaymentForStudent(idx) {
+  go('students');
+  setTimeout(() => {
+    const el = document.querySelector(`[onclick="openProfile(${idx})"]`)?.closest('.stu-row');
+    if (el) el.scrollIntoView({behavior:'smooth'});
+    openPaymentModal(idx);
+  }, 200);
+}
+
+// Patch openProfile to also update _profileIdx so profile page stays in sync
+const _origOpenProfile = typeof openProfile === 'function' ? openProfile : null;
+window.openProfile = function(idx) {
+  _profileIdx = idx;
+  if (_origOpenProfile) _origOpenProfile(idx);
+};
+
+// ── Scores Full Page ────────────────────────────────────────────────────────
+function initScoresPage() {
+  const classSel = $('sp-class'), subjSel = $('sp-subject');
+  if (!classSel || !subjSel) return;
+  const classes = [...new Set((SD.students||[]).map(s=>s.class).filter(Boolean))].sort();
+  classSel.innerHTML = '<option value="">All Classes</option>' + classes.map(c=>`<option>${esc(c)}</option>`).join('');
+  // subjects from all scores
+  const subjects = [...new Set((SD.students||[]).flatMap(s=>Object.values(s.scores||{}).flatMap(t=>Object.keys(t))))].sort();
+  subjSel.innerHTML = '<option value="">All Subjects</option>' + subjects.map(s=>`<option>${esc(s)}</option>`).join('');
+  renderScoresPage();
+}
+
+function renderScoresPage() {
+  const el = $('scores-page-content'); if (!el) return;
+  const cls = $('sp-class')?.value || '';
+  const subj = $('sp-subject')?.value || '';
+  const term = 't' + ($('sp-term')?.value || '1');
+  let students = SD.students || [];
+  if (cls) students = students.filter(s => s.class === cls);
+  if (!students.length) { el.innerHTML = '<p style="color:var(--sub);text-align:center;padding:2rem;">No students in this class.</p>'; return; }
+
+  const allSubjects = subj ? [subj] : [...new Set(students.flatMap(s=>Object.keys((s.scores||{})[term]||{})))].sort();
+  if (!allSubjects.length) { el.innerHTML = '<div class="card"><p style="color:var(--sub);font-size:0.82rem;">No scores recorded for this term yet. Use 📸 Scan Scores or add via student profile.</p></div>'; return; }
+
+  el.innerHTML = allSubjects.map(sub => {
+    const rows = students.map(s => {
+      const d = ((s.scores||{})[term]||{})[sub]||{};
+      const total = (d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0);
+      const grade = total>=75?'A':total>=60?'B':total>=50?'C':total>=45?'D':total>=40?'E':'F';
+      const col = total>=60?'#22c55e':total>=50?'#f59e0b':'#ef4444';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
+        <div style="cursor:pointer;" onclick="openProfilePage(${SD.students.indexOf(s)})">
+          <span style="font-weight:600;">${esc(s.name)}</span>
+          <span style="color:var(--sub);font-size:0.68rem;margin-left:4px;">${esc(s.class||'')}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="font-size:0.7rem;color:var(--sub);">${d.ca1||0}+${d.ca2||0}+${d.ca3||0}+${d.exam||0}</span>
+          <span style="font-weight:800;color:${col};min-width:28px;text-align:right;">${total}</span>
+          <span style="background:${col};color:#fff;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:800;">${grade}</span>
+        </div>
+      </div>`;
+    }).join('');
+    const avg = Math.round(students.reduce((t,s)=>{const d=((s.scores||{})[term]||{})[sub]||{};return t+(d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0);},0)/students.length);
+    return `<div class="card" style="margin-bottom:0.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+        <div style="font-weight:800;font-size:0.85rem;">${esc(sub)}</div>
+        <span style="font-size:0.72rem;color:var(--sub);">Class avg: <b>${avg}/100</b></span>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+function exportScoresCSV() {
+  const cls = $('sp-class')?.value || '';
+  const term = 't' + ($('sp-term')?.value || '1');
+  let students = SD.students || [];
+  if (cls) students = students.filter(s => s.class === cls);
+  const subjects = [...new Set(students.flatMap(s=>Object.keys((s.scores||{})[term]||{})))].sort();
+  const header = ['Name','Class',...subjects.flatMap(s=>[s+' CA1',s+' CA2',s+' CA3',s+' Exam',s+' Total'])].join(',');
+  const rows = students.map(s => {
+    const scores = subjects.flatMap(sub => {
+      const d = ((s.scores||{})[term]||{})[sub]||{};
+      return [d.ca1||0, d.ca2||0, d.ca3||0, d.exam||0, (d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0)];
+    });
+    return [s.name, s.class||'', ...scores].join(',');
+  });
+  const csv = [header,...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `scores_${cls||'all'}_term${$('sp-term')?.value||1}.csv`;
+  a.click();
+}
+
+// ── Attendance Full Page ────────────────────────────────────────────────────
+let _attPageData = {}; // {studentId: 'present'|'absent'|'late'}
+
+function initAttendancePage() {
+  const sel = $('att-class-page'); if (!sel) return;
+  const classes = [...new Set((SD.students||[]).map(s=>s.class).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All Classes</option>' + classes.map(c=>`<option>${esc(c)}</option>`).join('');
+  const dateEl = $('att-date-page');
+  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().split('T')[0];
+  renderAttendancePage();
+}
+
+function renderAttendancePage() {
+  const el = $('attendance-page-content'); if (!el) return;
+  const cls = $('att-class-page')?.value || '';
+  const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
+  let students = SD.students || [];
+  if (cls) students = students.filter(s => s.class === cls);
+  if (!students.length) { el.innerHTML = '<p style="color:var(--sub);padding:1rem;text-align:center;">No students found.</p>'; return; }
+
+  // Load existing data for this date
+  _attPageData = {};
+  students.forEach(s => { _attPageData[s.name] = (s.attendance||{})[date] || ''; });
+
+  const present = Object.values(_attPageData).filter(v=>v==='present').length;
+  const absent  = Object.values(_attPageData).filter(v=>v==='absent').length;
+  const late    = Object.values(_attPageData).filter(v=>v==='late').length;
+
+  el.innerHTML = `<div style="display:flex;gap:8px;margin-bottom:0.5rem;font-size:0.78rem;font-weight:700;">
+      <span style="color:#22c55e;">✓ ${present} present</span>
+      <span style="color:#ef4444;">✗ ${absent} absent</span>
+      <span style="color:#f59e0b;">L ${late} late</span>
+    </div>` +
+    students.map((s, i) => {
+      const cur = _attPageData[s.name] || '';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+        <div style="flex:1;font-size:0.82rem;font-weight:600;">${esc(s.name)}<span style="color:var(--sub);font-size:0.7rem;margin-left:4px;">${esc(s.class||'')}</span></div>
+        <div style="display:flex;gap:4px;">
+          <button onclick="setAtt('${esc(s.name)}','present',this)" style="padding:4px 8px;border-radius:6px;border:1px solid ${cur==='present'?'#22c55e':'var(--border)'};background:${cur==='present'?'rgba(34,197,94,0.15)':'transparent'};color:${cur==='present'?'#22c55e':'var(--sub)'};cursor:pointer;font-size:0.75rem;font-weight:700;">✓</button>
+          <button onclick="setAtt('${esc(s.name)}','late',this)" style="padding:4px 8px;border-radius:6px;border:1px solid ${cur==='late'?'#f59e0b':'var(--border)'};background:${cur==='late'?'rgba(245,158,11,0.15)':'transparent'};color:${cur==='late'?'#f59e0b':'var(--sub)'};cursor:pointer;font-size:0.75rem;font-weight:700;">L</button>
+          <button onclick="setAtt('${esc(s.name)}','absent',this)" style="padding:4px 8px;border-radius:6px;border:1px solid ${cur==='absent'?'#ef4444':'var(--border)'};background:${cur==='absent'?'rgba(239,68,68,0.15)':'transparent'};color:${cur==='absent'?'#ef4444':'var(--sub)'};cursor:pointer;font-size:0.75rem;font-weight:700;">✗</button>
+        </div>
+      </div>`;
+    }).join('');
+}
+
+function setAtt(name, status, btn) {
+  _attPageData[name] = status;
+  // Refresh button colours in this row
+  const row = btn.closest('div[style*="display:flex"]');
+  if (row) row.querySelectorAll('button').forEach(b => {
+    const s = b.textContent.trim() === '✓' ? 'present' : b.textContent.trim() === 'L' ? 'late' : 'absent';
+    const active = s === status;
+    const col = s==='present'?'#22c55e':s==='late'?'#f59e0b':'#ef4444';
+    b.style.borderColor = active ? col : 'var(--border)';
+    b.style.background = active ? `rgba(${s==='present'?'34,197,94':s==='late'?'245,158,11':'239,68,68'},0.15)` : 'transparent';
+    b.style.color = active ? col : 'var(--sub)';
+  });
+}
+
+function markAllPresent() {
+  Object.keys(_attPageData).forEach(n => _attPageData[n] = 'present');
+  renderAttendancePage();
+}
+
+async function saveAttendancePage() {
+  const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
+  (SD.students || []).forEach(s => {
+    if (_attPageData[s.name] !== undefined) {
+      if (!s.attendance) s.attendance = {};
+      s.attendance[date] = _attPageData[s.name] || 'absent';
+    }
+  });
+  await SQ.push('students', SD.students);
+  toast('✅ Attendance saved for ' + date);
+  renderAttendancePage();
+}
+
+function exportAttendanceCSV() {
+  const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
+  const rows = [['Name','Class','Status'],...(SD.students||[]).map(s=>[s.name,s.class||'',_attPageData[s.name]||'—'])];
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const a = document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download=`attendance_${date}.csv`; a.click();
+}
+
+// ── Payroll Page ─────────────────────────────────────────────────────────────
+function renderPayrollPage() {
+  const staff = SD.staff || [];
+  const cfg = SD.config || {};
+  const totalSalary = staff.reduce((t,m)=>t+(m.salary||0), 0);
+  const cashBalance = cfg.cashBalance || 0;
+  const collected = (SD.students||[]).reduce((t,s)=>t+(s.paid||0), 0);
+  const canAfford = (cashBalance + collected) >= totalSalary;
+  const history = cfg.payrollHistory || [];
+  const thisMonth = new Date().toISOString().slice(0,7);
+  const alreadyRan = history.some(h=>h.month===thisMonth);
+
+  // Summary card
+  const summaryEl = $('payroll-summary');
+  if (summaryEl) summaryEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0.65rem;">
+      <div style="background:var(--s2);border-radius:10px;padding:10px 12px;">
+        <div style="font-weight:800;font-size:1rem;">${fmt(totalSalary)}</div>
+        <div style="font-size:0.68rem;color:var(--sub);">Monthly obligation</div>
+      </div>
+      <div style="background:var(--s2);border-radius:10px;padding:10px 12px;">
+        <div style="font-weight:800;font-size:1rem;color:${canAfford?'#22c55e':'#ef4444'};">${canAfford?'✅ Can pay':'🔴 Shortfall'}</div>
+        <div style="font-size:0.68rem;color:var(--sub);">Cash + collections: ${fmt(cashBalance+collected)}</div>
+      </div>
+    </div>
+    <div style="font-size:0.75rem;color:var(--sub);">Pay date: ${cfg.salaryPayDay?cfg.salaryPayDay+'th of month':'not set — tap Settings → Finance Setup to add'}</div>
+    ${alreadyRan?`<div style="font-size:0.75rem;color:#22c55e;margin-top:4px;">✅ Payroll already run for ${thisMonth}</div>`:''}`;
+
+  // Staff list
+  const staffEl = $('payroll-staff-list');
+  if (staffEl) {
+    if (!staff.length) {
+      staffEl.innerHTML = '<p style="color:var(--sub);font-size:0.82rem;">No staff added yet. Go to Staff to add them.</p>';
+    } else {
+      staffEl.innerHTML = staff.map((m,i) => {
+        const hasSalary = m.salary > 0;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:0.85rem;">${esc(m.name)}</div>
+            <div style="font-size:0.72rem;color:var(--sub);">${esc(m.role)}</div>
+          </div>
+          <div style="text-align:right;">
+            ${hasSalary
+              ? `<div style="font-weight:800;color:#22c55e;">${fmt(m.salary)}</div><div style="font-size:0.65rem;color:var(--sub);">/month</div>`
+              : `<button class="btn-ghost btn-sm" style="font-size:0.72rem;" onclick="promptSalary(${i})">+ Set salary</button>`}
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // History
+  const histEl = $('payroll-history');
+  if (histEl) {
+    histEl.innerHTML = history.length
+      ? history.slice(0,6).map(h=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
+          <div><b>${h.month}</b><span style="color:var(--sub);font-size:0.7rem;margin-left:6px;">ran on ${h.date}</span></div>
+          <span style="font-weight:700;color:#22c55e;">${fmt(h.total)}</span>
+        </div>`).join('')
+      : '<p style="color:var(--sub);font-size:0.78rem;">No payroll history yet. Run your first payroll above.</p>';
+  }
+
+  const btn = $('run-payroll-btn');
+  if (btn) { btn.textContent = alreadyRan ? '✅ Already Run' : '▶ Run Payroll'; btn.disabled = alreadyRan; }
+}
+
+async function runPayroll() {
+  const staff = SD.staff || [];
+  const totalSalary = staff.reduce((t,m)=>t+(m.salary||0), 0);
+  if (!totalSalary) return alert('No salaries set. Set salaries for staff members first.');
+  if (!confirm(`Record payroll of ${fmt(totalSalary)} for ${staff.length} staff members?\n\nThis will be logged in payroll history.`)) return;
+  const cfg = SD.config || {};
+  if (!cfg.payrollHistory) cfg.payrollHistory = [];
+  const month = new Date().toISOString().slice(0,7);
+  cfg.payrollHistory.unshift({
+    month, date: new Date().toISOString().split('T')[0],
+    total: totalSalary,
+    records: staff.map(m=>({name:m.name,role:m.role,salary:m.salary||0}))
+  });
+  // Deduct from cash balance
+  if (cfg.cashBalance != null) {
+    cfg.cashBalance = Math.max(0, cfg.cashBalance - totalSalary);
+    cfg.cashBalanceDate = new Date().toISOString().split('T')[0];
+  }
+  await SQ.push('config', cfg);
+  SD.config = cfg;
+  toast('✅ Payroll recorded — ' + fmt(totalSalary));
+  renderPayrollPage();
+}
+
+async function promptSalary(staffIdx) {
+  const m = (SD.staff||[])[staffIdx]; if (!m) return;
+  const val = prompt(`Monthly salary for ${m.name} (${m.role}):`, '');
+  const n = parseFloat((val||'').replace(/[^0-9.]/g,''));
+  if (!(n > 0)) return;
+  SD.staff[staffIdx].salary = n;
+  await SQ.push('staff', SD.staff);
+  toast(`✅ ${m.name}: ₦${n.toLocaleString()}/month`);
+  renderPayrollPage();
+}
+
+// ── Navigation wiring for new pages ──────────────────────────────────────────
+
+// ── Analytics ─────────────────────────────────────────────────────────────
+
 function renderAnalytics(){
   const el=$('analytics-content'); if(!el) return;
   const s=SD.students||[];
