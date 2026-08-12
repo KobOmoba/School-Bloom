@@ -63,6 +63,29 @@
 .subj-chip{display:inline-flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--border);border-radius:20px;padding:3px 10px 3px 10px;font-size:0.74rem;font-weight:600;color:var(--text);}
 .chip-del{background:none;border:none;color:var(--danger);font-size:1rem;cursor:pointer;padding:0;line-height:1;margin-left:2px;font-weight:700;}
 
+
+/* Nav group labels */
+.nav-group-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--sub);
+  opacity: 0.55;
+  padding: 0.55rem 0.75rem 0.15rem;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Profile tabs */
+.profile-tab {
+  background: var(--s2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.4rem 0.75rem; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  color: var(--sub); white-space: nowrap; transition: background 0.15s;
+}
+.profile-tab.active {
+  background: var(--brand); color: #fff; border-color: var(--brand);
+}
 </style>
 <script>
 // Eye toggle — defined here so it works even if app.js has an error
@@ -444,12 +467,27 @@ function toggleEye(inputId, btn) {
             <button class="btn-brand" onclick="askFinanceAI()" style="padding:0.5rem 0.9rem;white-space:nowrap;">Ask →</button>
           </div>
 
-          <!-- Suggested questions -->
-          <div style="margin-top:0.5rem;display:flex;flex-wrap:wrap;gap:5px;">
-            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='Who are my top 5 defaulters and how much do they owe?';askFinanceAI()">Top defaulters</button>
-            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='Can I pay salaries this month based on what I have collected?';askFinanceAI()">Can I pay salaries?</button>
-            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='Which class has the worst fee collection rate?';askFinanceAI()">Worst-paying class</button>
-            <button class="btn-ghost" style="font-size:0.7rem;padding:3px 8px;" onclick="document.getElementById('ai-question').value='How much will I have left after paying salaries and expenses?';askFinanceAI()">Net position</button>
+          <!-- Suggested questions — four one-tap prompts -->
+          <div style="margin-top:0.6rem;">
+            <div style="font-size:0.68rem;font-weight:700;color:var(--sub);letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.35rem;">Quick questions — tap to ask</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+              <button onclick="askFinanceQ('Who are my top defaulters and exactly how much does each one owe?')"
+                style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:9px;padding:9px 10px;font-size:0.78rem;font-weight:700;color:#ef4444;cursor:pointer;text-align:left;line-height:1.3;">
+                🔴 Top defaulters<br><span style="font-weight:400;font-size:0.68rem;color:var(--sub);">Who owes the most?</span>
+              </button>
+              <button onclick="askFinanceQ('Can I pay staff salaries this month? Show the exact numbers — collections vs payroll obligation.')"
+                style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:9px;padding:9px 10px;font-size:0.78rem;font-weight:700;color:#22c55e;cursor:pointer;text-align:left;line-height:1.3;">
+                💸 Can I pay salaries?<br><span style="font-weight:400;font-size:0.68rem;color:var(--sub);">Collections vs payroll</span>
+              </button>
+              <button onclick="askFinanceQ('Which class has the worst fee collection rate and what should I do about it?')"
+                style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:9px;padding:9px 10px;font-size:0.78rem;font-weight:700;color:#f59e0b;cursor:pointer;text-align:left;line-height:1.3;">
+                📚 Worst-paying class<br><span style="font-weight:400;font-size:0.68rem;color:var(--sub);">Which class to chase first?</span>
+              </button>
+              <button onclick="askFinanceQ('What is my net cash position after all salaries and expenses? Will I have a surplus or deficit?')"
+                style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:9px;padding:9px 10px;font-size:0.78rem;font-weight:700;color:#3b82f6;cursor:pointer;text-align:left;line-height:1.3;">
+                📊 Net position<br><span style="font-weight:400;font-size:0.68rem;color:var(--sub);">Surplus or deficit?</span>
+              </button>
+            </div>
           </div>
 
           <div style="display:flex;gap:6px;margin-top:0.65rem;">
@@ -1099,6 +1137,85 @@ function toggleEye(inputId, btn) {
   </div>
     </section>
 
+  
+    <!-- STUDENT PROFILE PAGE -->
+    <section id="sec-profile" class="sec">
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
+        <button onclick="go('students')" style="background:none;border:none;color:var(--brand);font-size:1rem;cursor:pointer;padding:0;">← Students</button>
+        <div style="font-size:0.78rem;color:var(--sub);" id="profile-breadcrumb">Select a student</div>
+      </div>
+      <!-- Avatar + name block -->
+      <div class="card" style="display:flex;align-items:center;gap:1rem;padding:1rem;" id="profile-header-card">
+        <div id="profile-avatar" style="width:56px;height:56px;border-radius:50%;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:800;color:#fff;flex-shrink:0;"></div>
+        <div style="flex:1;min-width:0;">
+          <div id="profile-name" style="font-size:1.05rem;font-weight:800;"></div>
+          <div id="profile-meta" style="font-size:0.78rem;color:var(--sub);margin-top:2px;"></div>
+        </div>
+        <button id="profile-edit-btn" onclick="editStudentFromProfile()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:0.75rem;cursor:pointer;">✏️ Edit</button>
+      </div>
+      <!-- Profile tabs -->
+      <div style="display:flex;gap:4px;margin-bottom:0.65rem;overflow-x:auto;padding-bottom:2px;">
+        <button class="profile-tab active" data-ptab="fees" onclick="switchProfileTab('fees',this)">💰 Fees</button>
+        <button class="profile-tab" data-ptab="scores" onclick="switchProfileTab('scores',this)">📝 Scores</button>
+        <button class="profile-tab" data-ptab="attendance" onclick="switchProfileTab('attendance',this)">📅 Attendance</button>
+        <button class="profile-tab" data-ptab="swot" onclick="switchProfileTab('swot',this)">🧠 SWOT</button>
+      </div>
+      <div id="profile-tab-content"></div>
+    </section>
+
+    <!-- SCORES FULL PAGE -->
+    <section id="sec-scores" class="sec">
+      <div class="ct" style="margin-bottom:0.6rem;">📝 Subject Scores</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:0.65rem;">
+        <select id="sp-class" onchange="renderScoresPage()" style="flex:1;min-width:120px;font-size:0.82rem;"></select>
+        <select id="sp-subject" onchange="renderScoresPage()" style="flex:1;min-width:120px;font-size:0.82rem;"></select>
+        <select id="sp-term" onchange="renderScoresPage()" style="flex:1;min-width:100px;font-size:0.82rem;">
+          <option value="1">Term 1</option><option value="2">Term 2</option><option value="3">Term 3</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:0.65rem;flex-wrap:wrap;">
+        <button class="btn-brand btn-sm" style="background:#0891b2;" onclick="go('students');openScoreOCR()">📸 Scan Scores</button>
+        <button class="btn-brand btn-sm" style="background:#059669;" onclick="exportScoresCSV()">⬇️ Export CSV</button>
+      </div>
+      <div id="scores-page-content"></div>
+    </section>
+
+    <!-- ATTENDANCE FULL PAGE -->
+    <section id="sec-attendance" class="sec">
+      <div class="ct" style="margin-bottom:0.6rem;">📅 Attendance</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:0.65rem;">
+        <select id="att-class-page" onchange="renderAttendancePage()" style="flex:1;font-size:0.82rem;"></select>
+        <input type="date" id="att-date-page" onchange="renderAttendancePage()"
+          style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.45rem 0.6rem;color:var(--text);font-size:0.82rem;">
+      </div>
+      <div id="attendance-page-content"></div>
+      <div style="margin-top:0.65rem;display:flex;gap:6px;">
+        <button class="btn-brand btn-sm" onclick="markAllPresent()">✅ All Present</button>
+        <button class="btn-ghost btn-sm" onclick="saveAttendancePage()">💾 Save</button>
+        <button class="btn-ghost btn-sm" onclick="exportAttendanceCSV()">⬇️ Export</button>
+      </div>
+    </section>
+
+    <!-- PAYROLL FULL PAGE -->
+    <section id="sec-payroll" class="sec">
+      <div class="ct" style="margin-bottom:0.6rem;">💸 Payroll</div>
+      <!-- Summary bar -->
+      <div class="card" id="payroll-summary" style="margin-bottom:0.65rem;"></div>
+      <!-- Staff salary list -->
+      <div class="card" style="margin-bottom:0.65rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+          <div style="font-weight:700;font-size:0.85rem;">Staff & Salaries</div>
+          <button class="btn-brand btn-sm" onclick="runPayroll()" id="run-payroll-btn">▶ Run Payroll</button>
+        </div>
+        <div id="payroll-staff-list"></div>
+      </div>
+      <!-- Payroll history -->
+      <div class="card">
+        <div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">📋 Payroll History</div>
+        <div id="payroll-history"></div>
+      </div>
+    </section>
+
   </main>
 
   <!-- BOTTOM NAV — all 16 sections -->
@@ -1110,24 +1227,37 @@ function toggleEye(inputId, btn) {
       </div>
       <span id="nav-school-name">Educational Bloom</span>
     </div>
+    <div class="nav-group-label">STUDENTS</div>
     <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue</button>
     <button class="nlink" data-t="students" onclick="go('students')"><span class="ni">🎓</span>Students</button>
+    <button class="nlink" data-t="profile" onclick="go('profile')"><span class="ni">👤</span>Profile</button>
+    <button class="nlink" data-t="scores" onclick="go('scores')"><span class="ni">📝</span>Scores</button>
+    <button class="nlink" data-t="attendance" onclick="go('attendance')"><span class="ni">📅</span>Attendance</button>
+    <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Report Card</button>
+
+    <div class="nav-group-label">STAFF & FINANCE</div>
     <button class="nlink" data-t="staff" onclick="go('staff')"><span class="ni">👥</span>Staff</button>
+    <button class="nlink" data-t="payroll" onclick="go('payroll')"><span class="ni">💸</span>Payroll</button>
+    <button class="nlink" data-t="expenses" onclick="go('expenses')"><span class="ni">📉</span>Expenses</button>
+    <button class="nlink" data-t="finance" onclick="go('finance')"><span class="ni">🤖</span>Finance AI</button>
+
+    <div class="nav-group-label">INSIGHTS</div>
+    <button class="nlink" data-t="analytics" onclick="go('analytics')"><span class="ni">📊</span>Analytics</button>
+    <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🔒</span>Security</button>
+    <button class="nlink" data-t="ai" onclick="go('ai');renderMorningAlertStatus();"><span class="ni">🤖</span>Agents</button>
+    <button class="nlink" data-t="opps" onclick="go('opps')"><span class="ni">🔍</span>Scout</button>
+
+    <div class="nav-group-label">EXTRAS</div>
     <button class="nlink" data-t="sports" onclick="go('sports')"><span class="ni">⚽</span>Sports</button>
     <button class="nlink" data-t="arts" onclick="go('arts')"><span class="ni">🎨</span>Arts</button>
     <button class="nlink" data-t="music" onclick="go('music')"><span class="ni">🎵</span>Music</button>
     <button class="nlink" data-t="health" onclick="go('health')"><span class="ni">🏥</span>Health</button>
     <button class="nlink" data-t="alumni" onclick="go('alumni')"><span class="ni">🎓</span>Alumni</button>
-    <button class="nlink" data-t="expenses" onclick="go('expenses')"><span class="ni">📉</span>Expenses</button>
-    <button class="nlink" data-t="finance" onclick="go('finance')"><span class="ni">🤖</span>Finance AI</button>
     <button class="nlink" data-t="comms" onclick="go('comms')"><span class="ni">📢</span>Comms</button>
-    <button class="nlink" data-t="analytics" onclick="go('analytics')"><span class="ni">📊</span>Analytics</button>
-    <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🔒</span>Security</button>
-    <button class="nlink" data-t="ai" onclick="go('ai');renderMorningAlertStatus();"><span class="ni">🤖</span>Agents</button>
+
+    <div class="nav-group-label">SYSTEM</div>
     <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
-    <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Scorecard</button>
-    <button class="nlink" data-t="opps" onclick="go('opps')"><span class="ni">🔍</span>Scout</button>
   </nav>
 </div>
 
