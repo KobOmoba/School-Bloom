@@ -404,3 +404,73 @@ one tap, no typing.
 ### Commits
 - `1059e12` — app.js: go() dispatch + sub-page renderers + askFinanceQ + openProfilePage
 - `2ce1d22` — index.html: nav groups + 4 new sections + Finance question cards
+
+
+---
+
+## 2026-08-12 — BloomCollect Zero-Cost: Bank Details Now in All Fee Reminders
+
+### Context
+BloomCollect bank registration was already built (Settings → enter bank name, account number,
+account name → save). What was missing was those bank details actually appearing in the
+WhatsApp messages sent to parents. That gap is now closed.
+
+### What changed — `app.js` (commit `98ef9f5`)
+
+**Three reminder paths upgraded — all now include bank details when set:**
+
+**1. `sendReminder(idx)`** — individual student reminder from Revenue/Profile:
+- New message format: school name header + fee summary (Total / Paid / Outstanding) +
+  conditional payment block
+- If bank details are set: shows Bank Name, Account Number, Account Name, and instructs
+  parent to use **student's full name as reference**
+- If no bank details: directs parent to visit school office
+- If no phone number: copies message to clipboard instead of failing silently
+
+**2. `renderBulkWA()`** — bulk reminder sequence (Send All Reminders):
+- Same upgraded message format with bank details block
+- Logs to comms record after each send
+
+**3. Finance Agent automated reminders**:
+- Same message format with bank details injected dynamically
+
+### What a parent now receives (when bank is set):
+
+```
+*Future Promise Comprehensive College* — Fee Reminder 🌸
+
+Dear Parent/Guardian of *ADAEZE OKONKWO* (JSS 2),
+
+📋 *Fee Summary — Term 1*
+Total Fee:   ₦35,000
+Paid:        ₦15,000
+Outstanding: ₦20,000
+
+💳 *Payment Instructions*
+Bank: GTBank
+Account Number: 0123456789
+Account Name: Future Promise College
+Reference: ADAEZE OKONKWO
+
+Please use your child's full name as the transfer reference so we can confirm
+payment quickly.
+
+Send your receipt/alert to this number after payment.
+
+Thank you for your continued support. 🙏
+– *Future Promise Comprehensive College*
+```
+
+### Why this IS BloomCollect (zero-cost version)
+The school registers their account once in Settings. Every reminder sent to every
+parent from that point forward includes bank details and a reference. Parents transfer
+directly to the school's bank — no gateway, no 2.5% fee, no third-party involvement.
+The school uploads their monthly bank statement CSV → app auto-reconciles by matching
+the reference (student name) → student marked paid.
+
+**Cost to school: ₦0. Cost to AariNAT: ₦0. Works with any Nigerian bank today.**
+
+### Gateway version (future)
+When AariNAT is ready to add Squad/Monnify/Paystack, a "Pay Now" link replaces the
+bank transfer block in the same message. The architecture is already provider-agnostic —
+the `payBlock` variable just needs a URL instead of bank details.
