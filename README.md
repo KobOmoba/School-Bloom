@@ -325,3 +325,82 @@ Four one-tap question buttons:
 ### Commits
 - `7d6d575` — app.js: FSA agent + rich context + upgraded runFinanceAgent
 - `cb3e683` — index.html: setup chat UI + health cards + suggested questions panel
+
+
+---
+
+## 2026-08-11 — Navigation Rebuild: Sub-pages + Finance Quick Questions
+
+### Problem
+18 items in the nav tray with no grouping. Sports/Arts/Music/Health occupied prime spots
+while Scores, Attendance, Student Profile, and Payroll had no dedicated pages at all —
+they were buried as modals inside other sections. Hidden information the proprietor couldn't
+find without knowing to look.
+
+### Nav tray reorganised into 4 groups
+
+```
+STUDENTS        Revenue · Students · Profile · Scores · Attendance · Report Card
+STAFF & FINANCE Staff · Payroll · Expenses · Finance AI
+INSIGHTS        Analytics · Security · Agents · Scout
+EXTRAS          Sports · Arts · Music · Health · Alumni · Comms
+SYSTEM          Support · Settings
+```
+
+Group labels are styled dividers (uppercase, muted, non-interactive).
+
+### New full-page: 👤 Profile (`sec-profile`)
+- Tapping any student row now navigates to their full Profile page (`openProfilePage(idx)`)
+  instead of the old quick-view modal
+- 4 tabs: **Fees** (paid/owed/history + Record Payment), **Scores** (per-term per-subject),
+  **Attendance** (last 20 days coloured present/late/absent), **SWOT**
+- Edit button navigates back to Students and opens the edit modal
+- Breadcrumb shows student name + class
+
+### New full-page: 📝 Scores (`sec-scores`)
+- Class selector + Subject selector + Term selector (all in one row)
+- Shows every student's CA1 + CA2 + CA3 + Exam = Total with colour-coded grade badge
+  (A/B/C/D/E/F)
+- Class average shown per subject
+- Tapping a student's name navigates to their Profile page
+- **📸 Scan Scores** button → routes to Score OCR
+- **⬇️ Export CSV** → downloads scores for selected class/term
+
+### New full-page: 📅 Attendance (`sec-attendance`)
+- Class selector + Date picker
+- Each student has ✓ Present / L Late / ✗ Absent toggle buttons
+- Running summary at top (X present, X absent, X late)
+- **✅ All Present** one-tap button
+- **💾 Save** → persists to `SD.students[].attendance[date]` and Firestore
+- **⬇️ Export CSV** for the selected date
+
+### New full-page: 💸 Payroll (`sec-payroll`)
+- **Summary card**: monthly obligation, cash + collections vs payroll (green/red),
+  salary pay date, "already run" banner if payroll ran this month
+- **Staff list**: each member with name, role, and monthly salary.
+  Missing salary → "Set salary" button → `promptSalary()` inline
+- **▶ Run Payroll** button:
+  - Confirms total and staff count
+  - Logs `{month, date, total, records[]}` to `SD.config.payrollHistory`
+  - Deducts from `SD.config.cashBalance` and updates `cashBalanceDate`
+  - Saves to Firestore
+  - Button disables for the rest of the month ("✅ Already Run")
+- **Payroll History**: last 6 payroll runs with month, date, and total
+
+### Finance AI: four one-tap question cards (2×2 grid)
+Replaced the small ghost-button row with four large coloured tappable cards:
+
+| Card | Colour | Question sent |
+|---|---|---|
+| 🔴 Top defaulters | Red | "Who are my top defaulters and exactly how much does each one owe?" |
+| 💸 Can I pay salaries? | Green | "Can I pay staff salaries this month? Show collections vs payroll obligation." |
+| 📚 Worst-paying class | Amber | "Which class has the worst fee collection rate and what should I do about it?" |
+| 📊 Net position | Blue | "What is my net cash position after all salaries and expenses?" |
+
+Each card has a bold label and a subtitle hint. Tapping fires `askFinanceQ(question)` which
+pre-fills the input, scrolls the chat into view, and calls `askFinanceAI()` immediately —
+one tap, no typing.
+
+### Commits
+- `1059e12` — app.js: go() dispatch + sub-page renderers + askFinanceQ + openProfilePage
+- `2ce1d22` — index.html: nav groups + 4 new sections + Finance question cards
