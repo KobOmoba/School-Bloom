@@ -2015,7 +2015,7 @@ function renderRevenue() {
       ? '<p style="text-align:center;color:var(--sub);padding:1rem;">All fees collected! 🎉</p>'
       : overdue.map(s => {
           const idx = SD.students.indexOf(s); const owe = (s.totalFee || 0) - (s.paid || 0);
-          return `<div class="stu-row"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><button class="btn-wa btn-sm" onclick="sendReminder(${idx})">📲</button></div>`;
+          return `<div class="stu-row"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><div style="display:flex;gap:4px;"><button class="btn-wa btn-sm" onclick="sendReminder(${idx})" title="WhatsApp bank transfer reminder">📲</button><button style="background:#7c3aed;color:#fff;border:none;border-radius:7px;padding:0.3rem 0.55rem;font-size:0.8rem;cursor:pointer;" onclick="sendPaymentLink(${idx})" title="Send payment link">💳</button></div></div>`;
         }).join('');
   }
 }
@@ -6320,7 +6320,8 @@ function switchProfileTab(tab, btn) {
           <div style="background:#22c55e;height:6px;border-radius:4px;width:${s.totalFee?Math.round((s.paid||0)/s.totalFee*100):0}%;"></div>
         </div>
         <button class="btn-brand btn-sm" onclick="recordPaymentForStudent(${_profileIdx})">💰 Record Payment</button>
-        <button class="btn-ghost btn-sm" style="margin-left:4px;" onclick="sendFeeReminderSingle(${_profileIdx})">📱 Send Reminder</button>
+        <button class="btn-ghost btn-sm" style="margin-left:4px;" onclick="sendReminder(${_profileIdx})">📲 Reminder</button>
+        <button style="background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:0.75rem;cursor:pointer;margin-left:4px;" onclick="sendPaymentLink(${_profileIdx})">💳 Send Payment Link</button>
       </div>
       <div class="card">
         <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">Payment History</div>
@@ -6896,6 +6897,153 @@ If nothing legible is found, output: {"subjects":[]}`;
   }
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════
+// BLOOMCOLLECT — PAYMENT LINK GENERATION
+// Fee model (Option B): parent pays school_fee + 2.5%. School gets exact fee.
+// Split: 1.5% gateway (Paystack/Squad/Monnify) + 1% AariNAT.
+// When gateway not configured → falls back to bank transfer reminder (WhatsApp).
+// ══════════════════════════════════════════════════════════════════════════
+
+// Calculate what parent pays so school receives exact amount
+function calcParentCharge(schoolFee, gatewayRate = 0.015, aarinatRate = 0.01) {
+  // parent_pays = school_fee + surcharge (both gateway + AariNAT borne by parent)
+  const surcharge = Math.ceil(schoolFee * (gatewayRate + aarinatRate));
+  return { parentPays: schoolFee + surcharge, surcharge, schoolGets: schoolFee };
+}
+
+// Gateway config — stored in SD.config.bloomcollect by AariNAT during onboarding
+function getGatewayConfig() {
+  const bc = SD.config?.bloomcollect || {};
+  return {
+    active:     !!(bc.publicKey && bc.gateway),
+    gateway:    bc.gateway || 'paystack',      // 'paystack' | 'squad' | 'monnify'
+    publicKey:  bc.publicKey || '',
+    rate:       bc.gatewayRate || 0.015,       // Paystack default
+    subaccount: bc.subaccountCode || '',       // set when AariNAT registers school with gateway
+  };
+}
+
+// Send payment link (or fall back to bank transfer reminder if gateway not active)
+async function sendPaymentLink(idx) {
+  const s  = (SD.students || [])[idx];
+  if (!s) return;
+  const owe = (s.totalFee || 0) - (s.paid || 0);
+  if (owe <= 0) return toast('✅ ' + s.name + ' has no outstanding balance.');
+
+  const gw  = getGatewayConfig();
+  const bd  = SD.config?.bankDetails || {};
+  const sn  = SD.config?.schoolName || 'School';
+  const term = SD.config?.currentTerm || 'This Term';
+  const phone = (s.phone || '').replace(/\D/g, '');
+
+  if (!phone) return toast('⚠️ No phone number for ' + s.name + '. Add it in the student profile.');
+
+  // ── GATEWAY ACTIVE: generate Paystack payment link ──────────────────────
+  if (gw.active && gw.subaccount) {
+    const { parentPays, surcharge } = calcParentCharge(owe, gw.rate);
+
+    try {
+      toast('⏳ Generating payment link...');
+      // Call Firebase Cloud Function (deployed separately — see functions/bloomcollect.js)
+      const fnUrl = SD.config?.bloomcollect?.functionUrl || '';
+      if (!fnUrl) throw new Error('Cloud Function URL not configured');
+
+      const res = await fetch(fnUrl + '/createPaymentLink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schoolId:     SD.config.schoolId,
+          schoolName:   sn,
+          studentName:  s.name,
+          studentClass: s.class || '',
+          parentPhone:  phone,
+          parentEmail:  s.email || (phone + '@parent.edubloom.com.ng'),
+          schoolFee:    owe,
+          parentCharge: parentPays,
+          term,
+          subaccount:   gw.subaccount,
+          gateway:      gw.gateway,
+          ref:          'BLOOM-' + (SD.config.schoolId || 'SCH') + '-' + Date.now(),
+        }),
+      });
+      const data = await res.json();
+      if (!data.paymentUrl) throw new Error(data.error || 'No payment URL returned');
+
+      // Send via WhatsApp with the payment link
+      const msg =
+`*${sn}* — Fee Payment Link 💳
+
+Dear Parent/Guardian of *${s.name}* (${s.class || 'our student'}),
+
+Please use the link below to pay your child's school fee securely online:
+
+🔗 *${data.paymentUrl}*
+
+📋 *Payment Summary — ${term}*
+School fee:       *${fmt(owe)}*
+Processing fee:   *${fmt(surcharge)}* (2.5%)
+*Total to pay:    ${fmt(parentPays)}*
+
+✅ Your school receives its full ₦${owe.toLocaleString()} — the 2.5% processing fee is added on top.
+✅ Payment confirms automatically — no need to send a receipt.
+
+The link expires in 24 hours. If you prefer bank transfer, please contact us.
+
+Thank you! 🙏
+– *${sn}*
+school.edubloom.com.ng`;
+
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+      logComm('Payment Link', `Sent to ${s.name} — ₦${parentPays.toLocaleString()} (incl. 2.5% fee)`);
+      toast('✅ Payment link sent to ' + s.name + '\'s parent');
+
+    } catch (e) {
+      console.warn('BloomCollect gateway error:', e.message);
+      // Graceful fallback to bank transfer
+      toast('⚠️ Gateway error — sending bank transfer reminder instead');
+      sendReminder(idx);
+    }
+    return;
+  }
+
+  // ── GATEWAY NOT YET ACTIVE: send bank transfer reminder with coming-soon note ──
+  if (bd.bankName && bd.accountNumber) {
+    // Bank details set — send full transfer instructions
+    sendReminder(idx);
+    toast('💡 Bank transfer reminder sent. Gateway payment links coming soon.');
+  } else {
+    // Neither gateway nor bank details configured
+    alert(
+      'BloomCollect is not fully set up yet.\n\n' +
+      'Go to Settings → BloomCollect and enter your school bank details.\n\n' +
+      'Once saved, fee reminders will include full bank transfer instructions.\n\n' +
+      'Gateway payment links (one-tap parent payment) are activated by AariNAT.'
+    );
+  }
+}
+
+// Save gateway details (called when AariNAT enables gateway for a school)
+async function saveGatewayDetails() {
+  const gateway = $('set-gateway')?.value;
+  const publicKey = $('set-gateway-key')?.value?.trim();
+  if (!gateway || !publicKey) return toast('Please select a gateway and enter the public key.');
+  if (!publicKey.startsWith('pk_')) return toast('⚠️ That doesn\'t look like a public key. It should start with pk_live_ or pk_test_');
+
+  const rateMap = { paystack: 0.015, squad: 0.01, monnify: 0.01 };
+  if (!SD.config.bloomcollect) SD.config.bloomcollect = {};
+  SD.config.bloomcollect.gateway    = gateway;
+  SD.config.bloomcollect.publicKey  = publicKey;
+  SD.config.bloomcollect.gatewayRate = rateMap[gateway] || 0.015;
+  SD.config.bloomcollect.activatedAt = new Date().toISOString();
+
+  await SQ.push('config', SD.config);
+
+  // Update badge
+  const badge = $('bc-gateway-badge');
+  if (badge) { badge.textContent = '✅ ACTIVE'; badge.style.background = 'rgba(34,197,94,0.15)'; badge.style.color = '#22c55e'; }
+  toast('⚡ Gateway activated! Payment links are now live.');
+}
 
 // ── BloomCollect Kora bank detail helpers (Settings) ──────────────────────
 async function saveBankDetails() {
