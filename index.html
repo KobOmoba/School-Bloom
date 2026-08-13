@@ -1079,36 +1079,33 @@ function toggleEye(inputId, btn) {
           <div style="font-size:24px;">💳</div>
           <div>
             <div class="ct" style="margin:0;">BloomCollect</div>
-            <div style="font-size:0.68rem;color:#00C853;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Powered by Kora · Online Fee Collection</div>
+            <div style="font-size:0.68rem;color:#00C853;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Online Fee Collection · Powered by AariNAT</div>
           </div>
           <div id="bc-status-badge" style="margin-left:auto;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;background:rgba(255,82,82,0.1);color:#FF5252;">⚠️ Not Set Up</div>
         </div>
-        <p style="font-size:0.8rem;color:var(--sub);margin-bottom:0.75rem;line-height:1.55;">
-          Enable parents to pay school fees online via <strong>BloomCollect</strong>. A 2.5% processing fee applies per transaction (1.5% Kora + 1% AariNAT platform fee). Fees collected go directly into your school's bank account below.
-        </p>
+
+        <!-- HOW IT WORKS -->
+        <div style="background:rgba(0,200,83,0.06);border:1px solid rgba(0,200,83,0.2);border-radius:10px;padding:12px;margin-bottom:0.75rem;font-size:0.78rem;line-height:1.75;">
+          <div style="font-weight:800;margin-bottom:4px;color:#00C853;">💡 How BloomCollect Works</div>
+          <div>• You enter your school bank account below</div>
+          <div>• Parent owes ₦35,000 — they pay <b>₦35,875</b> (₦35,000 + 2.5%)</div>
+          <div>• Your school receives exactly <b>₦35,000</b> — nothing deducted</div>
+          <div>• 2.5% covers: 1.5% payment gateway + 1% AariNAT</div>
+          <div style="margin-top:4px;font-size:0.72rem;color:var(--sub);">Parents bear the small processing cost. Your school always collects its full fee.</div>
+        </div>
+
+        <!-- STEP 1 -->
+        <div style="font-weight:800;font-size:0.72rem;color:var(--sub);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.5rem;">Step 1 — Your School Bank Account</div>
         <label>Bank Name</label>
         <select id="set-bank-name" style="margin-bottom:0.5rem;">
           <option value="">— Select Bank —</option>
-          <option>Access Bank</option>
-          <option>Ecobank Nigeria</option>
-          <option>FCMB</option>
-          <option>Fidelity Bank</option>
-          <option>First Bank of Nigeria</option>
-          <option>GTBank</option>
-          <option>Heritage Bank</option>
-          <option>Keystone Bank</option>
-          <option>Kuda Bank</option>
-          <option>Moniepoint</option>
-          <option>Opay</option>
-          <option>Palmpay</option>
-          <option>Polaris Bank</option>
-          <option>Stanbic IBTC Bank</option>
-          <option>Sterling Bank</option>
-          <option>UBA</option>
-          <option>Union Bank</option>
-          <option>VFD Microfinance Bank</option>
-          <option>Wema Bank</option>
-          <option>Zenith Bank</option>
+          <option>Access Bank</option><option>Ecobank Nigeria</option><option>FCMB</option>
+          <option>Fidelity Bank</option><option>First Bank of Nigeria</option><option>GTBank</option>
+          <option>Heritage Bank</option><option>Keystone Bank</option><option>Kuda Bank</option>
+          <option>Moniepoint</option><option>Opay</option><option>Palmpay</option>
+          <option>Polaris Bank</option><option>Stanbic IBTC Bank</option><option>Sterling Bank</option>
+          <option>UBA</option><option>Union Bank</option><option>VFD Microfinance Bank</option>
+          <option>Wema Bank</option><option>Zenith Bank</option>
         </select>
         <label>Account Number <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(10-digit NUBAN)</span></label>
         <input type="text" id="set-bank-account" placeholder="0123456789" maxlength="10" inputmode="numeric" pattern="[0-9]{10}">
@@ -1117,9 +1114,51 @@ function toggleEye(inputId, btn) {
         <div id="bc-bank-status" style="font-size:0.75rem;margin:0.4rem 0 0.75rem;color:var(--sub);"></div>
         <button class="btn-money btn-sm" onclick="saveBankDetails()">💾 Save Bank Details</button>
         <button class="btn-ghost btn-sm" onclick="clearBankDetails()" style="margin-left:0.4rem;">🗑️ Clear</button>
+
+        <!-- STEP 2: GATEWAY PLACEHOLDER -->
+        <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+            <div style="font-weight:800;font-size:0.72rem;color:var(--sub);letter-spacing:0.08em;text-transform:uppercase;">Step 2 — One-Tap Payment Links</div>
+            <span id="bc-gateway-badge" style="font-size:0.65rem;font-weight:800;padding:2px 8px;border-radius:20px;background:rgba(245,158,11,0.15);color:#f59e0b;">COMING SOON</span>
+          </div>
+          <p style="font-size:0.78rem;color:var(--sub);margin-bottom:0.65rem;line-height:1.6;">
+            When activated, parents receive a <b>payment link</b> via WhatsApp — they tap, pay by card or bank transfer, and your records update automatically. No CSV upload needed.
+          </p>
+          <div style="background:var(--s2);border-radius:8px;padding:10px 12px;font-size:0.78rem;line-height:1.6;">
+            <div style="font-weight:700;margin-bottom:4px;">How the fee split works:</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin-bottom:8px;">
+              <div style="background:var(--card);border-radius:7px;padding:7px;">
+                <div style="font-size:0.65rem;color:var(--sub);">Parent pays</div>
+                <div style="font-weight:800;color:#3b82f6;">Fee + 2.5%</div>
+              </div>
+              <div style="background:var(--card);border-radius:7px;padding:7px;">
+                <div style="font-size:0.65rem;color:var(--sub);">School gets</div>
+                <div style="font-weight:800;color:#22c55e;">Full fee ✓</div>
+              </div>
+              <div style="background:var(--card);border-radius:7px;padding:7px;">
+                <div style="font-size:0.65rem;color:var(--sub);">AariNAT gets</div>
+                <div style="font-weight:800;color:#8b5cf6;">1% always</div>
+              </div>
+            </div>
+            <div style="font-size:0.7rem;color:var(--sub);">🔐 Gateway activation is completed by AariNAT. Your bank details above are enough to start collecting via WhatsApp reminders today.</div>
+          </div>
+
+          <!-- Gateway config — shown when AariNAT activates -->
+          <div id="bc-gateway-form" style="display:none;margin-top:0.65rem;">
+            <label>Payment Gateway</label>
+            <select id="set-gateway" style="margin-bottom:0.5rem;">
+              <option value="paystack">Paystack (1.5% · most trusted)</option>
+              <option value="squad">Squad by GTBank (1% · best rate)</option>
+              <option value="monnify">Monnify (1% · best for transfers)</option>
+            </select>
+            <label>Gateway Public Key <span style="font-size:0.68rem;color:var(--sub);font-weight:400;">(safe to store — not the secret key)</span></label>
+            <input type="text" id="set-gateway-key" placeholder="pk_live_xxxxxxxxxxxx" style="font-family:monospace;font-size:0.8rem;">
+            <button class="btn-money btn-sm" style="margin-top:0.5rem;" onclick="saveGatewayDetails()">⚡ Activate Gateway</button>
+          </div>
+        </div>
       </div>
 
-    <!-- 16. OPPORTUNITIES -->
+<!-- 16. OPPORTUNITIES -->
     <section id="sec-opps" class="sec">
       <div class="card">
         <div class="ct">🔍 Opportunity Scout</div>
