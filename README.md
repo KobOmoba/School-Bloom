@@ -474,3 +474,82 @@ the reference (student name) → student marked paid.
 When AariNAT is ready to add Squad/Monnify/Paystack, a "Pay Now" link replaces the
 bank transfer block in the same message. The architecture is already provider-agnostic —
 the `payBlock` variable just needs a URL instead of bank details.
+
+
+---
+
+## 2026-08-12 — BloomCollect: Full Payment Link System Built
+
+### Business decision (Bayo — 2026-08-12)
+**Option B confirmed:** Parent pays school fee + processing surcharge on top. School always
+receives its exact fee. Nothing deducted from school.
+
+**Fee model:**
+- Parent pays: school_fee + 2.5% (1.5% gateway + 1% AariNAT)
+- School receives: exact school_fee (guaranteed via flat Paystack `transaction_charge`)
+- AariNAT nets: ~1% of school_fee after gateway fees
+- Example: ₦35,000 fee → parent pays ₦35,875 → school gets ₦35,000 → AariNAT gets ~₦237
+
+### Files changed — 3 commits
+
+**`app.js` (`d554eef`):**
+- `calcParentCharge(schoolFee, gatewayRate, aarinatRate)` — calculates exact parent payment
+- `getGatewayConfig()` — reads gateway config from `SD.config.bloomcollect`
+- `sendPaymentLink(idx)` — full flow:
+  - If gateway active + subaccount set → calls Cloud Function, gets Paystack URL, sends via WhatsApp
+  - If gateway not active but bank details set → falls back to `sendReminder()` with bank transfer
+  - If neither → guides user to Settings
+- `saveGatewayDetails()` — saves gateway + public key when AariNAT activates for a school
+- `💳 Send Link` button added to: defaulter rows in Revenue section + Student Profile Fees tab
+
+**`index.html` (`59159ae`):**
+- BloomCollect settings card rebuilt with:
+  - "How It Works" explainer box (₦35,000 → parent pays ₦35,875 → school gets ₦35,000)
+  - Step 1: Bank account registration (unchanged functionality)
+  - Step 2: Gateway Payments — COMING SOON placeholder with 3-column fee split display
+  - Fee split visual: Parent pays (Fee + 2.5%) | School gets (Full fee ✓) | AariNAT gets (1%)
+  - Hidden gateway form (shown when AariNAT activates): gateway selector + public key field
+- "Powered by Kora" removed — now "Powered by AariNAT" (gateway-agnostic)
+
+**`functions/bloomcollect.js` (`284f5d5`) — NEW FILE:**
+Three Firebase Cloud Functions ready to deploy:
+
+1. `createSubaccount` — called once when school saves bank details:
+   - Verifies account via Paystack NIP name enquiry
+   - Creates Paystack subaccount for the school
+   - Stores `subaccountCode` in `schools/{schoolId}/config.bloomcollect`
+   - Creates record in `admin_bloomcollect/{schoolId}`
+
+2. `createPaymentLink` — called when principal taps 💳:
+   - Calculates parent charge (school_fee × 1.025)
+   - Initialises Paystack transaction with flat split (school gets exact fee)
+   - Returns `authorization_url` (the payment link)
+   - Stores pending transaction in `admin_bloomcollect_txns/{txRef}`
+
+3. `paystackWebhook` — Paystack calls this when parent pays:
+   - Verifies HMAC signature
+   - Marks student as paid in `schools/{schoolId}.students`
+   - Adds payment to student's paymentHistory (method: 'BloomCollect')
+   - Updates school's BloomCollect stats (totalVolume, aarinatEarnings, txCount)
+   - Adds entry to `admin_bloomcollect_ledger` (AariNAT's revenue record)
+
+### To activate for a school (when AariNAT has Paystack account):
+1. `firebase functions:secrets:set PAYSTACK_SECRET_KEY` (once, for the project)
+2. `firebase deploy --only functions:createSubaccount,createPaymentLink,paystackWebhook`
+3. In Portal: add school's subaccount code to `schools/{schoolId}/config.bloomcollect`
+   (or call `createSubaccount` function from portal when school registers bank)
+4. Set `config.bloomcollect.functionUrl` in school's Firestore doc to the Cloud Function URL
+5. School app auto-enables payment links — 💳 button becomes live
+
+### Gateway flexibility
+Paystack is the default. To switch to Squad (1% rate):
+- Change `gatewayRate: 0.015` → `0.01` in the school's Firestore config
+- Parent surcharge drops from 2.5% to 2%
+- No code changes needed — the rate is read from Firestore
+
+### Fintech pathway note (from business discussion 2026-08-12)
+At 2,000 schools processing fees through BloomCollect:
+- Annual fee flow: ~₦36B
+- AariNAT 1% net: ~₦360M/year
+- This is the revenue base for a PSSP licence application (₦100M capital requirement)
+- The `admin_bloomcollect_ledger` collection is the financial record for that application
