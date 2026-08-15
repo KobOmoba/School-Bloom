@@ -215,11 +215,11 @@ function _deskew(binaryMat) {
   }
 }
 
-function resizeImageForOCR(dataURL, maxPx) {
+function resizeImageForOCR(dataURL) {
   return new Promise(async resolve => {
     const img = new Image();
     img.onload = async () => {
-      const MAX = maxPx || 1000;
+      const MAX = 1000;
       let w = img.width, h = img.height;
       if (w > MAX || h > MAX) {
         if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
@@ -371,25 +371,18 @@ const OCR_SCHEMAS = {
     }
   },
 
-  // ── 3a. Score sheet — read all available terms ──────────────────────
+  // ── 3a. Score sheet — read all 3 terms ────────────────────────────
   score_sheet_all: {
-    intro: (p) => `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}.`,
+    intro: (p) => `You are reading a Nigerian school CA/exam score sheet (broadsheet) for subject: ${p && p.subject ? p.subject : 'unknown subject'}.`,
     usesAdaptiveStructure: true,
     domainRules: [
       'DOMAIN RULES:',
-      '- Nigerian score sheets come in many formats — adapt to whatever is on this page:',
-      '  a) Broadsheet: all 3 terms side by side (1ST TERM | 2ND TERM | 3RD TERM)',
-      '  b) Single-term sheet: only one term visible (fill t1, leave t2/t3 as zeros)',
-      '  c) Two-term sheet: two terms visible (fill t1 and t2, leave t3 as zeros)',
-      '  d) Portrait layout: terms stacked vertically — read each section as a term block',
-      '- Within each term block look for score columns (labels vary by school):',
-      '  1st CA (CA1, TEST1, /10) | 2nd CA (CA2, TEST2, /10) | 3rd CA (CA3, TEST3, /10) | Exam (/70)',
-      '  If only 2 CA columns exist, put them in ca1/ca2 and set ca3 to 0.',
-      '- Read EVERY student row without skipping.',
-      '- Blank or illegible score cell = 0 (never null, never skip).',
+      '- The sheet has THREE term blocks side by side: "1ST TERM", "2ND TERM", "3RD TERM".',
+      '- Within each block: 1st CA | 2nd CA | 3rd CA (each /10) | Exam (/70).',
+      '- Read EVERY student row and ALL THREE terms.',
+      '- If the sheet only shows one or two terms, fill the missing terms with zeros.',
       '- Names: SURNAME FIRSTNAME, all caps.',
-      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.',
-      '- Ignore the S/N column, any TOTAL row, and any AVERAGE row at the bottom.'
+      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.'
     ],
     referenceData: NIGERIAN_NAME_REFERENCE,
     outputShape: [{
@@ -405,21 +398,17 @@ const OCR_SCHEMAS = {
     intro: (p) => {
       const labels = { '1': '1ST TERM', '2': '2ND TERM', '3': '3RD TERM' };
       const label = labels[p && p.termNum] || '1ST TERM';
-      return `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}. Extract ONLY the ${label} columns.`;
+      return `You are reading a Nigerian school CA/exam score sheet for subject: ${p && p.subject ? p.subject : 'unknown subject'}. Read ONLY the ${label} columns.`;
     },
     usesAdaptiveStructure: true,
     domainRules: [
       'DOMAIN RULES:',
-      '- The sheet may show one, two, or three term blocks — extract ONLY the requested',
-      '  term block; ignore all other term columns entirely.',
-      '- Within the requested term block (labels vary by school):',
-      '  1st CA (CA1, TEST1, /10) | 2nd CA (CA2, TEST2, /10) | 3rd CA (CA3, TEST3, /10) | Exam (/70)',
-      '  If only 2 CA columns exist, put them in ca1/ca2 and set ca3 to 0.',
+      '- The sheet may show multiple terms — read ONLY the columns under the',
+      '  requested term block; ignore all other terms\' columns.',
+      '- Within that term: 1st CA | 2nd CA | 3rd CA (each /10) | Exam (/70).',
       '- Blank or illegible score cell = 0.',
-      '- Read EVERY student row.',
       '- Names: SURNAME FIRSTNAME, all caps.',
-      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.',
-      '- Ignore S/N, TOTAL, and AVERAGE rows.'
+      '- NAME EXCEPTION: best-effort on unclear names — garbled > omitted.'
     ],
     referenceData: NIGERIAN_NAME_REFERENCE,
     outputShape: [{ name: 'SURNAME FIRSTNAME', ca1: 0, ca2: 0, ca3: 0, exam: 0 }]
@@ -1032,7 +1021,7 @@ window.addEventListener('offline', () => SQ.ping());
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const esc = s => { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+const esc = s => { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML.replace(/'/g,"&#39;"); };
 const fmt = n => '₦' + Number(n || 0).toLocaleString('en-NG');
 const _PREMIUM_SCAN_MODALS = { 'add-student-modal': 'ns', 'add-staff-modal': 'sf', 'add-expense-modal': 'exp' };
 // ── Password hashing (SHA-256 via Web Crypto) ────────────────────────────────
@@ -1848,18 +1837,11 @@ function go(tab) {
   const fn = {
     revenue: renderRevenue, students: renderStudentList, staff: renderStaff,
     sports: loadSports, arts: renderArts, music: renderMusic, health: renderHealth,
-    alumni: renderAlumni, expenses: renderExpenses,
-    finance: () => { checkFinance(); const score=_financeScore(); if(score<100&&!((SD.students||[]).some(s=>s.paid>0)||(SD.expenses||[]).length>0)){ FSA.start(); } else { const bar=$('fsa-bar'); if(bar) bar.style.width=score+'%'; } },
+    alumni: renderAlumni, expenses: renderExpenses, finance: checkFinance,
     comms: renderComms, analytics: renderAnalytics, security: () => {},
     support: renderSupport, settings: loadSettings, opps: renderOpps,
     scorecard: renderScorecard,
-    ai: () => { renderMorningAlertStatus(); if(typeof renderAITools==='function') renderAITools(); },
-    aitools: () => { if(typeof renderAITools==='function') renderAITools(); },
-    // ── New sub-pages ──
-    profile:    renderProfilePage,
-    scores:     () => { initScoresPage(); },
-    attendance: () => { initAttendancePage(); },
-    payroll:    renderPayrollPage,
+    aitools: () => { if (typeof renderAITools === 'function') renderAITools(); }
   };
   if (fn[tab]) fn[tab]();
 }
@@ -2015,7 +1997,7 @@ function renderRevenue() {
       ? '<p style="text-align:center;color:var(--sub);padding:1rem;">All fees collected! 🎉</p>'
       : overdue.map(s => {
           const idx = SD.students.indexOf(s); const owe = (s.totalFee || 0) - (s.paid || 0);
-          return `<div class="stu-row"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><div style="display:flex;gap:4px;"><button class="btn-wa btn-sm" onclick="sendReminder(${idx})" title="WhatsApp bank transfer reminder">📲</button><button style="background:#7c3aed;color:#fff;border:none;border-radius:7px;padding:0.3rem 0.55rem;font-size:0.8rem;cursor:pointer;" onclick="sendPaymentLink(${idx})" title="Send payment link">💳</button></div></div>`;
+          return `<div class="stu-row"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><button class="btn-wa btn-sm" onclick="sendReminder(${idx})">📲</button></div>`;
         }).join('');
   }
 }
@@ -2078,58 +2060,23 @@ async function handleBulkPayment(e) {
 }
 
 function sendReminder(idx) {
-  const s = SD.students[idx];
-  const owe = (s.totalFee || 0) - (s.paid || 0);
-  if (owe <= 0) return toast('This student has no outstanding balance.');
-  const sn  = SD.config.schoolName || 'Your School';
-  const bd  = SD.config.bankDetails || {};
-  const hasBankDetails = !!(bd.bankName && bd.accountNumber && bd.accountName);
-  const term = SD.config.currentTerm ? `${SD.config.currentTerm}` : 'this term';
-
-  // Payment instructions block — included if bank details are set (BloomCollect zero-cost)
-  const payBlock = hasBankDetails
-    ? `\n💳 *Payment Instructions*\nBank: *${bd.bankName}*\nAccount Number: *${bd.accountNumber}*\nAccount Name: *${bd.accountName}*\nReference: *${s.name.toUpperCase()}*\n\nPlease use your child's full name as the transfer reference so we can confirm payment quickly.`
-    : `\nPlease visit the school or contact us to arrange payment.`;
-
-  const msg =
-`*${sn}* — Fee Reminder 🌸
-
-Dear Parent/Guardian of *${s.name}* (${s.class || 'our student'}),
-
-We hope this message finds you well.
-
-📋 *Fee Summary — ${term}*
-Total Fee:   *${fmt(s.totalFee || 0)}*
-Paid:        *${fmt(s.paid || 0)}*
-Outstanding: *${fmt(owe)}*
-${payBlock}
-
-Once payment is made, please send us your transfer receipt or debit alert on this number so we can update your child's record immediately.
-
-Thank you for your continued support. 🙏
-– *${sn}*
-school.edubloom.com.ng`;
-
-  const phone = (s.phone || '').replace(/\D/g, '');
-  if (phone) {
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-    logComm('Fee Reminder', `Sent to ${s.name} — ₦${owe.toLocaleString()} outstanding`);
-  } else {
-    // No phone — copy to clipboard so staff can send manually
-    navigator.clipboard?.writeText(msg).then(() =>
-      toast('📋 No phone number — message copied to clipboard. Paste it manually.')
-    ).catch(() => alert(msg));
-  }
+  const s = SD.students[idx]; const owe = (s.totalFee || 0) - (s.paid || 0);
+  const sn = SD.config.schoolName || 'School Management';
+  const msg = `Dear Parent,\n\nThis is a friendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
+  if (s.phone) window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`, '_blank');
+  else alert('No phone number for this student.');
 }
 
 function sendAllReminders() {
-  const overdue = (SD.students || []).filter(s => (s.totalFee || 0) - (s.paid || 0) > 0);
-  if (!overdue.length) return toast('✅ No outstanding balances — everyone is paid up!');
+  const overdue = SD.students.filter(s => (s.totalFee || 0) - (s.paid || 0) > 0);
+  if (!overdue.length) return alert('No overdue students!');
   const withPhone = overdue.filter(s => s.phone);
-  const noPhone   = overdue.filter(s => !s.phone);
-  if (!withPhone.length) return alert(`None of the ${overdue.length} defaulters have phone numbers recorded. Add phone numbers in the Students section first.`);
-  if (!confirm(`📲 Send fee reminders to ${withPhone.length} parents via WhatsApp?\n${noPhone.length > 0 ? `(${noPhone.length} students have no phone — skipped)` : ''}\n\nMessages will open one at a time. Tap OK to start.`)) return;
-  startBulkWA();
+  if (withPhone.length > 0) { startBulkWA(); return; }
+  const sn = SD.config.schoolName || 'School';
+  const total = overdue.reduce((t, s) => t + (s.totalFee || 0) - (s.paid || 0), 0);
+  const msg = `Dear Parents of ${sn},\n\nThis is a reminder that *${overdue.length} students* have outstanding fee balances this term.\n\nTotal outstanding: *${fmt(total)}*\n\nKindly ensure prompt payment.\n\n– ${sn}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+  logComm('Fee Reminder Broadcast', `Sent to ${overdue.length} overdue parents. Total: ${fmt(total)}`);
 }
 
 // ── Students list / CRUD ──────────────────────────────────────────────────
@@ -2310,7 +2257,7 @@ function renderStudentList() {
     const pbt = owe <= 0 ? 'Paid' : s.paid > 0 ? 'Partial' : 'Unpaid';
     const feeBadge = canSeeFees() ? `<span class="pay-badge ${pbc}">${pbt}</span>${owe>0?`<span style="font-size:0.68rem;color:var(--danger);">${fmt(owe)}</span>`:''}` : '';
     return `<div class="stu-row" style="display:flex;align-items:center;gap:0.4rem;">
-      <div style="flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;cursor:pointer;" onclick="openProfilePage(${idx})">
+      <div style="flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;cursor:pointer;" onclick="openProfile(${idx})">
         <div class="stu-av" style="${s.photo?'background:none;padding:0;overflow:hidden;':''}">${s.photo?`<img src="${esc(s.photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`:s.name.charAt(0).toUpperCase()}</div>
         <div style="flex:1;min-width:0;">
           <div class="stu-name">${esc(s.name)}</div>
@@ -4874,23 +4821,19 @@ function _parseScoreOcrJson(raw){
 async function _groqScoreOCR(b64, mime, prompt){
   const groqKey=getGroqKey();
   if(!groqKey) throw new Error('No Groq key configured');
-  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),90000);
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),60000);
   let r;
   try {
     r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model: GROQ_OCR_MODEL,
-      temperature: 0.1,
-      max_tokens: 8192,
-      reasoning_format: 'hidden',
+      model: GROQ_OCR_MODEL, temperature:0.2, max_tokens: 4096, reasoning_format:'hidden',
       messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
     })});
   } finally { clearTimeout(timer); }
   if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('Groq '+r.status+': '+(ed.error?.message||r.statusText)); }
   const d=await r.json();
   const raw=d.choices?.[0]?.message?.content||'[]';
-  console.log('[Score OCR] Groq raw (first 400 chars):', raw.slice(0,400));
   const parsed=_parseScoreOcrJson(raw);
-  if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries — raw: '+raw.slice(0,200));
+  if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries');
   return parsed;
 }
 
@@ -4922,7 +4865,7 @@ function _renderScoreOcrPreview(rows, classStudents, termMode){
   const termsToShow = isAllTerms ? [1, 2, 3] : [parseInt(termNum)];
   for (const t of termsToShow) {
     const tKey = 't' + t;
-    pHTML += `<div id="socr-term-${t}-panel" style="display:${(isAllTerms && t !== 1) ? 'none' : 'block'};">`;
+    pHTML += `<div id="socr-term-${t}-panel" style="display:block;">`;
     if (!isAllTerms) {
       const tLabel = t === 1 ? 'Term 1' : t === 2 ? 'Term 2' : 'Term 3';
       pHTML += `<p style="font-size:0.72rem;color:var(--sub);margin-bottom:0.3rem;font-weight:600;">${tLabel}</p>`;
@@ -5288,8 +5231,7 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, t
   let processedDataURL = dataURL;
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Enhancing image (OpenCV)...</span>';
-    // Score sheets need higher resolution — numbers in small cells need more pixels.
-    processedDataURL = await resizeImageForOCR(dataURL, 1800);
+    processedDataURL = await resizeImageForOCR(dataURL);
     mime = 'image/jpeg';
   } catch (preErr) {
     console.warn('[Score OCR] OpenCV preprocess failed, using raw:', preErr.message);
@@ -5297,31 +5239,17 @@ async function socrOcrOneImage(dataURL, mime, prompt, statusEl, classStudents, t
   }
   const b64 = processedDataURL.split(',')[1];
 
-  // ── Step 1: Check Groq key before attempting OCR ──
-  const _groqKey = getGroqKey();
-  if (!_groqKey) {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ No Groq API key — go to <b>Settings → API Keys</b> and paste your Groq key to enable auto-read. Using manual entry below.</span>';
-    return null;
-  }
-
-  // ── Step 2: Groq Vision — reads names AND numbers directly off the sheet ──
+  // ── Step 1: Groq Vision — reads names AND numbers directly off the sheet ──
   try {
     if (statusEl) statusEl.innerHTML = '<span style="color:var(--brand);">⏳ Reading with Groq...</span>';
     const rows = await _groqScoreOCR(b64, mime, prompt);
     if (rows && rows.length) return { rows, fromTesseract: false };
-    // Groq returned empty — likely a formatting mismatch rather than an error
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--warn);">⚠️ Groq could not find scores in this image. Try a closer, well-lit photo with the score columns clearly visible.</span>';
   } catch (e1) {
     console.warn('Groq score OCR failed:', e1.message);
-    const reason = e1.message?.includes('401') || e1.message?.includes('invalid_api_key')
-      ? 'Groq API key rejected — go to <b>Settings → API Keys</b> and update it.'
-      : e1.message?.includes('rate') || e1.message?.includes('429')
-      ? 'Groq rate limit hit — wait a moment and try again.'
-      : 'Groq scan failed (' + (e1.message || 'unknown error') + '). Try a clearer photo or enter manually.';
-    if (statusEl) statusEl.innerHTML = `<span style="color:var(--warn);">⚠️ ${reason}</span>`;
   }
 
-  // ── Groq-only: no fallback engines ──
+    // ── Groq-only: no fallback engines ──
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">⚠️ Groq scan failed. Check image quality and retry.</span>';
   return null;
 }
 
@@ -5574,15 +5502,9 @@ function renderBulkWA(){
   if($('bwa-owe')) $('bwa-owe').textContent=fmt(owe);
   if($('bwa-phone')) $('bwa-phone').textContent=s.phone;
   const sn=SD.config.schoolName||'School Management';
-  const bd=SD.config.bankDetails||{};
-  const hasBD=!!(bd.bankName&&bd.accountNumber&&bd.accountName);
-  const term=SD.config.currentTerm||'this term';
-  const payBlock=hasBD
-    ?`\n💳 *Payment Instructions*\nBank: *${bd.bankName}*\nAccount: *${bd.accountNumber}*\nName: *${bd.accountName}*\nReference: *${s.name.toUpperCase()}*\n\nSend your receipt/alert to this number after payment.`
-    :`\nPlease visit the school office to make payment.`;
-  const msg=`*${sn}* — Fee Reminder 🌸\n\nDear Parent/Guardian of *${s.name}* (${s.class||'our student'}),\n\n📋 *Fee Summary — ${term}*\nTotal Fee:   *${fmt(s.totalFee||0)}*\nPaid:        *${fmt(s.paid||0)}*\nOutstanding: *${fmt(owe)}*\n${payBlock}\n\nThank you for your continued support. 🙏\n– *${sn}*`;
+  const msg=`Dear Parent,\n\nFriendly reminder from *${sn}*.\n\n*${s.name}* has an outstanding fee balance of *${fmt(owe)}* this term.\n\nKindly make payment at your earliest convenience.\n\nThank you.\n– ${sn}`;
   const btn=$('bwa-open-btn');
-  if(btn) btn.onclick=()=>{ window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank'); logComm('Fee Reminder',`Sent to ${s.name} — ${fmt(owe)} outstanding`); };
+  if(btn) btn.onclick=()=>window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
 }
 function nextBulkWA(){_bulkWAIdx++;if(_bulkWAIdx>=_bulkWAStudents.length){alert('Bulk sequence completed.');closeBulkWA();}else renderBulkWA();}
 function closeBulkWA(){closeM('bulk-wa-modal');}
@@ -5903,770 +5825,62 @@ function renderCommsHistory(){
     <div style="margin-top:2px;">${esc(l.desc)}</div></div>`).join('');
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// FINANCE AI — Setup Agent + Rich Context
-// ══════════════════════════════════════════════════════════════════════════
-
-// ── Data audit ────────────────────────────────────────────────────────────
-function _financeAudit(){
-  const s=SD.students||[], cfg=SD.config||{}, staff=SD.staff||[], exp=SD.expenses||[];
-  const classes=[...new Set(s.map(x=>x.class).filter(Boolean))];
-  return {
-    feeSet:      s.length>0 && s.some(x=>(x.totalFee||0)>0),
-    cashBalance: cfg.cashBalance!=null && cfg.cashBalance>=0,
-    staffSalary: staff.length===0 || staff.every(x=>(x.salary||0)>0),
-    payDay:      !!cfg.salaryPayDay || staff.length===0,
-    hasStudents: s.length>0,
-    missingStaff: staff.filter(x=>!(x.salary>0)),
-    classes, staff, s, cfg, exp
-  };
-}
-
-function _financeScore(){
-  const a=_financeAudit();
-  const checks=[a.feeSet, a.cashBalance, a.staffSalary, a.payDay, a.hasStudents];
-  return Math.round(checks.filter(Boolean).length/checks.length*100);
-}
-
-// ── Rich context builder ───────────────────────────────────────────────────
-function buildRichFinanceContext(){
-  const s=SD.students||[], cfg=SD.config||{}, staff=SD.staff||[], expenses=SD.expenses||[];
-  const totalExpected=s.reduce((t,x)=>t+(x.totalFee||0),0);
-  const totalCollected=s.reduce((t,x)=>t+(x.paid||0),0);
-  const totalOutstanding=totalExpected-totalCollected;
-  const rate=totalExpected>0?Math.round(totalCollected/totalExpected*100):0;
-  const classes=[...new Set(s.map(x=>x.class).filter(Boolean))];
-  const classSummary=classes.map(cls=>{
-    const cs=s.filter(x=>x.class===cls);
-    const exp=cs.reduce((t,x)=>t+(x.totalFee||0),0);
-    const col=cs.reduce((t,x)=>t+(x.paid||0),0);
-    return `  ${cls}: ${cs.length} students | expected ₦${exp.toLocaleString()} | collected ₦${col.toLocaleString()} | owed ₦${(exp-col).toLocaleString()}`;
-  }).join('\n');
-  const defaulters=s.filter(x=>(x.totalFee||0)-(x.paid||0)>0)
-    .sort((a,b)=>((b.totalFee||0)-(b.paid||0))-((a.totalFee||0)-(a.paid||0))).slice(0,6)
-    .map(x=>`  ${x.name} (${x.class||'—'}): owes ₦${((x.totalFee||0)-(x.paid||0)).toLocaleString()}`).join('\n');
-  const totalSalary=staff.reduce((t,m)=>t+(m.salary||0),0);
-  const staffLines=staff.map(m=>`  ${m.name} (${m.role}): ₦${(m.salary||0).toLocaleString()}/month`).join('\n');
-  const cashBal=cfg.cashBalance!=null?`₦${cfg.cashBalance.toLocaleString()} as of ${cfg.cashBalanceDate||'?'}`:'not recorded';
-  const projNet=(cfg.cashBalance||0)+totalCollected-totalSalary;
-  const totalExp=expenses.reduce((t,e)=>t+(e.amount||0),0);
-  const byCategory={};
-  expenses.forEach(e=>{const c=e.category||'Other';byCategory[c]=(byCategory[c]||0)+e.amount;});
-  const expLines=Object.entries(byCategory).sort((a,b)=>b[1]-a[1])
-    .map(([c,a])=>`  ${c}: ₦${a.toLocaleString()}`).join('\n');
-  const upcoming=(cfg.upcomingExpenses||[]).map(e=>`  ${e.note}`).join('\n');
-  return [
-    `SCHOOL: ${cfg.schoolName||'School'} | TERM: ${cfg.currentTerm||'Term 1'} | STUDENTS: ${s.length}`,
-    ``,
-    `FEE COLLECTION:`,
-    `  Expected this term: ₦${totalExpected.toLocaleString()}`,
-    `  Collected so far:   ₦${totalCollected.toLocaleString()}`,
-    `  Outstanding:        ₦${totalOutstanding.toLocaleString()}`,
-    `  Collection rate:    ${rate}%`,
-    ``,
-    `PER-CLASS BREAKDOWN:\n${classSummary||'  No classes set'}`,
-    ``,
-    `TOP DEFAULTERS (highest balance first):\n${defaulters||'  None — all paid'}`,
-    ``,
-    `CASH POSITION:`,
-    `  Current balance: ${cashBal}`,
-    `  Monthly payroll: ₦${totalSalary.toLocaleString()}`,
-    `  Salary pay date: ${cfg.salaryPayDay?cfg.salaryPayDay+'th of month':'not set'}`,
-    `  Projected net after next payroll: ₦${projNet.toLocaleString()}`,
-    ``,
-    `STAFF & SALARIES:\n${staffLines||'  None recorded'}`,
-    ``,
-    `EXPENSES THIS TERM (₦${totalExp.toLocaleString()} total):\n${expLines||'  None recorded'}`,
-    upcoming?`\nUPCOMING EXPENSES:\n${upcoming}`:'',
-  ].filter(x=>x!==undefined).join('\n').trim();
-}
-
-// ── Finance Setup Agent ────────────────────────────────────────────────────
-const FSA={
-  _steps:[], _idx:0, _waitingFor:null,
-  _classQueue:[], _classIdx:0,
-
-  _chat(text, isUser=false){
-    const a=$('fsa-chat'); if(!a) return;
-    const d=document.createElement('div');
-    if(isUser){
-      d.style.cssText='background:var(--s2);padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:0.82rem;text-align:right;';
-      d.innerHTML=`<b>You:</b> ${esc(text)}`;
-    } else {
-      d.style.cssText='background:rgba(124,58,237,0.09);border-left:3px solid var(--brand);padding:10px 14px;border-radius:8px;margin-bottom:8px;font-size:0.82rem;line-height:1.65;white-space:pre-line;';
-      d.innerHTML=`<b style="color:var(--brand);">Finance AI:</b><br>${text.replace(/\n/g,'<br>')}`;
-    }
-    a.appendChild(d); a.scrollTop=a.scrollHeight;
-  },
-
-  _progress(){
-    const score=_financeScore();
-    const bar=$('fsa-bar'), lbl=$('fsa-bar-label');
-    if(bar) bar.style.width=score+'%';
-    if(lbl) lbl.textContent=`Finance AI setup ${score}% complete`;
-  },
-
-  _buildSteps(){
-    const a=_financeAudit();
-    const steps=[];
-    if(!a.feeSet && a.hasStudents) steps.push({id:'fee',type:'fee'});
-    if(!a.cashBalance) steps.push({id:'cash',type:'cash'});
-    a.missingStaff.forEach((m,i)=>steps.push({id:'sal_'+i,type:'salary',m,idx:(SD.staff||[]).indexOf(m)}));
-    if(!a.payDay && (SD.staff||[]).length>0) steps.push({id:'payday',type:'payday'});
-    return steps;
-  },
-
-  _question(step){
-    const cfg=SD.config||{}, school=cfg.schoolName||'your school';
-    switch(step.type){
-      case 'fee':   return `To track collection accurately, I need to know the school fee this term.\n\nIs it the same for all classes, or do different classes pay different amounts?\n(Reply "same" or "different")`;
-      case 'cash':  return `To know if you can meet your obligations this term, I need your current cash position.\n\nHow much money does ${school} have right now — bank and hand combined?\n(Type a number, e.g. 250000)`;
-      case 'salary':return `What is ${step.m.name}'s monthly salary?\n(${step.m.role} — type a number, e.g. 45000)`;
-      case 'payday':return `On what day of the month do you usually pay staff salaries?\n(Type a number like 25, or say "end of month")`;
-    }
-  },
-
-  async _save(step, text){
-    switch(step.type){
-      case 'fee':{
-        const t=text.toLowerCase();
-        if(t.includes('same')||t.includes('all')){
-          this._waitingFor='fee_amount';
-          this._chat('Got it — same fee for all students. How much is it per term?\n(Type the amount, e.g. 35000)');
-          return null;
-        } else if(t.includes('diff')||t.includes('class')){
-          this._classQueue=[...new Set((SD.students||[]).map(x=>x.class).filter(Boolean))];
-          this._classIdx=0;
-          if(this._classQueue.length){
-            this._waitingFor='class_fee';
-            this._chat(`Good. Let's go class by class.\n\nWhat is the term fee for ${this._classQueue[0]}?`);
-          }
-          return null;
-        }
-        const n=parseFloat(text.replace(/[^0-9.]/g,''));
-        if(n>0){ await this._applyFlatFee(n); return `✅ ₦${n.toLocaleString()} set for all students.`; }
-        return `I didn't catch that. Please reply with "same" or "different".`;
-      }
-      case 'cash':{
-        const n=parseFloat(text.replace(/[^0-9.]/g,''));
-        if(n>=0){
-          SD.config.cashBalance=n;
-          SD.config.cashBalanceDate=new Date().toISOString().split('T')[0];
-          await SQ.push('config',SD.config);
-          return `✅ Cash position: ₦${n.toLocaleString()} recorded.\n\nThis lets me tell you whether you can cover payroll next month.`;
-        }
-        return `Please type a number, e.g. 250000 (write 0 if you have nothing right now — that's still useful to know).`;
-      }
-      case 'salary':{
-        const n=parseFloat(text.replace(/[^0-9.]/g,''));
-        if(n>0){
-          SD.staff[step.idx].salary=n;
-          await SQ.push('staff',SD.staff);
-          return `✅ ${step.m.name}: ₦${n.toLocaleString()}/month`;
-        }
-        return `Please type the salary amount, e.g. 45000`;
-      }
-      case 'payday':{
-        const match=text.match(/\d+/);
-        const day=match?parseInt(match[0]):(text.toLowerCase().includes('end')?30:null);
-        if(day&&day>=1&&day<=31){
-          SD.config.salaryPayDay=day;
-          await SQ.push('config',SD.config);
-          return `✅ Salary date: ${day===30||day===31?'End of month':day+'th'} of each month.`;
-        }
-        return `Please type the day number (e.g. 25) or say "end of month".`;
-      }
-    }
-    return null;
-  },
-
-  async _applyFlatFee(amt){
-    (SD.students||[]).forEach(s=>{ if(!(s.totalFee>0)) s.totalFee=amt; });
-    SD.config.fee=amt;
-    await SQ.push('config',SD.config); await SQ.push('students',SD.students);
-  },
-
-  async start(){
-    const score=_financeScore();
-    if(score>=100){ this._showDashboard(); return; }
-    $('finance-empty').style.display='none';
-    $('finance-analysis').style.display='none';
-    $('finance-setup').style.display='block';
-    this._steps=this._buildSteps(); this._idx=0;
-    this._progress();
-    const name=(SD.staff||[]).find(x=>x.role==='Principal')?.name?.split(' ')[0]||'';
-    this._chat(
-      `Hello${name?' '+name:''}! 👋\n\nI'm your Finance Setup Assistant. I need to ask you a few short questions before I can give you real financial insights.\n\nI'll go one at a time — no forms, no confusion. Ready? Here we go.`
-    );
-    setTimeout(()=>this._nextQuestion(),700);
-  },
-
-  _nextQuestion(){
-    if(this._idx>=this._steps.length){ this._complete(); return; }
-    this._chat(this._question(this._steps[this._idx]));
-  },
-
-  async handleAnswer(){
-    const inp=$('fsa-input'); if(!inp) return;
-    const text=inp.value.trim(); if(!text) return;
-    inp.value=''; this._chat(text,true);
-
-    // Mid-flow: flat fee amount
-    if(this._waitingFor==='fee_amount'){
-      const n=parseFloat(text.replace(/[^0-9.]/g,''));
-      if(n>0){
-        await this._applyFlatFee(n);
-        this._chat(`✅ ₦${n.toLocaleString()} set for all ${(SD.students||[]).length} students.`);
-        this._waitingFor=null; this._idx++; this._progress();
-        setTimeout(()=>this._nextQuestion(),500);
-      } else { this._chat(`Please type a number, e.g. 35000`); }
-      return;
-    }
-
-    // Mid-flow: class fees
-    if(this._waitingFor==='class_fee'){
-      const n=parseFloat(text.replace(/[^0-9.]/g,''));
-      const cls=this._classQueue[this._classIdx];
-      if(n>0){
-        if(!SD.config.classFees) SD.config.classFees={};
-        SD.config.classFees[cls]=n;
-        (SD.students||[]).forEach(s=>{ if(s.class===cls&&!(s.totalFee>0)) s.totalFee=n; });
-        await SQ.push('config',SD.config); await SQ.push('students',SD.students);
-        this._classIdx++;
-        if(this._classIdx<this._classQueue.length){
-          this._chat(`✅ ${cls}: ₦${n.toLocaleString()}\n\nWhat is the fee for ${this._classQueue[this._classIdx]}?`);
-        } else {
-          const summary=Object.entries(SD.config.classFees).map(([c,f])=>`${c}: ₦${f.toLocaleString()}`).join('\n');
-          this._chat(`✅ All class fees saved:\n${summary}`);
-          this._waitingFor=null; this._idx++; this._progress();
-          setTimeout(()=>this._nextQuestion(),500);
-        }
-      } else { this._chat(`Please type the amount for ${cls}, e.g. 35000`); }
-      return;
-    }
-
-    const step=this._steps[this._idx]; if(!step) return;
-    const response=await this._save(step,text);
-    if(response===null) return;
-    if(response.startsWith('✅')){
-      this._chat(response); this._idx++; this._progress();
-      setTimeout(()=>this._nextQuestion(),500);
-    } else {
-      this._chat(response);
-    }
-  },
-
-  _complete(){
-    this._progress();
-    const s=SD.students||[], staff=SD.staff||[], cfg=SD.config||{};
-    const totalFee=s.reduce((t,x)=>t+(x.totalFee||0),0);
-    const totalSal=staff.reduce((t,m)=>t+(m.salary||0),0);
-    const cash=cfg.cashBalance!=null?`₦${cfg.cashBalance.toLocaleString()}`:'not recorded';
-    this._chat(
-      `✅ Setup complete! Here's your financial snapshot:\n\n` +
-      `💰 Term fee target: ₦${totalFee.toLocaleString()}\n` +
-      `🏦 Current cash: ${cash}\n` +
-      `👥 Monthly payroll: ₦${totalSal.toLocaleString()}\n\n` +
-      `Running your full Finance AI analysis now...`
-    );
-    setTimeout(()=>this._showDashboard(),1500);
-  },
-
-  _showDashboard(){
-    const setup=$('finance-setup'), empty=$('finance-empty'), analysis=$('finance-analysis');
-    if(setup) setup.style.display='none';
-    if(empty) empty.style.display='none';
-    if(analysis){ analysis.style.display='block'; }
-    checkFinance(); runLiveFinanceSummary(); BloomAgents.runFinanceAgent();
-  }
-};
-
-// ── Finance entry point ────────────────────────────────────────────────────
+// ── Finance AI ──────────────────────────────────────────────────────────────
 function checkFinance(){
-  const score=_financeScore();
-  const hasPayments=(SD.students||[]).some(s=>s.paid>0);
-  const hasExpenses=(SD.expenses||[]).length>0;
-  const hasAnyData=hasPayments||hasExpenses;
-
-  const fe=$('finance-empty'), fa=$('finance-analysis'), fs=$('finance-setup');
-  if(score>=100||hasAnyData){
-    if(fe) fe.style.display='none';
-    if(fs) fs.style.display='none';
-    if(fa) fa.style.display='block';
+  const hasData=(SD.expenses||[]).length>0||(SD.students||[]).some(s=>s.paid>0);
+  if(hasData){
+    const fe=$('finance-empty'),fa=$('finance-analysis');
+    if(fe) fe.style.display='none'; if(fa) fa.style.display='block';
     runLiveFinanceSummary();
   } else {
-    // Show setup agent
-    if(fa) fa.style.display='none';
-    if(fe) fe.style.display='none';
-    if(fs) fs.style.display='block';
+    const fe=$('finance-empty'),fa=$('finance-analysis');
+    if(fe) fe.style.display='block'; if(fa) fa.style.display='none';
   }
 }
 
 function runLiveFinanceSummary(){
   const s=SD.students||[];
-  const exp=s.reduce((a,x)=>a+(x.totalFee||0),0), col=s.reduce((a,x)=>a+(x.paid||0),0);
+  const exp=s.reduce((a,x)=>a+(x.totalFee||0),0),col=s.reduce((a,x)=>a+(x.paid||0),0);
   const expenses=(SD.expenses||[]).reduce((a,e)=>a+(e.amount||0),0);
-  const staff=SD.staff||[];
-  const totalSal=staff.reduce((t,m)=>t+(m.salary||0),0);
-  const cash=(SD.config||{}).cashBalance;
   const el1=$('ai-projection'); if(el1) el1.textContent=fmt(exp);
   const el2=$('ai-anomalies'); if(el2) el2.textContent=(SD.expenses||[]).filter(e=>e.amount>100000).length;
   const recEl=$('ai-recommendation');
   if(recEl){
     const pct=exp>0?(col/exp*100):0;
-    const netCash=(cash||0)+col-expenses-totalSal;
-    if(pct<50) recEl.innerHTML=`⚠️ <b>Warning:</b> Collection at <b>${Math.round(pct)}%</b>. ${col<totalSal?`Current collections (₦${fmt(col)}) won't cover next payroll (₦${fmt(totalSal)}). Chase defaulters immediately.`:'Recovering outstanding balances is critical.'}`;
-    else recEl.innerHTML=`✅ <b>${Math.round(pct)}% collected.</b> Net liquid position: ${fmt(netCash>=0?netCash:netCash)}${netCash<0?' <span style="color:#ef4444;">(deficit)</span>':''}`;
+    if(pct<50) recEl.innerHTML=`⚠️ <b>Budget Warning:</b> Fee collection is at <b>${Math.round(pct)}%</b>. Recovering outstanding balances must be prioritized.`;
+    else recEl.innerHTML=`✅ <b>Insight:</b> Fee collection is at <b>${Math.round(pct)}%</b>. Keep monitoring ledger expenditures. Net liquid: ${fmt(col-expenses)}.`;
   }
-  // Update setup progress bar if visible
-  const bar=$('fsa-bar'); if(bar) bar.style.width=_financeScore()+'%';
 }
 
+function handleFinanceUpload(event){if(event.target.files[0]){toast('Statement imported. Running budget analysis.');checkFinance();}}
 
 async function askFinanceAI(){
   const qInput=$('ai-question'),q=qInput?.value.trim(); if(!q) return;
   const chatArea=$('ai-chat-area');
   if(chatArea){const uMsg=document.createElement('div');uMsg.style.cssText='background:var(--s2);padding:8px;border-radius:8px;margin-bottom:5px;font-size:0.8rem;';uMsg.innerHTML=`<b>You:</b> ${esc(q)}`;chatArea.appendChild(uMsg);}
   if(qInput) qInput.value='';
-  // Use rich context — includes salary, cash position, per-class breakdown
-  const context=buildRichFinanceContext();
+  const s=SD.students||[];
+  const exp=s.reduce((a,x)=>a+(x.totalFee||0),0),col=s.reduce((a,x)=>a+(x.paid||0),0);
+  const expenses=(SD.expenses||[]).reduce((a,e)=>a+(e.amount||0),0);
+  const context=`School: ${SD.config.schoolName||'School'}, Students: ${s.length}, Expected: ${fmt(exp)}, Collected: ${fmt(col)}, Expenses: ${fmt(expenses)}, Net: ${fmt(col-expenses)}, Term: ${SD.config.currentTerm||'Term 1'}`;
+  // Use Groq for finance AI (text-only chat completion — same key as OCR)
   try{
-    const groqKey=getGroqKey();
-    if(!groqKey) throw new Error('No Groq key configured');
-    const prompt=`You are EduBloom's Finance Advisor for a Nigerian school. You have full financial data:\n\n${context}\n\nPrincipal's question: ${q}\n\nGive a direct, specific, practical answer using the real numbers above. Use ₦ for amounts. 3-5 sentences max. If the question can't be answered from the data, say what specific information you'd need.`;
+    const groqKey = getGroqKey();
+    if (!groqKey) throw new Error('No Groq key configured');
+    const prompt=`You are EduBloom's Finance Advisor for Nigerian schools. School data: ${context}. Question: ${q}\n\nGive a direct, practical answer in 3-4 sentences. Use ₦ for amounts.`;
     const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model:'llama-3.3-70b-versatile', temperature:0.3, max_tokens:400,
+      model:'llama-3.3-70b-versatile', temperature:0.3, max_tokens:300,
       messages:[{role:'user',content:prompt}]
     })});
     const d=await r.json();
     const reply=d.choices?.[0]?.message?.content||'Could not get a response.';
     if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> ${esc(reply)}`;chatArea.appendChild(bMsg);chatArea.scrollTop=chatArea.scrollHeight;}
   }catch(e){
-    if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> ${e.message||'Connection error.'}`;chatArea.appendChild(bMsg);}
+    if(chatArea){const bMsg=document.createElement('div');bMsg.style.cssText='background:rgba(124,58,237,0.08);border-left:3px solid var(--brand);padding:8px;border-radius:4px;margin-bottom:5px;font-size:0.8rem;';bMsg.innerHTML=`<b>Finance AI:</b> Connection error. Please check your internet.`;chatArea.appendChild(bMsg);}
   }
 }
 
-// One-tap question shortcut — pre-fills + fires immediately
-function askFinanceQ(question) {
-  const inp = $('ai-question');
-  if (inp) inp.value = question;
-  // Scroll the chat area into view
-  const chat = $('ai-chat-area');
-  if (chat) chat.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  askFinanceAI();
-}
-
-// Update Finance Agent to use rich context — salary capacity, cash position, per-class breakdown, health cards
-
-
-
-
-function handleFinanceUpload(event){if(event.target.files[0]){toast('Statement imported. Running budget analysis.');checkFinance();}}
-
-
-// ══════════════════════════════════════════════════════════════════════════
-// SUB-PAGES: Profile · Scores · Attendance · Payroll
-// ══════════════════════════════════════════════════════════════════════════
-
-// ── Student Profile Page ───────────────────────────────────────────────────
-let _profileIdx = null;
-
-function openProfilePage(idx) {
-  _profileIdx = idx;
-  go('profile');
-}
-
-function renderProfilePage() {
-  const idx = _profileIdx;
-  const s = idx !== null ? (SD.students || [])[idx] : null;
-  if (!s) {
-    // No student selected — show pick prompt
-    $('profile-header-card').innerHTML = '<p style="color:var(--sub);text-align:center;padding:1rem;">No student selected.<br><button class="btn-brand btn-sm" style="margin-top:0.5rem;" onclick="go(\'students\')">← Go to Students</button></p>';
-    $('profile-breadcrumb').textContent = 'Select a student from the Students page';
-    $('profile-tab-content').innerHTML = '';
-    return;
-  }
-  // Breadcrumb
-  $('profile-breadcrumb').textContent = s.name + (s.class ? ' · ' + s.class : '');
-  // Avatar
-  const av = $('profile-avatar');
-  if (av) {
-    if (s.photo) av.innerHTML = `<img src="${esc(s.photo)}" style="width:56px;height:56px;object-fit:cover;border-radius:50%;">`;
-    else av.textContent = s.name.charAt(0).toUpperCase();
-  }
-  $('profile-name').textContent = s.name;
-  $('profile-meta').innerHTML = `${esc(s.class||'No class')} · ${s.phone||'No phone'} · ${s.gender||''} ${s.dob?'· DOB: '+s.dob:''}`.trim().replace(/·\s*·/g,'·');
-  switchProfileTab('fees', document.querySelector('.profile-tab[data-ptab="fees"]'));
-}
-
-function switchProfileTab(tab, btn) {
-  document.querySelectorAll('.profile-tab').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  const s = _profileIdx !== null ? (SD.students||[])[_profileIdx] : null;
-  if (!s) return;
-  const el = $('profile-tab-content'); if (!el) return;
-
-  if (tab === 'fees') {
-    const owe = (s.totalFee||0) - (s.paid||0);
-    const hist = (s.paymentHistory||[]).slice(0,10);
-    el.innerHTML = `
-      <div class="card" style="margin-bottom:0.5rem;">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:0.75rem;">
-          <div><div style="font-weight:800;font-size:1rem;color:#22c55e;">${fmt(s.paid||0)}</div><div style="font-size:0.68rem;color:var(--sub);">Paid</div></div>
-          <div><div style="font-weight:800;font-size:1rem;color:#ef4444;">${fmt(owe)}</div><div style="font-size:0.68rem;color:var(--sub);">Owing</div></div>
-          <div><div style="font-weight:800;font-size:1rem;">${fmt(s.totalFee||0)}</div><div style="font-size:0.68rem;color:var(--sub);">Total Fee</div></div>
-        </div>
-        <div style="background:var(--border);border-radius:4px;height:6px;margin-bottom:0.65rem;">
-          <div style="background:#22c55e;height:6px;border-radius:4px;width:${s.totalFee?Math.round((s.paid||0)/s.totalFee*100):0}%;"></div>
-        </div>
-        <button class="btn-brand btn-sm" onclick="recordPaymentForStudent(${_profileIdx})">💰 Record Payment</button>
-        <button class="btn-ghost btn-sm" style="margin-left:4px;" onclick="sendReminder(${_profileIdx})">📲 Reminder</button>
-        <button style="background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:0.75rem;cursor:pointer;margin-left:4px;" onclick="sendPaymentLink(${_profileIdx})">💳 Send Payment Link</button>
-      </div>
-      <div class="card">
-        <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">Payment History</div>
-        ${hist.length ? hist.map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.78rem;">
-          <span>${p.date||'—'} <span style="color:var(--sub);">${p.method||''}</span></span>
-          <span style="color:#22c55e;font-weight:700;">${fmt(p.amount||0)}</span>
-        </div>`).join('') : '<p style="color:var(--sub);font-size:0.78rem;">No payments recorded yet.</p>'}
-      </div>`;
-  }
-
-  else if (tab === 'scores') {
-    const scores = s.scores || {};
-    const terms = ['t1','t2','t3'];
-    const termLabels = {t1:'Term 1',t2:'Term 2',t3:'Term 3'};
-    let html = '';
-    terms.forEach(t => {
-      const termData = scores[t] || {};
-      const subjects = Object.keys(termData);
-      if (!subjects.length) return;
-      html += `<div class="card" style="margin-bottom:0.5rem;"><div style="font-weight:700;margin-bottom:0.4rem;">${termLabels[t]}</div>`;
-      subjects.forEach(sub => {
-        const d = termData[sub]||{};
-        const total = (d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0);
-        html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
-          <span>${esc(sub)}</span>
-          <span style="color:${total>=50?'#22c55e':total>=40?'#f59e0b':'#ef4444'};font-weight:700;">${total}/100</span>
-        </div>`;
-      });
-      html += '</div>';
-    });
-    el.innerHTML = html || '<div class="card"><p style="color:var(--sub);font-size:0.82rem;">No scores recorded yet. Go to 📝 Scores to enter them.</p></div>';
-  }
-
-  else if (tab === 'attendance') {
-    const att = s.attendance || {};
-    const dates = Object.keys(att).sort().reverse().slice(0,20);
-    el.innerHTML = `<div class="card">
-      <div style="font-weight:700;font-size:0.82rem;margin-bottom:0.5rem;">Recent Attendance (last 20 days)</div>
-      ${dates.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;">
-        ${dates.map(d=>`<div title="${d}" style="padding:3px 7px;border-radius:5px;font-size:0.7rem;background:${att[d]==='present'?'rgba(34,197,94,0.15)':att[d]==='late'?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)'};color:${att[d]==='present'?'#22c55e':att[d]==='late'?'#f59e0b':'#ef4444'};">
-          ${d.slice(5)} ${att[d]==='present'?'✓':att[d]==='late'?'L':'✗'}
-        </div>`).join('')}
-      </div>` : '<p style="color:var(--sub);font-size:0.78rem;">No attendance data yet.</p>'}
-    </div>`;
-  }
-
-  else if (tab === 'swot') {
-    const sw = s.swot || {};
-    const fields = [{k:'strengths',label:'💪 Strengths',col:'#22c55e'},{k:'weaknesses',label:'⚠️ Weaknesses',col:'#f59e0b'},{k:'opportunities',label:'🚀 Opportunities',col:'#3b82f6'},{k:'threats',label:'🔴 Threats',col:'#ef4444'}];
-    el.innerHTML = `<div class="card">
-      ${fields.map(f=>`<div style="margin-bottom:0.6rem;">
-        <div style="font-weight:700;font-size:0.8rem;color:${f.col};margin-bottom:3px;">${f.label}</div>
-        <div style="font-size:0.8rem;color:var(--text);">${esc(sw[f.k]||'—')}</div>
-      </div>`).join('')}
-      <button class="btn-brand btn-sm" style="margin-top:0.25rem;" onclick="editStudent(${_profileIdx});go('students')">✏️ Edit SWOT</button>
-    </div>`;
-  }
-}
-
-function editStudentFromProfile() {
-  if (_profileIdx === null) return;
-  go('students');
-  setTimeout(() => editStudent(_profileIdx), 200);
-}
-
-function recordPaymentForStudent(idx) {
-  go('students');
-  setTimeout(() => {
-    const el = document.querySelector(`[onclick="openProfile(${idx})"]`)?.closest('.stu-row');
-    if (el) el.scrollIntoView({behavior:'smooth'});
-    openPaymentModal(idx);
-  }, 200);
-}
-
-// Patch openProfile to also update _profileIdx so profile page stays in sync
-const _origOpenProfile = typeof openProfile === 'function' ? openProfile : null;
-window.openProfile = function(idx) {
-  _profileIdx = idx;
-  if (_origOpenProfile) _origOpenProfile(idx);
-};
-
-// ── Scores Full Page ────────────────────────────────────────────────────────
-function initScoresPage() {
-  const classSel = $('sp-class'), subjSel = $('sp-subject');
-  if (!classSel || !subjSel) return;
-  const classes = [...new Set((SD.students||[]).map(s=>s.class).filter(Boolean))].sort();
-  classSel.innerHTML = '<option value="">All Classes</option>' + classes.map(c=>`<option>${esc(c)}</option>`).join('');
-  // subjects from all scores
-  const subjects = [...new Set((SD.students||[]).flatMap(s=>Object.values(s.scores||{}).flatMap(t=>Object.keys(t))))].sort();
-  subjSel.innerHTML = '<option value="">All Subjects</option>' + subjects.map(s=>`<option>${esc(s)}</option>`).join('');
-  renderScoresPage();
-}
-
-function renderScoresPage() {
-  const el = $('scores-page-content'); if (!el) return;
-  const cls = $('sp-class')?.value || '';
-  const subj = $('sp-subject')?.value || '';
-  const term = 't' + ($('sp-term')?.value || '1');
-  let students = SD.students || [];
-  if (cls) students = students.filter(s => s.class === cls);
-  if (!students.length) { el.innerHTML = '<p style="color:var(--sub);text-align:center;padding:2rem;">No students in this class.</p>'; return; }
-
-  const allSubjects = subj ? [subj] : [...new Set(students.flatMap(s=>Object.keys((s.scores||{})[term]||{})))].sort();
-  if (!allSubjects.length) { el.innerHTML = '<div class="card"><p style="color:var(--sub);font-size:0.82rem;">No scores recorded for this term yet. Use 📸 Scan Scores or add via student profile.</p></div>'; return; }
-
-  el.innerHTML = allSubjects.map(sub => {
-    const rows = students.map(s => {
-      const d = ((s.scores||{})[term]||{})[sub]||{};
-      const total = (d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0);
-      const grade = total>=75?'A':total>=60?'B':total>=50?'C':total>=45?'D':total>=40?'E':'F';
-      const col = total>=60?'#22c55e':total>=50?'#f59e0b':'#ef4444';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
-        <div style="cursor:pointer;" onclick="openProfilePage(${SD.students.indexOf(s)})">
-          <span style="font-weight:600;">${esc(s.name)}</span>
-          <span style="color:var(--sub);font-size:0.68rem;margin-left:4px;">${esc(s.class||'')}</span>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <span style="font-size:0.7rem;color:var(--sub);">${d.ca1||0}+${d.ca2||0}+${d.ca3||0}+${d.exam||0}</span>
-          <span style="font-weight:800;color:${col};min-width:28px;text-align:right;">${total}</span>
-          <span style="background:${col};color:#fff;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:800;">${grade}</span>
-        </div>
-      </div>`;
-    }).join('');
-    const avg = Math.round(students.reduce((t,s)=>{const d=((s.scores||{})[term]||{})[sub]||{};return t+(d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0);},0)/students.length);
-    return `<div class="card" style="margin-bottom:0.5rem;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
-        <div style="font-weight:800;font-size:0.85rem;">${esc(sub)}</div>
-        <span style="font-size:0.72rem;color:var(--sub);">Class avg: <b>${avg}/100</b></span>
-      </div>
-      ${rows}
-    </div>`;
-  }).join('');
-}
-
-function exportScoresCSV() {
-  const cls = $('sp-class')?.value || '';
-  const term = 't' + ($('sp-term')?.value || '1');
-  let students = SD.students || [];
-  if (cls) students = students.filter(s => s.class === cls);
-  const subjects = [...new Set(students.flatMap(s=>Object.keys((s.scores||{})[term]||{})))].sort();
-  const header = ['Name','Class',...subjects.flatMap(s=>[s+' CA1',s+' CA2',s+' CA3',s+' Exam',s+' Total'])].join(',');
-  const rows = students.map(s => {
-    const scores = subjects.flatMap(sub => {
-      const d = ((s.scores||{})[term]||{})[sub]||{};
-      return [d.ca1||0, d.ca2||0, d.ca3||0, d.exam||0, (d.ca1||0)+(d.ca2||0)+(d.ca3||0)+(d.exam||0)];
-    });
-    return [s.name, s.class||'', ...scores].join(',');
-  });
-  const csv = [header,...rows].join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = `scores_${cls||'all'}_term${$('sp-term')?.value||1}.csv`;
-  a.click();
-}
-
-// ── Attendance Full Page ────────────────────────────────────────────────────
-let _attPageData = {}; // {studentId: 'present'|'absent'|'late'}
-
-function initAttendancePage() {
-  const sel = $('att-class-page'); if (!sel) return;
-  const classes = [...new Set((SD.students||[]).map(s=>s.class).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="">All Classes</option>' + classes.map(c=>`<option>${esc(c)}</option>`).join('');
-  const dateEl = $('att-date-page');
-  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().split('T')[0];
-  renderAttendancePage();
-}
-
-function renderAttendancePage() {
-  const el = $('attendance-page-content'); if (!el) return;
-  const cls = $('att-class-page')?.value || '';
-  const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
-  let students = SD.students || [];
-  if (cls) students = students.filter(s => s.class === cls);
-  if (!students.length) { el.innerHTML = '<p style="color:var(--sub);padding:1rem;text-align:center;">No students found.</p>'; return; }
-
-  // Load existing data for this date
-  _attPageData = {};
-  students.forEach(s => { _attPageData[s.name] = (s.attendance||{})[date] || ''; });
-
-  const present = Object.values(_attPageData).filter(v=>v==='present').length;
-  const absent  = Object.values(_attPageData).filter(v=>v==='absent').length;
-  const late    = Object.values(_attPageData).filter(v=>v==='late').length;
-
-  el.innerHTML = `<div style="display:flex;gap:8px;margin-bottom:0.5rem;font-size:0.78rem;font-weight:700;">
-      <span style="color:#22c55e;">✓ ${present} present</span>
-      <span style="color:#ef4444;">✗ ${absent} absent</span>
-      <span style="color:#f59e0b;">L ${late} late</span>
-    </div>` +
-    students.map((s, i) => {
-      const cur = _attPageData[s.name] || '';
-      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
-        <div style="flex:1;font-size:0.82rem;font-weight:600;">${esc(s.name)}<span style="color:var(--sub);font-size:0.7rem;margin-left:4px;">${esc(s.class||'')}</span></div>
-        <div style="display:flex;gap:4px;">
-          <button onclick="setAtt('${esc(s.name)}','present',this)" style="padding:4px 8px;border-radius:6px;border:1px solid ${cur==='present'?'#22c55e':'var(--border)'};background:${cur==='present'?'rgba(34,197,94,0.15)':'transparent'};color:${cur==='present'?'#22c55e':'var(--sub)'};cursor:pointer;font-size:0.75rem;font-weight:700;">✓</button>
-          <button onclick="setAtt('${esc(s.name)}','late',this)" style="padding:4px 8px;border-radius:6px;border:1px solid ${cur==='late'?'#f59e0b':'var(--border)'};background:${cur==='late'?'rgba(245,158,11,0.15)':'transparent'};color:${cur==='late'?'#f59e0b':'var(--sub)'};cursor:pointer;font-size:0.75rem;font-weight:700;">L</button>
-          <button onclick="setAtt('${esc(s.name)}','absent',this)" style="padding:4px 8px;border-radius:6px;border:1px solid ${cur==='absent'?'#ef4444':'var(--border)'};background:${cur==='absent'?'rgba(239,68,68,0.15)':'transparent'};color:${cur==='absent'?'#ef4444':'var(--sub)'};cursor:pointer;font-size:0.75rem;font-weight:700;">✗</button>
-        </div>
-      </div>`;
-    }).join('');
-}
-
-function setAtt(name, status, btn) {
-  _attPageData[name] = status;
-  // Refresh button colours in this row
-  const row = btn.closest('div[style*="display:flex"]');
-  if (row) row.querySelectorAll('button').forEach(b => {
-    const s = b.textContent.trim() === '✓' ? 'present' : b.textContent.trim() === 'L' ? 'late' : 'absent';
-    const active = s === status;
-    const col = s==='present'?'#22c55e':s==='late'?'#f59e0b':'#ef4444';
-    b.style.borderColor = active ? col : 'var(--border)';
-    b.style.background = active ? `rgba(${s==='present'?'34,197,94':s==='late'?'245,158,11':'239,68,68'},0.15)` : 'transparent';
-    b.style.color = active ? col : 'var(--sub)';
-  });
-}
-
-function markAllPresent() {
-  Object.keys(_attPageData).forEach(n => _attPageData[n] = 'present');
-  renderAttendancePage();
-}
-
-async function saveAttendancePage() {
-  const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
-  (SD.students || []).forEach(s => {
-    if (_attPageData[s.name] !== undefined) {
-      if (!s.attendance) s.attendance = {};
-      s.attendance[date] = _attPageData[s.name] || 'absent';
-    }
-  });
-  await SQ.push('students', SD.students);
-  toast('✅ Attendance saved for ' + date);
-  renderAttendancePage();
-}
-
-function exportAttendanceCSV() {
-  const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
-  const rows = [['Name','Class','Status'],...(SD.students||[]).map(s=>[s.name,s.class||'',_attPageData[s.name]||'—'])];
-  const csv = rows.map(r=>r.join(',')).join('\n');
-  const a = document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download=`attendance_${date}.csv`; a.click();
-}
-
-// ── Payroll Page ─────────────────────────────────────────────────────────────
-function renderPayrollPage() {
-  const staff = SD.staff || [];
-  const cfg = SD.config || {};
-  const totalSalary = staff.reduce((t,m)=>t+(m.salary||0), 0);
-  const cashBalance = cfg.cashBalance || 0;
-  const collected = (SD.students||[]).reduce((t,s)=>t+(s.paid||0), 0);
-  const canAfford = (cashBalance + collected) >= totalSalary;
-  const history = cfg.payrollHistory || [];
-  const thisMonth = new Date().toISOString().slice(0,7);
-  const alreadyRan = history.some(h=>h.month===thisMonth);
-
-  // Summary card
-  const summaryEl = $('payroll-summary');
-  if (summaryEl) summaryEl.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0.65rem;">
-      <div style="background:var(--s2);border-radius:10px;padding:10px 12px;">
-        <div style="font-weight:800;font-size:1rem;">${fmt(totalSalary)}</div>
-        <div style="font-size:0.68rem;color:var(--sub);">Monthly obligation</div>
-      </div>
-      <div style="background:var(--s2);border-radius:10px;padding:10px 12px;">
-        <div style="font-weight:800;font-size:1rem;color:${canAfford?'#22c55e':'#ef4444'};">${canAfford?'✅ Can pay':'🔴 Shortfall'}</div>
-        <div style="font-size:0.68rem;color:var(--sub);">Cash + collections: ${fmt(cashBalance+collected)}</div>
-      </div>
-    </div>
-    <div style="font-size:0.75rem;color:var(--sub);">Pay date: ${cfg.salaryPayDay?cfg.salaryPayDay+'th of month':'not set — tap Settings → Finance Setup to add'}</div>
-    ${alreadyRan?`<div style="font-size:0.75rem;color:#22c55e;margin-top:4px;">✅ Payroll already run for ${thisMonth}</div>`:''}`;
-
-  // Staff list
-  const staffEl = $('payroll-staff-list');
-  if (staffEl) {
-    if (!staff.length) {
-      staffEl.innerHTML = '<p style="color:var(--sub);font-size:0.82rem;">No staff added yet. Go to Staff to add them.</p>';
-    } else {
-      staffEl.innerHTML = staff.map((m,i) => {
-        const hasSalary = m.salary > 0;
-        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-          <div style="flex:1;">
-            <div style="font-weight:700;font-size:0.85rem;">${esc(m.name)}</div>
-            <div style="font-size:0.72rem;color:var(--sub);">${esc(m.role)}</div>
-          </div>
-          <div style="text-align:right;">
-            ${hasSalary
-              ? `<div style="font-weight:800;color:#22c55e;">${fmt(m.salary)}</div><div style="font-size:0.65rem;color:var(--sub);">/month</div>`
-              : `<button class="btn-ghost btn-sm" style="font-size:0.72rem;" onclick="promptSalary(${i})">+ Set salary</button>`}
-          </div>
-        </div>`;
-      }).join('');
-    }
-  }
-
-  // History
-  const histEl = $('payroll-history');
-  if (histEl) {
-    histEl.innerHTML = history.length
-      ? history.slice(0,6).map(h=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
-          <div><b>${h.month}</b><span style="color:var(--sub);font-size:0.7rem;margin-left:6px;">ran on ${h.date}</span></div>
-          <span style="font-weight:700;color:#22c55e;">${fmt(h.total)}</span>
-        </div>`).join('')
-      : '<p style="color:var(--sub);font-size:0.78rem;">No payroll history yet. Run your first payroll above.</p>';
-  }
-
-  const btn = $('run-payroll-btn');
-  if (btn) { btn.textContent = alreadyRan ? '✅ Already Run' : '▶ Run Payroll'; btn.disabled = alreadyRan; }
-}
-
-async function runPayroll() {
-  const staff = SD.staff || [];
-  const totalSalary = staff.reduce((t,m)=>t+(m.salary||0), 0);
-  if (!totalSalary) return alert('No salaries set. Set salaries for staff members first.');
-  if (!confirm(`Record payroll of ${fmt(totalSalary)} for ${staff.length} staff members?\n\nThis will be logged in payroll history.`)) return;
-  const cfg = SD.config || {};
-  if (!cfg.payrollHistory) cfg.payrollHistory = [];
-  const month = new Date().toISOString().slice(0,7);
-  cfg.payrollHistory.unshift({
-    month, date: new Date().toISOString().split('T')[0],
-    total: totalSalary,
-    records: staff.map(m=>({name:m.name,role:m.role,salary:m.salary||0}))
-  });
-  // Deduct from cash balance
-  if (cfg.cashBalance != null) {
-    cfg.cashBalance = Math.max(0, cfg.cashBalance - totalSalary);
-    cfg.cashBalanceDate = new Date().toISOString().split('T')[0];
-  }
-  await SQ.push('config', cfg);
-  SD.config = cfg;
-  toast('✅ Payroll recorded — ' + fmt(totalSalary));
-  renderPayrollPage();
-}
-
-async function promptSalary(staffIdx) {
-  const m = (SD.staff||[])[staffIdx]; if (!m) return;
-  const val = prompt(`Monthly salary for ${m.name} (${m.role}):`, '');
-  const n = parseFloat((val||'').replace(/[^0-9.]/g,''));
-  if (!(n > 0)) return;
-  SD.staff[staffIdx].salary = n;
-  await SQ.push('staff', SD.staff);
-  toast(`✅ ${m.name}: ₦${n.toLocaleString()}/month`);
-  renderPayrollPage();
-}
-
-// ── Navigation wiring for new pages ──────────────────────────────────────────
-
-// ── Analytics ─────────────────────────────────────────────────────────────
-
+// ── Analytics ───────────────────────────────────────────────────────────────
 function renderAnalytics(){
   const el=$('analytics-content'); if(!el) return;
   const s=SD.students||[];
@@ -6897,153 +6111,6 @@ If nothing legible is found, output: {"subjects":[]}`;
   }
 }
 
-
-// ══════════════════════════════════════════════════════════════════════════
-// BLOOMCOLLECT — PAYMENT LINK GENERATION
-// Fee model (Option B): parent pays school_fee + 2.5%. School gets exact fee.
-// Split: 1.5% gateway (Paystack/Squad/Monnify) + 1% AariNAT.
-// When gateway not configured → falls back to bank transfer reminder (WhatsApp).
-// ══════════════════════════════════════════════════════════════════════════
-
-// Calculate what parent pays so school receives exact amount
-function calcParentCharge(schoolFee, gatewayRate = 0.015, aarinatRate = 0.01) {
-  // parent_pays = school_fee + surcharge (both gateway + AariNAT borne by parent)
-  const surcharge = Math.ceil(schoolFee * (gatewayRate + aarinatRate));
-  return { parentPays: schoolFee + surcharge, surcharge, schoolGets: schoolFee };
-}
-
-// Gateway config — stored in SD.config.bloomcollect by AariNAT during onboarding
-function getGatewayConfig() {
-  const bc = SD.config?.bloomcollect || {};
-  return {
-    active:     !!(bc.publicKey && bc.gateway),
-    gateway:    bc.gateway || 'paystack',      // 'paystack' | 'squad' | 'monnify'
-    publicKey:  bc.publicKey || '',
-    rate:       bc.gatewayRate || 0.015,       // Paystack default
-    subaccount: bc.subaccountCode || '',       // set when AariNAT registers school with gateway
-  };
-}
-
-// Send payment link (or fall back to bank transfer reminder if gateway not active)
-async function sendPaymentLink(idx) {
-  const s  = (SD.students || [])[idx];
-  if (!s) return;
-  const owe = (s.totalFee || 0) - (s.paid || 0);
-  if (owe <= 0) return toast('✅ ' + s.name + ' has no outstanding balance.');
-
-  const gw  = getGatewayConfig();
-  const bd  = SD.config?.bankDetails || {};
-  const sn  = SD.config?.schoolName || 'School';
-  const term = SD.config?.currentTerm || 'This Term';
-  const phone = (s.phone || '').replace(/\D/g, '');
-
-  if (!phone) return toast('⚠️ No phone number for ' + s.name + '. Add it in the student profile.');
-
-  // ── GATEWAY ACTIVE: generate Paystack payment link ──────────────────────
-  if (gw.active && gw.subaccount) {
-    const { parentPays, surcharge } = calcParentCharge(owe, gw.rate);
-
-    try {
-      toast('⏳ Generating payment link...');
-      // Call Firebase Cloud Function (deployed separately — see functions/bloomcollect.js)
-      const fnUrl = SD.config?.bloomcollect?.functionUrl || '';
-      if (!fnUrl) throw new Error('Cloud Function URL not configured');
-
-      const res = await fetch(fnUrl + '/createPaymentLink', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schoolId:     SD.config.schoolId,
-          schoolName:   sn,
-          studentName:  s.name,
-          studentClass: s.class || '',
-          parentPhone:  phone,
-          parentEmail:  s.email || (phone + '@parent.edubloom.com.ng'),
-          schoolFee:    owe,
-          parentCharge: parentPays,
-          term,
-          subaccount:   gw.subaccount,
-          gateway:      gw.gateway,
-          ref:          'BLOOM-' + (SD.config.schoolId || 'SCH') + '-' + Date.now(),
-        }),
-      });
-      const data = await res.json();
-      if (!data.paymentUrl) throw new Error(data.error || 'No payment URL returned');
-
-      // Send via WhatsApp with the payment link
-      const msg =
-`*${sn}* — Fee Payment Link 💳
-
-Dear Parent/Guardian of *${s.name}* (${s.class || 'our student'}),
-
-Please use the link below to pay your child's school fee securely online:
-
-🔗 *${data.paymentUrl}*
-
-📋 *Payment Summary — ${term}*
-School fee:       *${fmt(owe)}*
-Processing fee:   *${fmt(surcharge)}* (2.5%)
-*Total to pay:    ${fmt(parentPays)}*
-
-✅ Your school receives its full ₦${owe.toLocaleString()} — the 2.5% processing fee is added on top.
-✅ Payment confirms automatically — no need to send a receipt.
-
-The link expires in 24 hours. If you prefer bank transfer, please contact us.
-
-Thank you! 🙏
-– *${sn}*
-school.edubloom.com.ng`;
-
-      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-      logComm('Payment Link', `Sent to ${s.name} — ₦${parentPays.toLocaleString()} (incl. 2.5% fee)`);
-      toast('✅ Payment link sent to ' + s.name + '\'s parent');
-
-    } catch (e) {
-      console.warn('BloomCollect gateway error:', e.message);
-      // Graceful fallback to bank transfer
-      toast('⚠️ Gateway error — sending bank transfer reminder instead');
-      sendReminder(idx);
-    }
-    return;
-  }
-
-  // ── GATEWAY NOT YET ACTIVE: send bank transfer reminder with coming-soon note ──
-  if (bd.bankName && bd.accountNumber) {
-    // Bank details set — send full transfer instructions
-    sendReminder(idx);
-    toast('💡 Bank transfer reminder sent. Gateway payment links coming soon.');
-  } else {
-    // Neither gateway nor bank details configured
-    alert(
-      'BloomCollect is not fully set up yet.\n\n' +
-      'Go to Settings → BloomCollect and enter your school bank details.\n\n' +
-      'Once saved, fee reminders will include full bank transfer instructions.\n\n' +
-      'Gateway payment links (one-tap parent payment) are activated by AariNAT.'
-    );
-  }
-}
-
-// Save gateway details (called when AariNAT enables gateway for a school)
-async function saveGatewayDetails() {
-  const gateway = $('set-gateway')?.value;
-  const publicKey = $('set-gateway-key')?.value?.trim();
-  if (!gateway || !publicKey) return toast('Please select a gateway and enter the public key.');
-  if (!publicKey.startsWith('pk_')) return toast('⚠️ That doesn\'t look like a public key. It should start with pk_live_ or pk_test_');
-
-  const rateMap = { paystack: 0.015, squad: 0.01, monnify: 0.01 };
-  if (!SD.config.bloomcollect) SD.config.bloomcollect = {};
-  SD.config.bloomcollect.gateway    = gateway;
-  SD.config.bloomcollect.publicKey  = publicKey;
-  SD.config.bloomcollect.gatewayRate = rateMap[gateway] || 0.015;
-  SD.config.bloomcollect.activatedAt = new Date().toISOString();
-
-  await SQ.push('config', SD.config);
-
-  // Update badge
-  const badge = $('bc-gateway-badge');
-  if (badge) { badge.textContent = '✅ ACTIVE'; badge.style.background = 'rgba(34,197,94,0.15)'; badge.style.color = '#22c55e'; }
-  toast('⚡ Gateway activated! Payment links are now live.');
-}
 
 // ── BloomCollect Kora bank detail helpers (Settings) ──────────────────────
 async function saveBankDetails() {
@@ -7435,7 +6502,7 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxT
 // _OCR_DISCIPLINE kept as alias for backward compatibility with _buildRetryPrompt
 const _OCR_DISCIPLINE = OCR_CORE_DISCIPLINE;
 
-function _isPremium() { return true; /* All schools are Premium — basic tier eliminated per Bayo's decision 2026-08-10. */ }
+function _isPremium() { return true; /* TEMP BYPASS - matches production School-Bloom, Bayo verifying premium features across both. Do not restore until he confirms. */ }
 // ── Premium gate for scan buttons ─────────────────────────────────────────
 function _gateScan(prefix, scanInputId) {
   if (_isPremium()) { return true; }
@@ -8100,69 +7167,58 @@ const BloomAgents = {
   async runFinanceAgent() {
     const students = SD.students || [];
     if (!students.length) return;
-    const cfg = SD.config || {}, staff = SD.staff || [], expenses = SD.expenses || [];
 
-    const overdue = students.filter(s => ((s.totalFee||0)-(s.paid||0)) > 0);
-    const totalOwed = overdue.reduce((t,s)=>t+(s.totalFee||0)-(s.paid||0), 0);
-    const totalExpected = students.reduce((t,s)=>t+(s.totalFee||0), 0);
-    const totalCollected = students.reduce((t,s)=>t+(s.paid||0), 0);
-    const collectionRate = totalExpected>0 ? Math.round(totalCollected/totalExpected*100) : 0;
-    const critical = overdue.filter(s=>((s.totalFee||0)-(s.paid||0))/(s.totalFee||1)>0.5);
-    const totalSalary = staff.reduce((t,m)=>t+(m.salary||0), 0);
-    const cashBalance = cfg.cashBalance || 0;
-    const canPaySalary = (cashBalance + totalCollected) >= totalSalary;
-    const totalExpenses = expenses.reduce((t,e)=>t+(e.amount||0), 0);
+    const overdue = students.filter(s => ((s.totalFee || 0) - (s.paid || 0)) > 0);
+    const totalOwed = overdue.reduce((t, s) => t + (s.totalFee || 0) - (s.paid || 0), 0);
+    const totalExpected = students.reduce((t, s) => t + (s.totalFee || 0), 0);
+    const totalCollected = students.reduce((t, s) => t + (s.paid || 0), 0);
+    const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
 
-    // Stats panel
+    // Auto-flag critical defaulters (owe > 50% of their fee)
+    const critical = overdue.filter(s => ((s.totalFee||0)-(s.paid||0)) / (s.totalFee||1) > 0.5);
+
+    // Update finance agent panel
     const panel = document.getElementById('ai-finance-panel');
     if (panel) {
       panel.innerHTML = `
-        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:${collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'}">${collectionRate}%</span><span class="ai-stat-lbl">Collection Rate</span></div>
-        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:#ef4444">${overdue.length}</span><span class="ai-stat-lbl">Defaulters</span></div>
-        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:#f59e0b">${fmt(totalOwed)}</span><span class="ai-stat-lbl">Outstanding</span></div>
-        <div class="ai-agent-stat"><span class="ai-stat-val" style="color:#22c55e">${fmt(totalCollected)}</span><span class="ai-stat-lbl">Collected</span></div>`;
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:${collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'}">${collectionRate}%</span>
+          <span class="ai-stat-lbl">Collection Rate</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#ef4444">${overdue.length}</span>
+          <span class="ai-stat-lbl">Defaulters</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#f59e0b">${fmt(totalOwed)}</span>
+          <span class="ai-stat-lbl">Outstanding</span>
+        </div>
+        <div class="ai-agent-stat">
+          <span class="ai-stat-val" style="color:#22c55e">${fmt(totalCollected)}</span>
+          <span class="ai-stat-lbl">Collected</span>
+        </div>`;
     }
 
-    // Health cards
-    const cardsEl = document.getElementById('finance-health-cards');
-    if (cardsEl) {
-      const payrollStatus = totalSalary===0
-        ? {icon:'⚠️',label:'No salaries set',col:'#f59e0b'}
-        : canPaySalary ? {icon:'✅',label:'Can cover payroll',col:'#22c55e'}
-                       : {icon:'🔴',label:'Payroll at risk',col:'#ef4444'};
-      cardsEl.innerHTML = [
-        {icon:'💰',label:'Fee collected',val:fmt(totalCollected),sub:`of ${fmt(totalExpected)} target`,col:collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444'},
-        {icon:'🏦',label:'Cash balance',val:cfg.cashBalance!=null?fmt(cfg.cashBalance):'Not set',sub:cfg.cashBalanceDate?`as of ${cfg.cashBalanceDate}`:'tap Setup to add',col:cfg.cashBalance!=null?(cfg.cashBalance>0?'#22c55e':'#ef4444'):'#6b7280'},
-        {icon:payrollStatus.icon,label:'Payroll capacity',val:totalSalary?fmt(totalSalary)+'/mo':'—',sub:payrollStatus.label,col:payrollStatus.col},
-        {icon:'📉',label:'Expenses recorded',val:fmt(totalExpenses),sub:`${expenses.length} transactions`,col:'var(--text)'},
-      ].map(c=>`<div style="background:var(--s2);border-radius:10px;padding:10px 12px;">
-        <div style="font-size:1rem;margin-bottom:2px;">${c.icon}</div>
-        <div style="font-weight:800;font-size:0.88rem;color:${c.col};">${c.val}</div>
-        <div style="font-size:0.68rem;color:var(--sub);margin-top:1px;">${c.label}</div>
-        <div style="font-size:0.65rem;color:var(--sub);opacity:0.75;">${c.sub}</div>
-      </div>`).join('');
-    }
-
-    // Rich AI insight
+    // AI insight — only if Groq key set
     const key = getGroqKey();
-    if (key && students.length > 0) {
+    if (key && overdue.length > 0) {
       try {
-        const richCtx = buildRichFinanceContext();
         const insight = await BloomAgents._gemini(
           `You are EduBloom's Finance AI for a Nigerian school.
-${richCtx}
+Data: ${overdue.length} students owe fees. Total outstanding: ₦${totalOwed.toLocaleString()}. Collection rate: ${collectionRate}%.
+${critical.length} are critical defaulters (>50% unpaid).
+Classes with most defaults: ${[...new Set(overdue.map(s=>s.class||'Unknown'))].slice(0,3).join(', ')}.
 
-In 2 short sentences (max 35 words each): give the principal ONE urgent action and ONE prediction. Use the real numbers above. Be direct.`, 130);
+In 2 short sentences (max 30 words each), give the principal ONE urgent action and ONE prediction about end-of-term collection. Be direct, use Nigerian school context.`, 120);
         const insightEl = document.getElementById('ai-finance-insight');
         if (insightEl && insight) insightEl.textContent = insight;
       } catch(e) { console.warn('Finance AI insight failed:', e.message); }
     }
 
-    BloomAgents._log('💰 Finance Agent',
-      `${collectionRate}% collected · ${overdue.length} defaulters · ${canPaySalary?'payroll OK':'payroll at risk'}`,
-      `₦${totalCollected.toLocaleString()} of ₦${totalExpected.toLocaleString()} · cash: ${cfg.cashBalance!=null?fmt(cfg.cashBalance):'?'} · payroll: ${fmt(totalSalary)}/mo`);
+    BloomAgents._log('💰 Finance Agent', `Scanned ${students.length} students`, `${overdue.length} defaulters · ₦${totalOwed.toLocaleString()} outstanding · ${collectionRate}% collected`);
 
-    return { overdue, critical, totalOwed, collectionRate, canPaySalary, totalSalary, cashBalance };
+    // Return data for use by other agents
+    return { overdue, critical, totalOwed, collectionRate };
   },
 
   // Auto-batch send WA reminders to all defaulters (called by agent, confirmed by human)
@@ -8175,7 +7231,7 @@ In 2 short sentences (max 35 words each): give the principal ONE urgent action a
       return {
         name: s.name,
         phone: s.phone,
-        msg: (()=>{ const bd=SD.config.bankDetails||{}; const hasBD=!!(bd.bankName&&bd.accountNumber&&bd.accountName); const payBlock=hasBD?`\n💳 *Payment Instructions*\nBank: *${bd.bankName}*\nAccount: *${bd.accountNumber}*\nName: *${bd.accountName}*\nReference: *${s.name.toUpperCase()}*\n\nSend your receipt to this number after payment.`:`\nPlease contact the school to arrange payment.`; return `*${schoolName}* — Fee Reminder 🌸\n\nDear Parent/Guardian of *${s.name}* (${s.class||'our student'}),\n\n📋 *Fee Summary — ${SD.config.currentTerm||'This Term'}*\nTotal Fee:   *${fmt(s.totalFee||0)}*\nPaid:        *${fmt(s.paid||0)}*\nOutstanding: *${fmt(owe)}*\n${payBlock}\n\nThank you for your continued support. 🙏\n– *${schoolName}*`; })()
+        msg: `Dear Parent,\n\n*${schoolName}* 🌸\n\nThis is an automated fee reminder.\n\n*Student:* ${s.name}\n*Class:* ${s.class||'—'}\n*Outstanding:* *${fmt(owe)}*\n\nPlease pay promptly to avoid disruption to your child's learning.\n\nReply to this message for payment options.\n\nThank you.\n– EduBloom Finance Agent`
       };
     });
     openAgentReminderModal(messages);
