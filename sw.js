@@ -5,7 +5,7 @@
 //  assets (icons/manifest/CDN), Network-First for Firestore
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME   = 'edu-bloom-v20260809-step4port';
+const CACHE_NAME   = 'edubloom-School-Bloom-20260814-security';
 const SHELL_ASSETS = [
   './',
   './index.html',
