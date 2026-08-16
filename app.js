@@ -1851,7 +1851,7 @@ function go(tab) {
     alumni: renderAlumni, expenses: renderExpenses,
     finance: () => { checkFinance(); const score=_financeScore(); if(score<100&&!((SD.students||[]).some(s=>s.paid>0)||(SD.expenses||[]).length>0)){ FSA.start(); } else { const bar=$('fsa-bar'); if(bar) bar.style.width=score+'%'; } },
     comms: renderComms, analytics: renderAnalytics, security: () => {},
-    support: renderSupport, settings: loadSettings, opps: renderOpps,
+    support: () => { renderHelp(); renderSupport(); }, settings: loadSettings, opps: renderOpps,
     scorecard: renderScorecard,
     ai: () => { renderMorningAlertStatus(); if(typeof renderAITools==='function') renderAITools(); },
     aitools: () => { if(typeof renderAITools==='function') renderAITools(); },
@@ -6664,6 +6664,225 @@ async function promptSalary(staffIdx) {
 }
 
 // ── Navigation wiring for new pages ──────────────────────────────────────────
+
+// ── In-App Help System ────────────────────────────────────────────────────
+const HELP_TOPICS = [
+  {
+    id:'login', emoji:'🔑', title:'Logging In',
+    tags:['login','password','school id','forgot','open'],
+    body:`<b>How to open the app:</b> Open your phone browser and type <b>school.edubloom.com.ng</b> in the address bar. Tap Go.<br><br>
+<b>Your School ID</b> was sent to you on WhatsApp when AariNAT activated your school. It looks like: <b>BLOOM-AB1CD2</b><br><br>
+<b>Your first-time password</b> is: <b>bloom2026</b> — you will be asked to change it on your first login.<br><br>
+<b>Forgot password?</b> WhatsApp AariNAT on 0814 507 3941 and they will reset it for you.`
+  },
+  {
+    id:'students', emoji:'🎓', title:'Adding & Managing Students',
+    tags:['students','add','new student','import','csv','register'],
+    body:`<b>To add a student:</b> Tap Students in the menu → tap ➕ Add Student → fill in the name, class, and parent phone number → tap Save.<br><br>
+<b>Most important field:</b> The parent's WhatsApp phone number. Without it, automatic alerts (absent, fees, safety) cannot reach the parent.<br><br>
+<b>To import many students at once:</b> Upload a CSV or Excel file. It must have at least three columns: Name, Class, Phone.<br><br>
+<b>To edit a student:</b> Tap the ✏️ button on their row → make your changes → Save.<br><br>
+<b>To remove a student:</b> Tap the ✕ button. Only do this for students added by mistake. For students who have left, use the Alumni section instead.`
+  },
+  {
+    id:'fees', emoji:'💰', title:'Fee Tracking & Revenue',
+    tags:['fees','revenue','payment','paid','owing','balance','ledger'],
+    body:`<b>What Revenue shows:</b> A list of every student, how much they owe, and how much they have paid.<br><br>
+<b>To set the school fee:</b> Go to Settings → BloomCollect (or Finance AI will ask you when you first use it).<br><br>
+<b>To record a payment:</b> Find the student → tap 💰 Record Payment → enter the amount and date → Save.<br><br>
+<b>To send a reminder:</b> Tap 📲 next to any student who still owes money. WhatsApp opens with a message already written, including your bank details.<br><br>
+<b>To remind all defaulters at once:</b> Tap <i>Send All Reminders</i> at the top of the Revenue section.<br><br>
+<b>Bank statement import:</b> Upload your bank statement CSV — the app will automatically match each transfer to the correct student by their name.`
+  },
+  {
+    id:'attendance', emoji:'📅', title:'Taking Attendance',
+    tags:['attendance','absent','present','late','register','alert','parent'],
+    body:`<b>To take attendance:</b> Tap 📅 Attendance → select the class → check today's date is correct → tap ✓ (present), L (late), or ✗ (absent) for each student → tap 💾 Save.<br><br>
+<b>Shortcut:</b> Tap <i>✅ All Present</i> to mark everyone at once, then change just the absent students.<br><br>
+<b>Automatic parent alerts:</b> When you save attendance and a child is marked absent, a WhatsApp message goes to the parent <i>automatically</i> — no teacher needs to do anything extra.<br><br>
+<b>Alert not working?</b> Check that the parent's phone number is saved on the student's record in the Students section.`
+  },
+  {
+    id:'scores', emoji:'📝', title:'Entering & Viewing Scores',
+    tags:['scores','marks','ca','exam','subject','grade','results'],
+    body:`<b>To view scores:</b> Tap 📝 Scores → select the class, subject, and term. You will see every student's 1CA + 2CA + 3CA + Exam = Total, with a grade (A–F).<br><br>
+<b>To enter scores manually:</b> Select the class, subject, and term → tap on any score to edit it.<br><br>
+<b>Faster way:</b> Use Score Sheet Scan (see below) — take a photo of your marked sheet and the app reads the numbers automatically.<br><br>
+<b>Class average</b> is shown at the top of each subject so you can see how the class is performing overall.<br><br>
+<b>To export to Excel:</b> Tap ⬇️ Export CSV at the top.`
+  },
+  {
+    id:'scan', emoji:'📸', title:'Score Sheet Scan — App Reads Marks Automatically',
+    tags:['scan','photo','ocr','score sheet','automatic','read marks'],
+    body:`<b>What this does:</b> You photograph your marked score sheet, and the app reads all the names and numbers by itself. You do not need to type anything.<br><br>
+<b>How to scan:</b> Tap 📝 Scores → tap 📸 Scan Scores → take a clear photo of your score sheet → wait about 15 seconds → check the results → Save.<br><br>
+<b>For a good scan:</b> Lay the sheet flat on a table. Use good light (natural daylight is best). Take the photo from directly above. Make sure all columns are visible.<br><br>
+<b>If scan fails:</b> The app will show you a manual entry table with your students' names already listed. Just type the numbers in.<br><br>
+<b>The app accepts:</b> photographs, scanned PDFs, Excel files, CSV files, and typed lists.`
+  },
+  {
+    id:'reportcard', emoji:'📋', title:'Generating Report Cards',
+    tags:['report card','result','print','scorecard','position','grade'],
+    body:`<b>To generate report cards:</b> Tap 📋 Report Card → select the class and term → tap 🖨️ Print All Cards. A result slip is created for every student in that class.<br><br>
+<b>What appears on the card:</b> Student name, class, all subjects with CA and Exam scores, total, grade, class position, and class average.<br><br>
+<b>Positions are automatic</b> — the student with the highest total is Position 1.<br><br>
+<b>Teacher remarks:</b> You can add remarks for each student in Student Profile → SWOT tab.`
+  },
+  {
+    id:'profile', emoji:'👤', title:'Student Profile — Complete Record',
+    tags:['profile','student record','fees','swot','history'],
+    body:`<b>To open a student's profile:</b> Tap on any student's name in the Students list.<br><br>
+<b>The four tabs on every profile:</b><br>
+• 💰 <b>Fees</b> — what they owe/paid + record payment button<br>
+• 📝 <b>Scores</b> — all subject scores for all terms<br>
+• 📅 <b>Attendance</b> — last 20 school days (green=present, red=absent, L=late)<br>
+• 🧠 <b>SWOT</b> — your personal notes about this student (only you and staff can see this)`
+  },
+  {
+    id:'staff', emoji:'👥', title:'Managing Staff',
+    tags:['staff','teacher','login','class','role','add'],
+    body:`<b>To add a staff member:</b> Tap 👥 Staff → ➕ Add Staff → fill in name, role, phone, assigned class, and monthly salary → Save.<br><br>
+<b>Staff login:</b> Every staff member can log into the app with their phone number. Class Teachers can only see their own class. The Principal can see everything.<br><br>
+<b>If a teacher leaves:</b> Remove them from Staff immediately so they can no longer log in.<br><br>
+<b>Setting salary:</b> The salary you enter here is used by the Payroll section and Finance AI to check whether you can afford to pay salaries each month.`
+  },
+  {
+    id:'payroll', emoji:'💸', title:'Payroll — Staff Salaries',
+    tags:['payroll','salary','salaries','pay','workers'],
+    body:`<b>To set up:</b> Make sure every staff member has a salary entered in their Staff record.<br><br>
+<b>To record that salaries were paid:</b> Tap 💸 Payroll → check the summary at the top → tap ▶ Run Payroll → confirm. This logs the payment and deducts from your cash balance.<br><br>
+<b>The summary shows:</b> Total monthly obligation, your current cash, and whether you can afford to pay (green = yes, red = short).<br><br>
+<b>History:</b> The bottom of the page shows the last 6 months of payroll records.<br><br>
+<b>Note:</b> You can only run payroll once per month.`
+  },
+  {
+    id:'expenses', emoji:'📉', title:'Recording Expenses',
+    tags:['expenses','spending','diesel','maintenance','stationery','costs'],
+    body:`<b>To add an expense:</b> Tap 📉 Expenses → ➕ Add Expense → enter the amount, category (Diesel, Maintenance, WAEC Fees, etc.), a description, and the date → Save.<br><br>
+<b>Why record expenses?</b> Finance AI uses this data to calculate your real net position — what you have left after paying staff and all your school costs.<br><br>
+<b>Tip:</b> Record expenses on the same day you spend the money. It is easy to forget later.`
+  },
+  {
+    id:'finance', emoji:'🤖', title:'Finance AI — Your Money Advisor',
+    tags:['finance','ai','money','salary','collection','defaulters','net position'],
+    body:`<b>First time:</b> Finance AI will ask you a few questions to set up — school fee amount, current cash balance, staff salaries, and salary pay date. Answer honestly for accurate advice.<br><br>
+<b>The 4 health cards show:</b> Fee collected vs target, cash balance, payroll capacity (can you afford salaries?), and total expenses.<br><br>
+<b>One-tap questions:</b><br>
+• 🔴 Top Defaulters — who owes the most?<br>
+• 💸 Can I Pay Salaries? — collections vs payroll<br>
+• 📚 Worst-Paying Class — which class to chase?<br>
+• 📊 Net Position — surplus or deficit?<br><br>
+<b>Or type any question</b> in the box — Finance AI answers based on your actual numbers.`
+  },
+  {
+    id:'bloomcollect', emoji:'💳', title:'BloomCollect — Fee Payment by WhatsApp',
+    tags:['bloomcollect','bank','payment','transfer','whatsapp','reminder'],
+    body:`<b>One-time setup:</b> Go to Settings → BloomCollect → enter your school bank name, account number, and account name → Save.<br><br>
+<b>What happens after setup:</b> Every fee reminder sent to a parent will automatically include your bank details and instructions to use the student's name as the transfer reference.<br><br>
+<b>Parent transfers</b> directly to your school account. When you receive the alert, record the payment in Revenue.<br><br>
+<b>Cost to you: ₦0</b> — no gateway, no percentage taken. The money goes straight to your account.`
+  },
+  {
+    id:'safety', emoji:'🔒', title:'Safety Features — Protecting Students',
+    tags:['safety','security','absent','alert','collector','pickup','sign out','leave','mid-day'],
+    body:`Edu-BLOOM has three safety features that alert parents automatically.<br><br>
+<b>1. Absence Alert:</b> When a student is marked absent at attendance, the parent receives a WhatsApp immediately — no teacher needs to do anything.<br><br>
+<b>2. Collector Check:</b> Each student has a list of approved people who can collect them. If someone not on the list comes to collect the child, the system alerts the parent and the child stays in school.<br>
+→ <i>Set up in Student Profile → Authorised Collectors</i><br><br>
+<b>3. Sign-Out Alert:</b> When a child leaves school mid-day for any reason, the parent gets a WhatsApp with the time, the collector's name, and a note to call the school if they did not authorise it.`
+  },
+  {
+    id:'offline', emoji:'📶', title:'Working Without Internet',
+    tags:['offline','internet','network','connection','no data','sync'],
+    body:`<b>Edu-BLOOM works without internet.</b> You can take attendance, record payments, enter scores, add students, and record expenses — all offline.<br><br>
+<b>What happens to offline data:</b> Everything is saved on your phone. The next time your phone connects to the internet — even briefly — the app sends all the data to the cloud automatically.<br><br>
+<b>Status indicator:</b> At the top of the app you will see "Online", "Offline", or "Syncing". Wait until it says "Online" before closing the app after offline use.<br><br>
+<b>What requires internet:</b> Sending WhatsApp messages, using AI features (Finance AI, Score Scan), and seeing live data from other devices.`
+  },
+  {
+    id:'scout', emoji:'🔍', title:'Opportunity Scout — Scholarships & Grants',
+    tags:['scout','scholarship','grant','competition','funding','opportunity'],
+    body:`<b>What it does:</b> Searches for scholarships, grants, competitions, and funding opportunities that are relevant to Nigerian private schools.<br><br>
+<b>To use it:</b> Tap 🔍 Scout in the menu. Browse the list. Each opportunity shows the deadline and a link to apply.<br><br>
+<b>Examples:</b> Government grants, NGO scholarships for students, inter-school competitions, teacher training programmes, and international funding.<br><br>
+<b>Tip:</b> Check Scout at the start of each term — new opportunities are added regularly.`
+  },
+  {
+    id:'comms', emoji:'📢', title:'Communicating with Parents (Comms)',
+    tags:['comms','message','parents','broadcast','pta','announcement'],
+    body:`<b>To send a message to parents:</b> Tap 📢 Comms → choose who to send to (all parents, one class, etc.) → write your message → Send. WhatsApp messages open for each parent.<br><br>
+<b>Use Comms for:</b> PTA meeting dates, school closing and resumption dates, uniform reminders, exam timetables, and any school-wide announcements.<br><br>
+<b>Remember:</b> These messages come from the school, not a personal number. Keep the tone professional.`
+  },
+  {
+    id:'settings', emoji:'⚙️', title:'Settings — Changing School Information',
+    tags:['settings','password','school name','term','api key','calendar'],
+    body:`<b>Important settings to check:</b><br>
+• <b>School Name</b> — appears on report cards and messages<br>
+• <b>Current Term</b> — change this at the start of each new term (Term 1, 2, or 3)<br>
+• <b>Password</b> — change your login password anytime<br>
+• <b>BloomCollect</b> — enter your bank details for fee reminders<br>
+• <b>API Keys</b> — paste your Groq key here to enable AI features (AariNAT will give you this)<br>
+• <b>Term Calendar</b> — edit your state's resumption and vacation dates if they differ from the defaults`
+  },
+  {
+    id:'faq', emoji:'❓', title:'Common Questions & Problems',
+    tags:['problem','not working','help','question','faq','issue','error'],
+    body:`<b>I forgot my password</b> → WhatsApp AariNAT: 0814 507 3941<br><br>
+<b>Teacher can't see anything when logged in</b> → Check that they have a class assigned in Staff → Edit their record<br><br>
+<b>Score scan read some names wrongly</b> → Correct the mistakes in the preview table before tapping Save<br><br>
+<b>Parent says they didn't receive the absence alert</b> → Check the student's record has the correct phone number<br><br>
+<b>App is showing old information</b> → Pull down on the screen to refresh<br><br>
+<b>Can I use it on a computer?</b> → Yes. Open school.edubloom.com.ng in any computer browser<br><br>
+<b>New term starting — do I delete old scores?</b> → No! Go to Settings → change Current Term. Old scores are saved automatically<br><br>
+<b>Subscription expired</b> → Contact your agent or WhatsApp AariNAT: 0814 507 3941`
+  },
+];
+
+function renderHelp() {
+  const el = $('help-topics'); if (!el) return;
+  el.innerHTML = HELP_TOPICS.map(t => `
+    <div class="help-card" data-tags="${t.tags.join(' ')}" style="border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;">
+      <div onclick="toggleHelp('${t.id}')" style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;background:var(--s2);">
+        <span style="font-size:1.2rem;flex-shrink:0;">${t.emoji}</span>
+        <span style="font-weight:700;font-size:0.85rem;flex:1;">${t.title}</span>
+        <span id="help-arrow-${t.id}" style="color:var(--sub);font-size:0.8rem;transition:transform 0.2s;">▼</span>
+      </div>
+      <div id="help-body-${t.id}" style="display:none;padding:12px 14px;font-size:0.8rem;line-height:1.75;color:var(--text);border-top:1px solid var(--border);">
+        ${t.body}
+      </div>
+    </div>`).join('');
+}
+
+function toggleHelp(id) {
+  const body  = $(`help-body-${id}`);
+  const arrow = $(`help-arrow-${id}`);
+  if (!body) return;
+  const open = body.style.display === 'block';
+  // Close all
+  HELP_TOPICS.forEach(t => {
+    const b = $(`help-body-${t.id}`);
+    const a = $(`help-arrow-${t.id}`);
+    if (b) b.style.display = 'none';
+    if (a) a.style.transform = '';
+  });
+  // Open this one if it was closed
+  if (!open) {
+    body.style.display = 'block';
+    if (arrow) arrow.style.transform = 'rotate(180deg)';
+  }
+}
+
+function filterHelp(q) {
+  const term = q.toLowerCase().trim();
+  const cards = document.querySelectorAll('.help-card');
+  cards.forEach(card => {
+    const tags  = card.dataset.tags || '';
+    const title = card.querySelector('span:nth-child(2)')?.textContent?.toLowerCase() || '';
+    const match = !term || tags.includes(term) || title.includes(term);
+    card.style.display = match ? 'block' : 'none';
+  });
+}
 
 // ── Analytics ─────────────────────────────────────────────────────────────
 
