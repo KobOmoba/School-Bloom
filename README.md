@@ -575,3 +575,84 @@ entirely) across all three apps and all WhatsApp message templates.
 - After: `ctx.fillStyle = '#7c3aed'` (purple) → `fillText('Edu-', ...)` + `ctx.fillStyle = '#f97316'` (orange) → `fillText('BLOOM', ...)`
 
 The hyphen is now included. Logo baseline raised from y=55 to y=57 to accommodate 30px font (was 28px).
+
+
+---
+
+## 2026-08-16 — Edu-BLOOM User Manual (Personal + In-App)
+
+### Why this was built
+Bayo's request: "I need a manual — both personally and inside the app — where all features
+are highlighted and explained in simple English so even an internet-illiterate person can understand."
+
+---
+
+### 1. Personal Manual — `EduBLOOM_School_App_Manual.docx` (commit `d846cd0`)
+
+**32 pages. Branded in Edu-BLOOM colours (purple + orange). Professional layout with:**
+- Header on every page: "Edu-BLOOM · School App User Manual · AariNAT Company Limited"
+- Footer on every page: website, WhatsApp number, page number
+- Cover page with Edu-BLOOM branding, tagline, AariNAT address, RC number, August 2026
+
+**23 chapters covering every feature:**
+
+| Chapter | Topic |
+|---|---|
+| How to Read This Manual | Symbol guide (💡 tip, ✅ note, ⚠️ warning) |
+| 1 | Getting Started — First Login |
+| 2 | The Menu — What Every Button Does |
+| 3 | Revenue — Fee Tracking |
+| 4 | Students — Managing Records |
+| 5 | Student Profile — Complete Record |
+| 6 | Scores — Entering and Viewing Marks |
+| 7 | Score Sheet Scan — App Reads Marks Automatically |
+| 8 | Attendance — Daily Register |
+| 9 | Report Cards / Scorecard |
+| 10 | Staff — Managing Teachers and Workers |
+| 11 | Payroll — Staff Salaries |
+| 12 | Expenses — Recording School Spending |
+| 13 | Finance AI — Personal Money Advisor |
+| 14 | BloomCollect — Fee Collection by WhatsApp |
+| 15 | Safety Features (Absence Alert, Collector Check, Sign-Out Alert) |
+| 16 | Opportunity Scout — Scholarships and Grants |
+| 17 | Communications — Messaging Parents |
+| 18 | Analytics |
+| 19 | AI Agents |
+| 20 | Sports, Arts, Music, Health, Alumni |
+| 21 | Settings |
+| 22 | Working Without Internet |
+| 23 | Frequently Asked Questions (8 Q&As) |
+
+**Writing style:**
+- Zero technical jargon — "Groq", "Firestore", "OCR", "API" never appear
+- Step-by-step instructions for every action (Step 1, Step 2...)
+- 💡 Tips for shortcuts and best practices
+- ✅ Notes confirming correct behaviour
+- ⚠️ Warnings to prevent common mistakes
+- Feature-explanation tables (Feature name | What it does in plain English)
+- Sample WhatsApp messages shown as they actually appear to parents
+- Written in Nigerian context (NAPPS, term dates, bank transfers, WAEC, etc.)
+
+---
+
+### 2. In-App Help System — `app.js` + `index.html` (commits `1bcc723`, `4ada61b`)
+
+**Accessible from:** ❓ Support in the left menu (same section, now also shows help topics)
+
+**Features:**
+- 🔍 **Search bar** at the top — type any word (e.g. "fees", "scan", "absent") and matching topics filter instantly
+- **18 help topics** as accordion cards — tap a topic to expand it, tap again to close
+- **Topics covered:**
+  🔑 Logging In · 🎓 Students · 💰 Fees · 📅 Attendance · 📝 Scores · 📸 Score Scan ·
+  📋 Report Cards · 👤 Profile · 👥 Staff · 💸 Payroll · 📉 Expenses ·
+  🤖 Finance AI · 💳 BloomCollect · 🔒 Safety · 📶 Offline · 🔍 Scout · 📢 Comms ·
+  ⚙️ Settings · ❓ FAQ
+- **Agent contact card** (rendered by existing `renderSupport()`) shown at the top so the principal can WhatsApp their agent or AariNAT directly
+- **One section, no duplicates** — the old "Your Agent" support card was merged into the new Help section
+
+**How it works technically:**
+- `HELP_TOPICS` array (18 objects with `{id, emoji, title, tags[], body}`)
+- `renderHelp()` — renders all topics as accordion cards into `#help-topics`
+- `toggleHelp(id)` — opens/closes one topic; auto-closes all others (only one open at a time)
+- `filterHelp(query)` — hides cards that don't match the search term (checks tags + title)
+- `go('support')` now calls both `renderHelp()` and `renderSupport()`
