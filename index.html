@@ -945,37 +945,8 @@ function toggleEye(inputId, btn) {
       </div>
     </div>
 
-    <section id="sec-support" class="sec">
-      <div class="card" style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:2px solid var(--money);">
-        <div class="ct">👤 Your Agent</div>
-        <div id="agent-contact">
-          <div style="text-align:center;padding:1.5rem;color:var(--sub);">
-            <div style="font-size:2.5rem;margin-bottom:0.5rem;">⏳</div>
-            <p style="font-size:0.85rem;">No agent assigned yet.</p>
-            <p style="font-size:0.78rem;margin-top:0.25rem;">Contact AariNAT to get assigned an agent.</p>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="ct">📞 AariNAT Support</div>
-        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;border-bottom:1px solid var(--border);">
-          <div style="font-size:1.5rem;">📱</div>
-          <div style="flex:1;"><div style="font-size:0.68rem;color:var(--sub);text-transform:uppercase;">Support Hotline</div><div style="font-weight:600;">+234 814 507 3941</div></div>
-          <button class="btn-wa btn-sm" onclick="window.open('https://wa.me/2348145073941?text=Hello%20AariNAT%20Support%2C%20I%20need%20help%20with%20Educational%20Bloom.','_blank')">📞 Call</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;">
-          <div style="font-size:1.5rem;">✉️</div>
-          <div><div style="font-size:0.68rem;color:var(--sub);text-transform:uppercase;">Email</div><div style="font-weight:600;">aarinat.company.limited@gmail.com</div></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="ct">❓ FAQ</div>
-        <div id="faq-list">
-          <details style="margin-bottom:0.5rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">How do I add students?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Go to Students tab → tap ➕ Add Student. Or tap CSV Import to upload many at once. CSV format: Name, Phone, Class, Fee.</p></details>
-          <details style="margin-bottom:0.5rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">How do I generate a report card?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Go to Students → tap a student → tap Scores tab → enter CA and Exam scores → tap Report Card tab → tap Print.</p></details>
-          <details style="margin-bottom:0.5rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.85rem;padding:0.4rem 0;">Why is my data not syncing?</summary><p style="font-size:0.8rem;color:var(--sub);padding:0.5rem 0;">Check your internet connection. The app works offline and syncs automatically when connected. Look at the dot in the top header — green means online.</p></details></div>
-      </div>
-    </section>
+    <se
+
 
     <!-- 15. SETTINGS -->
 
@@ -1252,6 +1223,30 @@ function toggleEye(inputId, btn) {
       <div class="card">
         <div style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">📋 Payroll History</div>
         <div id="payroll-history"></div>
+      </div>
+    </section>
+
+  
+    <!-- HELP / MANUAL (in-app) -->
+    <section id="sec-support" class="sec">
+      <div class="card" style="border-left:4px solid #7c3aed;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:0.75rem;">
+          <div style="font-size:1.5rem;">❓</div>
+          <div>
+            <div class="ct" style="margin:0;">Help & User Guide</div>
+            <div style="font-size:0.72rem;color:var(--sub);">Plain-English guide to every feature in Edu-BLOOM</div>
+          </div>
+        </div>
+        <!-- Search -->
+        <input type="text" id="help-search" placeholder="🔍  Search help topics... (e.g. attendance, fees, scores)"
+          oninput="filterHelp(this.value)"
+          style="margin-bottom:0.75rem;font-size:0.82rem;">
+        <!-- Agent contact (populated by renderSupport) -->
+        <div id="agent-contact" style="background:rgba(124,58,237,0.07);border-radius:10px;padding:10px 14px;margin-bottom:0.75rem;">
+          <div style="font-size:0.75rem;color:var(--sub);">Loading support contact...</div>
+        </div>
+        <!-- Help topics -->
+        <div id="help-topics"></div>
       </div>
     </section>
 
