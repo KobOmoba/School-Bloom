@@ -957,7 +957,362 @@ function toggleEye(inputId, btn) {
       </div>
     </section>
 
-    <section id="sec-settings" class="sec">
+    
+<!-- ══════════════════════════════════════════════════
+     LESSON NOTE GENERATOR
+═══════════════════════════════════════════════════ -->
+<section id="sec-lessons" class="sec">
+<div class="sec-header"><h2>📖 Lesson Notes</h2></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start;">
+
+<!-- LEFT: Setup Form -->
+<div style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:1rem;">
+  <div style="font-size:0.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.75rem;">⚙️ Lesson Details</div>
+
+  <div style="margin-bottom:.65rem;">
+    <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">School Level</label>
+    <select id="ln-level" id="ln-level-sel" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;" onchange="updateLessonSubjects()">
+      <option value="primary">Primary (Basic 1–6)</option>
+      <option value="jss">Junior Secondary (JSS 1–3)</option>
+      <option value="ss">Senior Secondary (SS 1–3)</option>
+    </select>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.65rem;">
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Class</label>
+      <select id="ln-class" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;"></select>
+    </div>
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Subject</label>
+      <select id="ln-subject" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;"></select>
+    </div>
+  </div>
+
+  <div style="margin-bottom:.65rem;">
+    <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Topic <span style="color:#ef4444;">*</span></label>
+    <input id="ln-topic" placeholder="e.g. Photosynthesis in Plants" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;">
+  </div>
+
+  <div style="margin-bottom:.65rem;">
+    <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Sub-Topic <span style="color:var(--sub);font-weight:400;">(optional)</span></label>
+    <input id="ln-subtopic" placeholder="e.g. The role of chlorophyll" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;">
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;margin-bottom:1rem;">
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Duration</label>
+      <select id="ln-duration" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.8rem;">
+        <option value="30">30 min</option>
+        <option value="40" selected>40 min</option>
+        <option value="45">45 min</option>
+        <option value="60">60 min</option>
+        <option value="80">80 min</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Term</label>
+      <select id="ln-term" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.8rem;">
+        <option value="1st">1st Term</option>
+        <option value="2nd">2nd Term</option>
+        <option value="3rd">3rd Term</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Week</label>
+      <select id="ln-week" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.8rem;">
+        <option>1</option><option>2</option><option>3</option><option>4</option>
+        <option>5</option><option>6</option><option>7</option><option>8</option>
+        <option>9</option><option>10</option><option>11</option><option>12</option><option>13</option>
+      </select>
+    </div>
+  </div>
+
+  <button id="ln-btn" onclick="generateLessonNote()" style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:10px;padding:.75rem;font-weight:700;font-size:.9rem;cursor:pointer;">📝 Generate Lesson Note</button>
+
+  <div style="margin-top:.75rem;font-size:.72rem;color:var(--sub);line-height:1.5;">
+    Aligned with the <strong style="color:var(--text);">Federal Government of Nigeria New Curriculum</strong>.<br>
+    Uses the NTI/NCCE 5-step lesson note format.
+  </div>
+</div>
+
+<!-- RIGHT: Output -->
+<div>
+  <div id="ln-result" style="display:none;">
+    <div style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap;">
+      <button onclick="printLessonNote()" style="background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.8rem;cursor:pointer;">🖨️ Print</button>
+      <button onclick="copyLessonNote()" style="background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.8rem;cursor:pointer;">📋 Copy</button>
+    </div>
+    <div id="ln-output" style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:1rem 1.2rem;font-size:.82rem;line-height:1.85;white-space:pre-wrap;max-height:75vh;overflow-y:auto;color:var(--text);"></div>
+  </div>
+  <div id="ln-placeholder" style="background:var(--s1);border:1px dashed var(--border);border-radius:12px;padding:2.5rem 1rem;text-align:center;color:var(--sub);">
+    <div style="font-size:2rem;margin-bottom:.5rem;">📖</div>
+    <div style="font-size:.85rem;font-weight:600;">Your lesson note will appear here</div>
+    <div style="font-size:.76rem;margin-top:.25rem;">Fill in the details and tap Generate</div>
+  </div>
+</div>
+
+</div><!-- end grid -->
+</section>
+
+<!-- ══════════════════════════════════════════════════
+     QUESTION GENERATOR
+═══════════════════════════════════════════════════ -->
+<section id="sec-questions" class="sec">
+<div class="sec-header"><h2>❓ Question Generator</h2></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start;">
+
+<!-- LEFT: Setup Form -->
+<div style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:1rem;">
+  <div style="font-size:.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.75rem;">⚙️ Question Details</div>
+
+  <div style="margin-bottom:.65rem;">
+    <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">School Level</label>
+    <select id="qg-level" id="qg-level-sel" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;" onchange="updateQSubjects()">
+      <option value="primary">Primary (Basic 1–6)</option>
+      <option value="jss">Junior Secondary (JSS 1–3)</option>
+      <option value="ss">Senior Secondary (SS 1–3)</option>
+    </select>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.65rem;">
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Class</label>
+      <select id="qg-class" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;"></select>
+    </div>
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Subject</label>
+      <select id="qg-subject" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;"></select>
+    </div>
+  </div>
+
+  <div style="margin-bottom:.65rem;">
+    <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Topic(s) <span style="color:#ef4444;">*</span></label>
+    <input id="qg-topics" placeholder="e.g. Fractions, Decimals and Percentages" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;">
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.65rem;">
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Exam Type</label>
+      <select id="qg-type" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;">
+        <option>1st CA Test</option>
+        <option>2nd CA Test</option>
+        <option>Mid-Term Test</option>
+        <option>End of Term Exam</option>
+        <option>Mock Exam</option>
+        <option>Assignment</option>
+        <option>Weekly Quiz</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:3px;">Total Marks</label>
+      <input id="qg-marks" type="number" value="100" min="10" max="200" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:.83rem;">
+    </div>
+  </div>
+
+  <div style="background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:.85rem;margin-bottom:1rem;">
+    <div style="font-size:.75rem;font-weight:700;margin-bottom:.6rem;">Number of Questions by Type</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input id="qg-n-obj" type="number" value="20" min="0" max="60" style="width:52px;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;text-align:center;">
+        <label style="font-size:.78rem;">Objective (MCQ)</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input id="qg-n-theory" type="number" value="5" min="0" max="20" style="width:52px;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;text-align:center;">
+        <label style="font-size:.78rem;">Theory / Essay</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input id="qg-n-short" type="number" value="0" min="0" max="20" style="width:52px;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;text-align:center;">
+        <label style="font-size:.78rem;">Short Answer</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input id="qg-n-fill" type="number" value="0" min="0" max="20" style="width:52px;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;text-align:center;">
+        <label style="font-size:.78rem;">Fill in Blank</label>
+      </div>
+    </div>
+  </div>
+
+  <button id="qg-btn" onclick="generateQuestions()" style="width:100%;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:.75rem;font-weight:700;font-size:.9rem;cursor:pointer;">❓ Generate Questions</button>
+
+  <div style="margin-top:.75rem;font-size:.72rem;color:var(--sub);line-height:1.5;">
+    Generates a <strong style="color:var(--text);">question paper + complete answer key / marking scheme</strong>.<br>
+    Print them separately — questions for students, key for teacher only.
+  </div>
+</div>
+
+<!-- RIGHT: Output -->
+<div>
+  <div id="qg-result" style="display:none;">
+    <div style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap;">
+      <button onclick="printQuestions('questions')" style="background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.8rem;cursor:pointer;">🖨️ Print Questions</button>
+      <button onclick="printQuestions('answers')" style="background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.8rem;cursor:pointer;">🖨️ Print with Answer Key</button>
+      <button onclick="copyQuestions()" style="background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.8rem;cursor:pointer;">📋 Copy All</button>
+    </div>
+    <!-- Question paper -->
+    <div style="font-size:.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem;">📄 Question Paper</div>
+    <div id="qg-output" style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:1rem 1.2rem;font-size:.82rem;line-height:1.85;white-space:pre-wrap;max-height:45vh;overflow-y:auto;color:var(--text);margin-bottom:.75rem;"></div>
+    <!-- Answer key -->
+    <div id="qg-ans-section" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">
+        <div style="font-size:.7rem;font-weight:800;color:#7c3aed;letter-spacing:.1em;text-transform:uppercase;">🔑 Answer Key / Marking Scheme</div>
+        <button id="qg-ans-toggle" onclick="toggleAnswerKey()" style="background:var(--s2);color:var(--sub);border:1px solid var(--border);border-radius:7px;padding:4px 10px;font-size:.75rem;cursor:pointer;">🙈 Hide Answer Key</button>
+      </div>
+      <div id="qg-answer-output" style="background:rgba(124,58,237,.06);border:1px solid rgba(124,58,237,.2);border-radius:12px;padding:1rem 1.2rem;font-size:.82rem;line-height:1.85;white-space:pre-wrap;max-height:45vh;overflow-y:auto;color:var(--text);"></div>
+    </div>
+  </div>
+  <div id="qg-placeholder" style="background:var(--s1);border:1px dashed var(--border);border-radius:12px;padding:2.5rem 1rem;text-align:center;color:var(--sub);">
+    <div style="font-size:2rem;margin-bottom:.5rem;">❓</div>
+    <div style="font-size:.85rem;font-weight:600;">Your questions and answer key will appear here</div>
+    <div style="font-size:.76rem;margin-top:.25rem;">Fill in the details and tap Generate</div>
+  </div>
+</div>
+
+</div><!-- end grid -->
+</section>
+<section id="sec-settings" class="sec">
+      <div class="ct">⚙️ Settings</div>
+      <div class="card">
+        <label class="lbl">School Name</label>
+        <input class="inp" id="set-school-name" placeholder="Full school name">
+        <label class="lbl">Current Term</label>
+        <select class="inp" id="set-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+        <label class="lbl">Current Session</label>
+        <input class="inp" id="set-session" placeholder="e.g. 2025/2026">
+        <label class="lbl">New Password (leave blank to keep)</label>
+        <input class="inp" type="password" id="set-password" placeholder="New password">
+        <button class="btn-brand" onclick="saveSettings()">💾 Save Settings</button>
+      </div>
+    </section>
+
+  </div><!-- /main -->
+
+  <nav id="bottomnav">
+    <button class="nlink on" data-t="dashboard" onclick="go('dashboard')"><span class="ni">🏠</span>Home</button>
+    <button class="nlink" data-t="students"  onclick="go('students')"><span class="ni">🎓</span>Students</button>
+    <button class="nlink" data-t="scores"    onclick="go('scores')"><span class="ni">📝</span>Scores</button>
+    <button class="nlink" data-t="fees"      onclick="go('fees')"><span class="ni">💰</span>Fees</button>
+    <button class="nlink" data-t="guarantee" onclick="go('guarantee')"><span class="ni">🏆</span>Guarantee</button>
+    <button class="nlink" data-t="attendance"onclick="go('attendance')"><span class="ni">📋</span>Attendance</button>
+    <button class="nlink" data-t="staff"     onclick="go('staff')"><span class="ni">👥</span>Staff</button>
+    <button class="nlink" data-t="expenses"  onclick="go('expenses')"><span class="ni">📉</span>Expenses</button>
+    <button class="nlink" data-t="lessons"   onclick="go('lessons')"><span class="ni">📖</span>Lessons</button>
+    <button class="nlink" data-t="questions" onclick="go('questions')"><span class="ni">❓</span>Questions</button>
+    <button class="nlink" data-t="settings"  onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
+  </nav>
+</div>
+
+<!-- MODALS -->
+<div class="modal-bg" id="modal-add-student">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-add-student')">✕</button>
+    <div class="modal-title">➕ Add Student</div>
+    <label class="lbl">Full Name</label><input class="inp" id="s-name" placeholder="e.g. Adebayo Musa">
+    <label class="lbl">Class</label><input class="inp" id="s-class" placeholder="e.g. SS2A">
+    <label class="lbl">Level</label>
+    <select class="inp" id="s-level"><option>JSS1</option><option>JSS2</option><option>JSS3</option><option>SS1</option><option>SS2</option><option>SS3</option></select>
+    <label class="lbl">Gender</label>
+    <select class="inp" id="s-gender"><option value="M">Male</option><option value="F">Female</option></select>
+    <label class="lbl">Parent Phone</label><input class="inp" id="s-parent-phone" type="tel" placeholder="08012345678">
+    <label class="lbl">Admission Number (optional)</label><input class="inp" id="s-admission" placeholder="School's own number">
+    <button class="btn-brand" id="btn-add-student" onclick="saveStudent()">💾 Add Student</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-add-score">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-add-score')">✕</button>
+    <div class="modal-title">📝 Record Score</div>
+    <label class="lbl">Student</label><select class="inp" id="sc-student"></select>
+    <label class="lbl">Subject</label><input class="inp" id="sc-subject" placeholder="e.g. Mathematics">
+    <label class="lbl">Term</label>
+    <select class="inp" id="sc-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+    <label class="lbl">CA Score (0–40)</label><input class="inp" type="number" id="sc-ca" min="0" max="40" placeholder="0" oninput="previewTotal()">
+    <label class="lbl">Exam Score (0–60)</label><input class="inp" type="number" id="sc-exam" min="0" max="60" placeholder="0" oninput="previewTotal()">
+    <div id="sc-total-preview" style="margin-top:0.5rem;font-size:0.85rem;font-weight:700;color:var(--money);"></div>
+    <button class="btn-brand" onclick="saveScore()">💾 Save Score</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-add-payment">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-add-payment')">✕</button>
+    <div class="modal-title">💰 Record Fee Payment</div>
+    <label class="lbl">Student</label><select class="inp" id="pay-student"></select>
+    <label class="lbl">Amount (₦)</label><input class="inp" type="number" id="pay-amount" placeholder="e.g. 15000">
+    <label class="lbl">Term</label>
+    <select class="inp" id="pay-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+    <label class="lbl">Payment Method</label>
+    <select class="inp" id="pay-method"><option value="cash">Cash</option><option value="transfer">Bank Transfer</option><option value="POS">POS</option></select>
+    <label class="lbl">Received By</label><input class="inp" id="pay-received-by" placeholder="Staff name">
+    <label class="lbl">Receipt Number (optional)</label><input class="inp" id="pay-receipt" placeholder="RCP-0042">
+    <button class="btn-brand" onclick="savePayment()">💾 Save Payment</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-enroll-guarantee">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-enroll-guarantee')">✕</button>
+    <div class="modal-title">🏆 Exam Pass Guarantee Enrollment</div>
+    <label class="lbl">Student</label><select class="inp" id="g-student" onchange="prefillGuaranteeClass()"></select>
+    <label class="lbl">Class</label><input class="inp" id="g-class" readonly placeholder="Auto-filled">
+    <label class="lbl">Subject</label><input class="inp" id="g-subject" placeholder="e.g. Mathematics">
+    <label class="lbl">Term</label>
+    <select class="inp" id="g-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
+    <label class="lbl">Target Pass Score</label><input class="inp" type="number" id="g-target" value="50" min="30" max="100">
+    <label class="lbl">Amount Paid (₦)</label><input class="inp" type="number" id="g-amount" placeholder="e.g. 3000">
+    <div style="background:var(--card2);border-radius:8px;padding:0.7rem;margin-top:0.8rem;font-size:0.78rem;color:var(--sub);">
+      ℹ️ 70% refund if student completes 80%+ of modules, takes 3+ mock exams, and still misses target score.
+    </div>
+    <button class="btn-brand" onclick="enrollGuarantee()">✅ Enroll Student</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-take-attendance">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-take-attendance')">✕</button>
+    <div class="modal-title">📋 Take Attendance Register</div>
+    <label class="lbl">Class</label><select class="inp" id="att-class-select" onchange="loadAttendanceStudents()"></select>
+    <label class="lbl">Date</label><input class="inp" type="date" id="att-date">
+    <div id="att-student-list" style="margin-top:0.8rem;max-height:40vh;overflow-y:auto;"></div>
+    <button class="btn-brand" onclick="saveAttendance()" style="margin-top:0.8rem;">💾 Save Register</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-add-staff">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button>
+    <div class="modal-title">👥 Add Staff</div>
+    <label class="lbl">Full Name</label><input class="inp" id="st-name" placeholder="Full name">
+    <label class="lbl">Role</label>
+    <select class="inp" id="st-role"><option>Teacher</option><option>Principal</option><option>Bursar</option><option>Admin</option></select>
+    <label class="lbl">Phone</label><input class="inp" id="st-phone" type="tel" placeholder="08012345678">
+    <label class="lbl">Subjects (comma-separated, for teachers)</label>
+    <input class="inp" id="st-subjects" placeholder="e.g. Maths, Physics">
+    <button class="btn-brand" onclick="saveStaff()">💾 Add Staff</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-add-expense">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-add-expense')">✕</button>
+    <div class="modal-title">📉 Record Expense</div>
+    <label class="lbl">Category</label>
+    <select class="inp" id="exp-category"><option>Salary</option><option>Maintenance</option><option>Supplies</option><option>Utilities</option><option>Other</option></select>
+    <label class="lbl">Description</label><input class="inp" id="exp-desc" placeholder="Brief description">
+    <label class="lbl">Amount (₦)</label><input class="inp" type="number" id="exp-amount" placeholder="e.g. 50000">
+    <label class="lbl">Approved By</label><input class="inp" id="exp-approved" placeholder="Name">
+    <button class="btn-brand" onclick="saveExpense()">💾 Save Expense</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
+<section id="sec-settings" class="sec">
       <div class="card">
         <div class="ct">⚙️ School Settings</div>
         <label>School Name</label><input type="text" id="set-name" placeholder="e.g. Bright Stars Academy">
@@ -1291,6 +1646,8 @@ function toggleEye(inputId, btn) {
 
     <div class="nav-group-label">SYSTEM</div>
     <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
+<button class="nlink" data-t="lessons"   onclick="go('lessons')"><span class="ni">📖</span><span class="nl">Lessons</span></button>
+<button class="nlink" data-t="questions" onclick="go('questions')"><span class="ni">❓</span><span class="nl">Questions</span></button>
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
   </nav>
 </div>
@@ -1490,7 +1847,7 @@ function toggleEye(inputId, btn) {
     </div>
 
 
-<script src="app.js?v=20260810-scorefix2"></script>
+<script src="app.js?v=20260818-teaching"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
