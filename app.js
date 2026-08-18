@@ -9547,3 +9547,859 @@ function triggerMorningAlertNow() {
 function triggerNoReplyCheckNow() {
   MorningAlertSystem.runNoReplyCheck();
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// TEACHING TOOLS — Lesson Notes & Question Generator
+// Aligned with Federal Government of Nigeria New Curriculum
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Nigerian Curriculum Subject Maps ─────────────────────────────────────
+const CURRICULUM = {
+  primary: {
+    label: 'Primary',
+    classes: ['Primary 1','Primary 2','Primary 3','Primary 4','Primary 5','Primary 6'],
+    subjects: [
+      'English Language','Mathematics','Basic Science','Social Studies',
+      'Cultural and Creative Arts (CCA)','Civic Education',
+      'Physical and Health Education (PHE)','Agricultural Science',
+      'Computer Studies / ICT','Religious Studies (CRS)','Religious Studies (IRS)',
+      'Yoruba Language','Hausa Language','Igbo Language','French Language',
+      'Quantitative Reasoning','Verbal Reasoning'
+    ]
+  },
+  jss: {
+    label: 'Junior Secondary (JSS)',
+    classes: ['JSS 1','JSS 2','JSS 3'],
+    subjects: [
+      'English Language','Mathematics','Basic Science and Technology (BST)',
+      'Social Studies','Civic Education','Cultural and Creative Arts',
+      'Physical and Health Education (PHE)','Business Studies','Home Economics',
+      'Agricultural Science','Computer Studies / ICT',
+      'Christian Religious Knowledge (CRK)','Islamic Religious Knowledge (IRK)',
+      'Yoruba Language','Hausa Language','Igbo Language','French Language',
+      'Arabic Language','Pre-Vocational Studies'
+    ]
+  },
+  ss: {
+    label: 'Senior Secondary (SS)',
+    classes: ['SS 1','SS 2','SS 3'],
+    subjects: [
+      'English Language','Mathematics','Further Mathematics',
+      'Physics','Chemistry','Biology','Agricultural Science',
+      'Economics','Commerce','Accounting / Financial Accounting','Business Studies',
+      'Government','History','Geography',
+      'Literature in English','Christian Religious Studies (CRS)','Islamic Studies',
+      'Yoruba Language','Hausa Language','Igbo Language','French Language',
+      'Visual Arts','Music','Computer Science',
+      'Technical Drawing','Food and Nutrition','Health Science',
+      'Physical Education','Civic Education','Entrepreneurship'
+    ]
+  }
+};
+
+// Cached Groq key
+let _groqKey = null;
+async function _getGroqKey(){
+  if(_groqKey) return _groqKey;
+  try{
+    const snap = await db.collection('public_ocr_keys').doc('main').get();
+    if(snap.exists) _groqKey = snap.data()?.groqApiKey || null;
+  }catch(e){}
+  return _groqKey;
+}
+
+// ── Shared Groq caller ────────────────────────────────────────────────────
+async function _callGroqTeach(prompt, systemMsg){
+  const key = await _getGroqKey();
+  if(!key) throw new Error('Groq API key not set. Ask your admin to add it in Settings.');
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body: JSON.stringify({
+      model: 'qwen/qwen3.6-27b',
+      max_tokens: 8192,
+      reasoning_effort: 'none',
+      messages:[
+        {role:'system', content: systemMsg},
+        {role:'user',   content: prompt}
+      ]
+    })
+  });
+  if(!resp.ok){
+    const err = await resp.json().catch(()=>({}));
+    throw new Error(err?.error?.message || `Groq error ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// ── Build subject dropdown HTML ───────────────────────────────────────────
+function _buildSubjectOpts(level){
+  const map = CURRICULUM[level] || CURRICULUM.primary;
+  return map.subjects.map(s=>`<option value="${s}">${s}</option>`).join('');
+}
+
+function _buildClassOpts(level){
+  const map = CURRICULUM[level] || CURRICULUM.primary;
+  return map.classes.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+
+function updateLessonSubjects(){
+  const level = document.getElementById('ln-level')?.value || 'primary';
+  const subSel = document.getElementById('ln-subject');
+  const clsSel = document.getElementById('ln-class');
+  if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
+  if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
+}
+
+function updateQSubjects(){
+  const level = document.getElementById('qg-level')?.value || 'primary';
+  const subSel = document.getElementById('qg-subject');
+  const clsSel = document.getElementById('qg-class');
+  if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
+  if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
+}
+
+// ── Render Lesson Notes section ───────────────────────────────────────────
+function renderLessons(){
+  const sec = document.getElementById('sec-lessons');
+  if(!sec || sec.dataset.ready) return;
+  sec.dataset.ready = '1';
+  document.getElementById('ln-level-sel')?.addEventListener('change', updateLessonSubjects);
+  updateLessonSubjects();
+}
+
+async function generateLessonNote(){
+  const level   = document.getElementById('ln-level')?.value    || 'primary';
+  const cls     = document.getElementById('ln-class')?.value    || '';
+  const subj    = document.getElementById('ln-subject')?.value  || '';
+  const topic   = (document.getElementById('ln-topic')?.value   || '').trim();
+  const subtopic= (document.getElementById('ln-subtopic')?.value|| '').trim();
+  const duration= document.getElementById('ln-duration')?.value || '40';
+  const term    = document.getElementById('ln-term')?.value     || '1st';
+  const week    = document.getElementById('ln-week')?.value     || '1';
+
+  if(!topic){ alert('Please enter the lesson topic.'); return; }
+
+  const btn = document.getElementById('ln-btn');
+  const out  = document.getElementById('ln-output');
+  const wrap = document.getElementById('ln-result');
+
+  btn.textContent = '⏳ Generating...'; btn.disabled = true;
+  if(wrap) wrap.style.display = 'none';
+
+  const schoolName = schoolData?.config?.name || schoolData?.schoolName || schoolData?.config?.schoolName || 'School';
+  const levelLabel = CURRICULUM[level]?.label || 'Primary';
+
+  const prompt = `Generate a complete, professionally formatted lesson note for a Nigerian school following the Federal Government of Nigeria's new curriculum.
+
+Details:
+- School: ${schoolName}
+- Class: ${cls}
+- Subject: ${subj}
+- Topic: ${topic}${subtopic ? '
+- Sub-Topic: ' + subtopic : ''}
+- Duration: ${duration} minutes
+- ${term} Term, Week ${week}
+- School Level: ${levelLabel}
+
+Write the lesson note in this exact format — follow every section heading precisely:
+
+---
+LESSON NOTE
+
+School: ${schoolName}
+Subject: ${subj}
+Class: ${cls}
+Topic: ${topic}${subtopic ? '
+Sub-Topic: ' + subtopic : ''}
+Duration: ${duration} minutes  |  ${term} Term, Week ${week}
+Date: _______________  |  Time: _______________
+
+BEHAVIOURAL OBJECTIVES
+By the end of the lesson, pupils/students should be able to:
+1. [specific, measurable objective using action verb]
+2. [specific, measurable objective]
+3. [specific, measurable objective]
+4. [specific, measurable objective — for longer lessons add a 5th]
+
+ENTRY BEHAVIOUR / PREVIOUS KNOWLEDGE
+[What pupils already know that links to this topic]
+
+INSTRUCTIONAL MATERIALS / RESOURCES
+• [Material 1 — specific and relevant to Nigerian classroom context]
+• [Material 2]
+• [Material 3]
+• [Additional materials as appropriate]
+
+REFERENCE BOOKS
+• [Approved Nigerian textbook title — Author, Publisher, Edition]
+• [Second reference]
+
+STEP I — INTRODUCTION (5 minutes)
+[Engaging introduction: teacher poses a question or shares a scenario that links prior knowledge to the new topic. Include sample teacher language and expected student responses.]
+
+STEP II — PRESENTATION / DEVELOPMENT (${Math.round(parseInt(duration)*0.35)} minutes)
+[Core content delivery — explain the first key concept clearly with Nigerian examples. Include teacher activity and expected student activity.]
+
+STEP III — FURTHER DEVELOPMENT (${Math.round(parseInt(duration)*0.25)} minutes)
+[Second concept or deeper exploration of the first — with examples, demonstrations, or board work. Teacher-student interaction included.]
+
+STEP IV — APPLICATION / CLASS ACTIVITY (${Math.round(parseInt(duration)*0.15)} minutes)
+[Students practise or apply the concept — guided exercise, group work, or worked examples on the board.]
+
+STEP V — EVALUATION / QUESTIONS (5 minutes)
+Ask students the following evaluation questions:
+1. [Evaluation question — tests first objective]
+2. [Evaluation question — tests second objective]
+3. [Evaluation question — tests third objective]
+4. [Evaluation question — slightly challenging]
+5. [Evaluation question — application/thinking question]
+
+CONCLUSION / SUMMARY (3 minutes)
+[Teacher summarises the key points of the lesson and links to the next lesson topic.]
+
+ASSIGNMENT
+[1–2 well-designed homework tasks appropriate for the class level, with clear instructions]
+
+---
+Alignment note: This lesson note is aligned with the Federal Government of Nigeria's revised National Curriculum Framework.
+---`;
+
+  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';
+
+  try{
+    const result = await _callGroqTeach(prompt, systemMsg);
+    if(out) out.innerHTML = result.replace(/
+/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+    if(wrap) wrap.style.display = 'block';
+    // Store raw for print/copy
+    wrap.dataset.raw = result;
+  }catch(e){
+    alert('Error: ' + e.message);
+  }finally{
+    btn.textContent = '📝 Generate Lesson Note'; btn.disabled = false;
+  }
+}
+
+function printLessonNote(){
+  const wrap = document.getElementById('ln-result');
+  const raw  = wrap?.dataset?.raw || '';
+  if(!raw){ alert('Generate a lesson note first.'); return; }
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>Lesson Note</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;}
+h1{font-size:16px;text-align:center;border-bottom:2px solid #000;padding-bottom:8px;}
+pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
+hr{border:1px solid #ccc;margin:12px 0;}
+@media print{body{margin:15px;}button{display:none;}}
+</style></head><body>
+<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
+<pre>${raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+</body></html>`);
+  win.document.close();
+}
+
+function copyLessonNote(){
+  const wrap = document.getElementById('ln-result');
+  const raw  = wrap?.dataset?.raw || '';
+  if(!raw){ alert('Generate a lesson note first.'); return; }
+  navigator.clipboard.writeText(raw).then(()=>alert('✅ Lesson note copied to clipboard!'));
+}
+
+// ── Render Question Generator section ────────────────────────────────────
+function renderQuestions(){
+  const sec = document.getElementById('sec-questions');
+  if(!sec || sec.dataset.ready) return;
+  sec.dataset.ready = '1';
+  document.getElementById('qg-level-sel')?.addEventListener('change', updateQSubjects);
+  updateQSubjects();
+}
+
+async function generateQuestions(){
+  const level   = document.getElementById('qg-level')?.value      || 'primary';
+  const cls     = document.getElementById('qg-class')?.value      || '';
+  const subj    = document.getElementById('qg-subject')?.value    || '';
+  const topics  = (document.getElementById('qg-topics')?.value    || '').trim();
+  const examType= document.getElementById('qg-type')?.value       || 'CA Test';
+  const nObj    = parseInt(document.getElementById('qg-n-obj')?.value  || '0');
+  const nTheory = parseInt(document.getElementById('qg-n-theory')?.value || '0');
+  const nShort  = parseInt(document.getElementById('qg-n-short')?.value  || '0');
+  const nFill   = parseInt(document.getElementById('qg-n-fill')?.value   || '0');
+  const marks   = document.getElementById('qg-marks')?.value      || '100';
+
+  if(!topics){ alert('Please enter the topic(s) to cover.'); return; }
+  if((nObj + nTheory + nShort + nFill) === 0){
+    alert('Please set at least one question count greater than 0.'); return;
+  }
+
+  const btn   = document.getElementById('qg-btn');
+  const wrap  = document.getElementById('qg-result');
+  const out   = document.getElementById('qg-output');
+  const ansOut= document.getElementById('qg-answer-output');
+
+  btn.textContent = '⏳ Generating...'; btn.disabled = true;
+  if(wrap) wrap.style.display = 'none';
+
+  const schoolName = schoolData?.config?.name || schoolData?.schoolName || 'School';
+  const sections = [];
+  if(nObj    > 0) sections.push(`${nObj} multiple-choice (objective) questions — each with options A, B, C, D`);
+  if(nTheory > 0) sections.push(`${nTheory} theory/essay questions`);
+  if(nShort  > 0) sections.push(`${nShort} short-answer questions`);
+  if(nFill   > 0) sections.push(`${nFill} fill-in-the-blank questions`);
+
+  const prompt = `Generate a complete, properly formatted Nigerian school ${examType} for the following:
+
+School: ${schoolName}
+Subject: ${subj}
+Class: ${cls}
+Topic(s): ${topics}
+Type: ${examType}
+Total Marks: ${marks}
+Questions required:
+${sections.map((s,i)=>`• ${s}`).join('
+')}
+
+PART 1 — QUESTION PAPER:
+Format exactly as a Nigerian school exam paper:
+
+---
+${schoolName.toUpperCase()}
+${examType.toUpperCase()} EXAMINATION
+Subject: ${subj}  |  Class: ${cls}
+${topics.length < 60 ? 'Topic: ' + topics : ''}
+Total Marks: ${marks}  |  Time Allowed: ___________
+Name: _________________________  |  Date: ___________
+
+INSTRUCTIONS: Answer ALL questions. Write clearly and legibly.
+
+${nObj > 0 ? `SECTION A — OBJECTIVE (${nObj} Questions)
+Choose the correct answer from options A, B, C, D.
+
+[Generate ${nObj} objective questions on the topic. Each question should be on a new line, numbered 1–${nObj}, with options A B C D on the next line. Cover different aspects of the topic. Vary difficulty: easy, medium, hard.]
+
+` : ''}${nFill > 0 ? `SECTION ${nObj>0?'B':'A'} — FILL IN THE BLANKS (${nFill} Questions)
+Complete each sentence with the correct word or phrase.
+
+[Generate ${nFill} fill-in-the-blank sentences numbered correctly. Leave a blank line for the answer.]
+
+` : ''}${nShort > 0 ? `SECTION ${nObj>0||nFill>0?'C':'A'} — SHORT ANSWER (${nShort} Questions)
+Answer the following questions briefly.
+
+[Generate ${nShort} short-answer questions numbered correctly. Each should require 1–3 sentences.]
+
+` : ''}${nTheory > 0 ? `SECTION ${sections.length > 1 ? 'D' : 'A'} — THEORY / ESSAY (${nTheory} Questions)
+Answer ALL questions. Show all workings where necessary.
+
+[Generate ${nTheory} theory/essay questions numbered correctly. Each should be substantive, open-ended, and appropriate for ${cls}. State marks per question in brackets e.g. (10 marks).]
+
+` : ''}---
+
+PART 2 — ANSWER KEY / MARKING SCHEME:
+(Separate this section clearly with === ANSWER KEY === on its own line)
+
+=== ANSWER KEY / MARKING SCHEME ===
+Subject: ${subj}  |  Class: ${cls}  |  ${examType}
+
+[Provide the complete answer to EVERY question:
+- Objective: list A/B/C/D answers (e.g. 1. B  2. A  3. C ...)
+- Fill in blank: the exact word(s)
+- Short answer: model answer in 1–3 sentences
+- Theory: full model answer with marking points and marks allocation (e.g. "2 marks for defining X, 3 marks for explaining Y...")]
+
+Total: ${marks} marks
+===`;
+
+  const systemMsg = 'You are a senior Nigerian school examiner and curriculum specialist with expertise in the Federal Government of Nigeria's new curriculum. You create exam questions that are clear, unambiguous, age-appropriate, curriculum-aligned, and follow the standard Nigerian exam format. Use Nigerian names, scenarios, and examples. Always include a complete answer key.';
+
+  try{
+    const result = await _callGroqTeach(prompt, systemMsg);
+    // Split into question paper and answer key
+    const splitIdx = result.indexOf('=== ANSWER KEY');
+    const qPaper = splitIdx > -1 ? result.slice(0, splitIdx) : result;
+    const ansKey  = splitIdx > -1 ? result.slice(splitIdx) : '';
+
+    const fmt = t => t.replace(/
+/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+    if(out)    out.innerHTML    = fmt(qPaper);
+    if(ansOut) ansOut.innerHTML = fmt(ansKey);
+    if(wrap){
+      wrap.style.display = 'block';
+      wrap.dataset.qPaper = qPaper;
+      wrap.dataset.ansKey  = ansKey;
+      wrap.dataset.raw     = result;
+    }
+    // Show answer key section
+    const ansSection = document.getElementById('qg-ans-section');
+    if(ansSection) ansSection.style.display = ansKey ? 'block' : 'none';
+  }catch(e){
+    alert('Error: ' + e.message);
+  }finally{
+    btn.textContent = '❓ Generate Questions'; btn.disabled = false;
+  }
+}
+
+function toggleAnswerKey(){
+  const el  = document.getElementById('qg-answer-output');
+  const btn = document.getElementById('qg-ans-toggle');
+  if(!el) return;
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'block';
+  if(btn) btn.textContent = showing ? '👁 Show Answer Key' : '🙈 Hide Answer Key';
+}
+
+function printQuestions(mode){
+  const wrap = document.getElementById('qg-result');
+  if(!wrap){ alert('Generate questions first.'); return; }
+  const text = mode === 'answers'
+    ? (wrap.dataset.qPaper || '') + '\n\n' + (wrap.dataset.ansKey || '')
+    : (wrap.dataset.qPaper || '');
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>${mode==='answers'?'Questions + Answer Key':'Question Paper'}</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.8;color:#000;}
+pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
+hr{border-top:1px solid #000;margin:14px 0;}
+@media print{body{margin:15px;}button{display:none;}}
+</style></head><body>
+<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
+<pre>${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+</body></html>`);
+  win.document.close();
+}
+
+function copyQuestions(){
+  const wrap = document.getElementById('qg-result');
+  const raw  = wrap?.dataset?.raw || '';
+  if(!raw){ alert('Generate questions first.'); return; }
+  navigator.clipboard.writeText(raw).then(()=>alert('✅ Questions and answer key copied!'));
+}
+// ── End Teaching Tools ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// TEACHING TOOLS — Lesson Notes & Question Generator
+// Aligned with Federal Government of Nigeria New Curriculum
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Nigerian Curriculum Subject Maps ─────────────────────────────────────
+const CURRICULUM = {
+  primary: {
+    label: 'Primary',
+    classes: ['Primary 1','Primary 2','Primary 3','Primary 4','Primary 5','Primary 6'],
+    subjects: [
+      'English Language','Mathematics','Basic Science','Social Studies',
+      'Cultural and Creative Arts (CCA)','Civic Education',
+      'Physical and Health Education (PHE)','Agricultural Science',
+      'Computer Studies / ICT','Religious Studies (CRS)','Religious Studies (IRS)',
+      'Yoruba Language','Hausa Language','Igbo Language','French Language',
+      'Quantitative Reasoning','Verbal Reasoning'
+    ]
+  },
+  jss: {
+    label: 'Junior Secondary (JSS)',
+    classes: ['JSS 1','JSS 2','JSS 3'],
+    subjects: [
+      'English Language','Mathematics','Basic Science and Technology (BST)',
+      'Social Studies','Civic Education','Cultural and Creative Arts',
+      'Physical and Health Education (PHE)','Business Studies','Home Economics',
+      'Agricultural Science','Computer Studies / ICT',
+      'Christian Religious Knowledge (CRK)','Islamic Religious Knowledge (IRK)',
+      'Yoruba Language','Hausa Language','Igbo Language','French Language',
+      'Arabic Language','Pre-Vocational Studies'
+    ]
+  },
+  ss: {
+    label: 'Senior Secondary (SS)',
+    classes: ['SS 1','SS 2','SS 3'],
+    subjects: [
+      'English Language','Mathematics','Further Mathematics',
+      'Physics','Chemistry','Biology','Agricultural Science',
+      'Economics','Commerce','Accounting / Financial Accounting','Business Studies',
+      'Government','History','Geography',
+      'Literature in English','Christian Religious Studies (CRS)','Islamic Studies',
+      'Yoruba Language','Hausa Language','Igbo Language','French Language',
+      'Visual Arts','Music','Computer Science',
+      'Technical Drawing','Food and Nutrition','Health Science',
+      'Physical Education','Civic Education','Entrepreneurship'
+    ]
+  }
+};
+
+// Cached Groq key
+let _groqKey = null;
+async function _getGroqKey(){
+  if(_groqKey) return _groqKey;
+  try{
+    const snap = await db.collection('public_ocr_keys').doc('main').get();
+    if(snap.exists) _groqKey = snap.data()?.groqApiKey || null;
+  }catch(e){}
+  return _groqKey;
+}
+
+// ── Shared Groq caller ────────────────────────────────────────────────────
+async function _callGroqTeach(prompt, systemMsg){
+  const key = await _getGroqKey();
+  if(!key) throw new Error('Groq API key not set. Ask your admin to add it in Settings.');
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body: JSON.stringify({
+      model: 'qwen/qwen3.6-27b',
+      max_tokens: 8192,
+      reasoning_effort: 'none',
+      messages:[
+        {role:'system', content: systemMsg},
+        {role:'user',   content: prompt}
+      ]
+    })
+  });
+  if(!resp.ok){
+    const err = await resp.json().catch(()=>({}));
+    throw new Error(err?.error?.message || `Groq error ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// ── Build subject dropdown HTML ───────────────────────────────────────────
+function _buildSubjectOpts(level){
+  const map = CURRICULUM[level] || CURRICULUM.primary;
+  return map.subjects.map(s=>`<option value="${s}">${s}</option>`).join('');
+}
+
+function _buildClassOpts(level){
+  const map = CURRICULUM[level] || CURRICULUM.primary;
+  return map.classes.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+
+function updateLessonSubjects(){
+  const level = document.getElementById('ln-level')?.value || 'primary';
+  const subSel = document.getElementById('ln-subject');
+  const clsSel = document.getElementById('ln-class');
+  if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
+  if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
+}
+
+function updateQSubjects(){
+  const level = document.getElementById('qg-level')?.value || 'primary';
+  const subSel = document.getElementById('qg-subject');
+  const clsSel = document.getElementById('qg-class');
+  if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
+  if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
+}
+
+// ── Render Lesson Notes section ───────────────────────────────────────────
+function renderLessons(){
+  const sec = document.getElementById('sec-lessons');
+  if(!sec || sec.dataset.ready) return;
+  sec.dataset.ready = '1';
+  document.getElementById('ln-level-sel')?.addEventListener('change', updateLessonSubjects);
+  updateLessonSubjects();
+}
+
+async function generateLessonNote(){
+  const level   = document.getElementById('ln-level')?.value    || 'primary';
+  const cls     = document.getElementById('ln-class')?.value    || '';
+  const subj    = document.getElementById('ln-subject')?.value  || '';
+  const topic   = (document.getElementById('ln-topic')?.value   || '').trim();
+  const subtopic= (document.getElementById('ln-subtopic')?.value|| '').trim();
+  const duration= document.getElementById('ln-duration')?.value || '40';
+  const term    = document.getElementById('ln-term')?.value     || '1st';
+  const week    = document.getElementById('ln-week')?.value     || '1';
+
+  if(!topic){ alert('Please enter the lesson topic.'); return; }
+
+  const btn = document.getElementById('ln-btn');
+  const out  = document.getElementById('ln-output');
+  const wrap = document.getElementById('ln-result');
+
+  btn.textContent = '⏳ Generating...'; btn.disabled = true;
+  if(wrap) wrap.style.display = 'none';
+
+  const schoolName = schoolData?.config?.name || schoolData?.schoolName || schoolData?.config?.schoolName || 'School';
+  const levelLabel = CURRICULUM[level]?.label || 'Primary';
+
+  const prompt = `Generate a complete, professionally formatted lesson note for a Nigerian school following the Federal Government of Nigeria's new curriculum.
+
+Details:
+- School: ${schoolName}
+- Class: ${cls}
+- Subject: ${subj}
+- Topic: ${topic}${subtopic ? '
+- Sub-Topic: ' + subtopic : ''}
+- Duration: ${duration} minutes
+- ${term} Term, Week ${week}
+- School Level: ${levelLabel}
+
+Write the lesson note in this exact format — follow every section heading precisely:
+
+---
+LESSON NOTE
+
+School: ${schoolName}
+Subject: ${subj}
+Class: ${cls}
+Topic: ${topic}${subtopic ? '
+Sub-Topic: ' + subtopic : ''}
+Duration: ${duration} minutes  |  ${term} Term, Week ${week}
+Date: _______________  |  Time: _______________
+
+BEHAVIOURAL OBJECTIVES
+By the end of the lesson, pupils/students should be able to:
+1. [specific, measurable objective using action verb]
+2. [specific, measurable objective]
+3. [specific, measurable objective]
+4. [specific, measurable objective — for longer lessons add a 5th]
+
+ENTRY BEHAVIOUR / PREVIOUS KNOWLEDGE
+[What pupils already know that links to this topic]
+
+INSTRUCTIONAL MATERIALS / RESOURCES
+• [Material 1 — specific and relevant to Nigerian classroom context]
+• [Material 2]
+• [Material 3]
+• [Additional materials as appropriate]
+
+REFERENCE BOOKS
+• [Approved Nigerian textbook title — Author, Publisher, Edition]
+• [Second reference]
+
+STEP I — INTRODUCTION (5 minutes)
+[Engaging introduction: teacher poses a question or shares a scenario that links prior knowledge to the new topic. Include sample teacher language and expected student responses.]
+
+STEP II — PRESENTATION / DEVELOPMENT (${Math.round(parseInt(duration)*0.35)} minutes)
+[Core content delivery — explain the first key concept clearly with Nigerian examples. Include teacher activity and expected student activity.]
+
+STEP III — FURTHER DEVELOPMENT (${Math.round(parseInt(duration)*0.25)} minutes)
+[Second concept or deeper exploration of the first — with examples, demonstrations, or board work. Teacher-student interaction included.]
+
+STEP IV — APPLICATION / CLASS ACTIVITY (${Math.round(parseInt(duration)*0.15)} minutes)
+[Students practise or apply the concept — guided exercise, group work, or worked examples on the board.]
+
+STEP V — EVALUATION / QUESTIONS (5 minutes)
+Ask students the following evaluation questions:
+1. [Evaluation question — tests first objective]
+2. [Evaluation question — tests second objective]
+3. [Evaluation question — tests third objective]
+4. [Evaluation question — slightly challenging]
+5. [Evaluation question — application/thinking question]
+
+CONCLUSION / SUMMARY (3 minutes)
+[Teacher summarises the key points of the lesson and links to the next lesson topic.]
+
+ASSIGNMENT
+[1–2 well-designed homework tasks appropriate for the class level, with clear instructions]
+
+---
+Alignment note: This lesson note is aligned with the Federal Government of Nigeria's revised National Curriculum Framework.
+---`;
+
+  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';
+
+  try{
+    const result = await _callGroqTeach(prompt, systemMsg);
+    if(out) out.innerHTML = result.replace(/
+/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+    if(wrap) wrap.style.display = 'block';
+    // Store raw for print/copy
+    wrap.dataset.raw = result;
+  }catch(e){
+    alert('Error: ' + e.message);
+  }finally{
+    btn.textContent = '📝 Generate Lesson Note'; btn.disabled = false;
+  }
+}
+
+function printLessonNote(){
+  const wrap = document.getElementById('ln-result');
+  const raw  = wrap?.dataset?.raw || '';
+  if(!raw){ alert('Generate a lesson note first.'); return; }
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>Lesson Note</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;}
+h1{font-size:16px;text-align:center;border-bottom:2px solid #000;padding-bottom:8px;}
+pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
+hr{border:1px solid #ccc;margin:12px 0;}
+@media print{body{margin:15px;}button{display:none;}}
+</style></head><body>
+<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
+<pre>${raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+</body></html>`);
+  win.document.close();
+}
+
+function copyLessonNote(){
+  const wrap = document.getElementById('ln-result');
+  const raw  = wrap?.dataset?.raw || '';
+  if(!raw){ alert('Generate a lesson note first.'); return; }
+  navigator.clipboard.writeText(raw).then(()=>alert('✅ Lesson note copied to clipboard!'));
+}
+
+// ── Render Question Generator section ────────────────────────────────────
+function renderQuestions(){
+  const sec = document.getElementById('sec-questions');
+  if(!sec || sec.dataset.ready) return;
+  sec.dataset.ready = '1';
+  document.getElementById('qg-level-sel')?.addEventListener('change', updateQSubjects);
+  updateQSubjects();
+}
+
+async function generateQuestions(){
+  const level   = document.getElementById('qg-level')?.value      || 'primary';
+  const cls     = document.getElementById('qg-class')?.value      || '';
+  const subj    = document.getElementById('qg-subject')?.value    || '';
+  const topics  = (document.getElementById('qg-topics')?.value    || '').trim();
+  const examType= document.getElementById('qg-type')?.value       || 'CA Test';
+  const nObj    = parseInt(document.getElementById('qg-n-obj')?.value  || '0');
+  const nTheory = parseInt(document.getElementById('qg-n-theory')?.value || '0');
+  const nShort  = parseInt(document.getElementById('qg-n-short')?.value  || '0');
+  const nFill   = parseInt(document.getElementById('qg-n-fill')?.value   || '0');
+  const marks   = document.getElementById('qg-marks')?.value      || '100';
+
+  if(!topics){ alert('Please enter the topic(s) to cover.'); return; }
+  if((nObj + nTheory + nShort + nFill) === 0){
+    alert('Please set at least one question count greater than 0.'); return;
+  }
+
+  const btn   = document.getElementById('qg-btn');
+  const wrap  = document.getElementById('qg-result');
+  const out   = document.getElementById('qg-output');
+  const ansOut= document.getElementById('qg-answer-output');
+
+  btn.textContent = '⏳ Generating...'; btn.disabled = true;
+  if(wrap) wrap.style.display = 'none';
+
+  const schoolName = schoolData?.config?.name || schoolData?.schoolName || 'School';
+  const sections = [];
+  if(nObj    > 0) sections.push(`${nObj} multiple-choice (objective) questions — each with options A, B, C, D`);
+  if(nTheory > 0) sections.push(`${nTheory} theory/essay questions`);
+  if(nShort  > 0) sections.push(`${nShort} short-answer questions`);
+  if(nFill   > 0) sections.push(`${nFill} fill-in-the-blank questions`);
+
+  const prompt = `Generate a complete, properly formatted Nigerian school ${examType} for the following:
+
+School: ${schoolName}
+Subject: ${subj}
+Class: ${cls}
+Topic(s): ${topics}
+Type: ${examType}
+Total Marks: ${marks}
+Questions required:
+${sections.map((s,i)=>`• ${s}`).join('
+')}
+
+PART 1 — QUESTION PAPER:
+Format exactly as a Nigerian school exam paper:
+
+---
+${schoolName.toUpperCase()}
+${examType.toUpperCase()} EXAMINATION
+Subject: ${subj}  |  Class: ${cls}
+${topics.length < 60 ? 'Topic: ' + topics : ''}
+Total Marks: ${marks}  |  Time Allowed: ___________
+Name: _________________________  |  Date: ___________
+
+INSTRUCTIONS: Answer ALL questions. Write clearly and legibly.
+
+${nObj > 0 ? `SECTION A — OBJECTIVE (${nObj} Questions)
+Choose the correct answer from options A, B, C, D.
+
+[Generate ${nObj} objective questions on the topic. Each question should be on a new line, numbered 1–${nObj}, with options A B C D on the next line. Cover different aspects of the topic. Vary difficulty: easy, medium, hard.]
+
+` : ''}${nFill > 0 ? `SECTION ${nObj>0?'B':'A'} — FILL IN THE BLANKS (${nFill} Questions)
+Complete each sentence with the correct word or phrase.
+
+[Generate ${nFill} fill-in-the-blank sentences numbered correctly. Leave a blank line for the answer.]
+
+` : ''}${nShort > 0 ? `SECTION ${nObj>0||nFill>0?'C':'A'} — SHORT ANSWER (${nShort} Questions)
+Answer the following questions briefly.
+
+[Generate ${nShort} short-answer questions numbered correctly. Each should require 1–3 sentences.]
+
+` : ''}${nTheory > 0 ? `SECTION ${sections.length > 1 ? 'D' : 'A'} — THEORY / ESSAY (${nTheory} Questions)
+Answer ALL questions. Show all workings where necessary.
+
+[Generate ${nTheory} theory/essay questions numbered correctly. Each should be substantive, open-ended, and appropriate for ${cls}. State marks per question in brackets e.g. (10 marks).]
+
+` : ''}---
+
+PART 2 — ANSWER KEY / MARKING SCHEME:
+(Separate this section clearly with === ANSWER KEY === on its own line)
+
+=== ANSWER KEY / MARKING SCHEME ===
+Subject: ${subj}  |  Class: ${cls}  |  ${examType}
+
+[Provide the complete answer to EVERY question:
+- Objective: list A/B/C/D answers (e.g. 1. B  2. A  3. C ...)
+- Fill in blank: the exact word(s)
+- Short answer: model answer in 1–3 sentences
+- Theory: full model answer with marking points and marks allocation (e.g. "2 marks for defining X, 3 marks for explaining Y...")]
+
+Total: ${marks} marks
+===`;
+
+  const systemMsg = 'You are a senior Nigerian school examiner and curriculum specialist with expertise in the Federal Government of Nigeria's new curriculum. You create exam questions that are clear, unambiguous, age-appropriate, curriculum-aligned, and follow the standard Nigerian exam format. Use Nigerian names, scenarios, and examples. Always include a complete answer key.';
+
+  try{
+    const result = await _callGroqTeach(prompt, systemMsg);
+    // Split into question paper and answer key
+    const splitIdx = result.indexOf('=== ANSWER KEY');
+    const qPaper = splitIdx > -1 ? result.slice(0, splitIdx) : result;
+    const ansKey  = splitIdx > -1 ? result.slice(splitIdx) : '';
+
+    const fmt = t => t.replace(/
+/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+    if(out)    out.innerHTML    = fmt(qPaper);
+    if(ansOut) ansOut.innerHTML = fmt(ansKey);
+    if(wrap){
+      wrap.style.display = 'block';
+      wrap.dataset.qPaper = qPaper;
+      wrap.dataset.ansKey  = ansKey;
+      wrap.dataset.raw     = result;
+    }
+    // Show answer key section
+    const ansSection = document.getElementById('qg-ans-section');
+    if(ansSection) ansSection.style.display = ansKey ? 'block' : 'none';
+  }catch(e){
+    alert('Error: ' + e.message);
+  }finally{
+    btn.textContent = '❓ Generate Questions'; btn.disabled = false;
+  }
+}
+
+function toggleAnswerKey(){
+  const el  = document.getElementById('qg-answer-output');
+  const btn = document.getElementById('qg-ans-toggle');
+  if(!el) return;
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'block';
+  if(btn) btn.textContent = showing ? '👁 Show Answer Key' : '🙈 Hide Answer Key';
+}
+
+function printQuestions(mode){
+  const wrap = document.getElementById('qg-result');
+  if(!wrap){ alert('Generate questions first.'); return; }
+  const text = mode === 'answers'
+    ? (wrap.dataset.qPaper || '') + '\n\n' + (wrap.dataset.ansKey || '')
+    : (wrap.dataset.qPaper || '');
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>${mode==='answers'?'Questions + Answer Key':'Question Paper'}</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.8;color:#000;}
+pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
+hr{border-top:1px solid #000;margin:14px 0;}
+@media print{body{margin:15px;}button{display:none;}}
+</style></head><body>
+<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
+<pre>${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+</body></html>`);
+  win.document.close();
+}
+
+function copyQuestions(){
+  const wrap = document.getElementById('qg-result');
+  const raw  = wrap?.dataset?.raw || '';
+  if(!raw){ alert('Generate questions first.'); return; }
+  navigator.clipboard.writeText(raw).then(()=>alert('✅ Questions and answer key copied!'));
+}
+// ── End Teaching Tools ─────────────────────────────────────────────────────
