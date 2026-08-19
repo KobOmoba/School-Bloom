@@ -547,19 +547,184 @@ function getHFKey() { return window.HF_API_KEY || localStorage.getItem(HF_KEY_ST
 
 // Keys sync from Firestore admin_settings/main — survives browsing-data clears
 async function _fetchGroqKeyFromFirestore() {
-  // Reads directly from Firestore now — no external proxy. public_ocr_keys/main
-  // holds ONLY the OCR keys (never anything sensitive), mirrored there by the
-  // portal whenever Bayo updates a key in Settings.
+  // GroqRotator loads all keys (groqApiKey…groqApiKey5) + HF key
   try {
     if (!db) return;
-    const doc = await db.collection('public_ocr_keys').doc('main').get();
-    if (!doc.exists) return; // fall back to whatever's cached in localStorage
-    const d = doc.data();
-    if (d.groqApiKey) {
-      window.GROQ_API_KEY = d.groqApiKey;
-      localStorage.setItem(GROQ_KEY_STORAGE, d.groqApiKey);
-      console.log('✅ Groq key loaded from Firestore');
+    await GroqRotator.reload();
+  } catch(e) { /* offline — GroqRotator falls back to cached key */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GroqRotator — Multi-key round-robin with Retry-After cooldown tracking
+// Reads groqApiKey, groqApiKey2 … groqApiKey5 from public_ocr_keys/main
+// All Groq calls route through GroqRotator.vision() or GroqRotator.text()
+// ═══════════════════════════════════════════════════════════════════════════
+const GroqRotator = (() => {
+  let _keys = [];
+  let _idx  = 0;
+  let _cd   = {};           // key → cooldown expiry timestamp
+  let _loaded  = false;
+  let _loading = null;      // in-flight promise dedup
+
+  async function _load() {
+    if (_loaded)  return;
+    if (_loading) return _loading;
+    _loading = (async () => {
+      try {
+        const snap = await db.collection('public_ocr_keys').doc('main').get();
+        if (snap.exists) {
+          const d = snap.data();
+          const found = [];
+          ['groqApiKey','groqApiKey2','groqApiKey3','groqApiKey4','groqApiKey5'].forEach(k => {
+            if (d[k] && d[k].startsWith('gsk_') && !found.includes(d[k])) found.push(d[k]);
+          });
+          if (Array.isArray(d.groqKeys)) {
+            d.groqKeys.forEach(k => { if (k && !found.includes(k)) found.push(k); });
+          }
+          if (found.length) {
+            _keys = found;
+            // Keep first key in legacy globals for any call sites not yet migrated
+            window.GROQ_API_KEY = _keys[0];
+            const store = typeof GROQ_KEY_STORAGE !== 'undefined' ? GROQ_KEY_STORAGE : 'groq_key';
+            localStorage.setItem(store, _keys[0]);
+            console.log(`[GroqRotator] ${_keys.length} key(s) ready`);
+          }
+          if (d.hfApiKey) {
+            window.HF_API_KEY = d.hfApiKey;
+            const hs = typeof HF_KEY_STORAGE !== 'undefined' ? HF_KEY_STORAGE : 'hf_key';
+            localStorage.setItem(hs, d.hfApiKey);
+          }
+        }
+      } catch(e) {
+        // Offline — fall back to whatever is already in the legacy globals
+        const cached = window.GROQ_API_KEY
+          || (typeof GROQ_KEY_STORAGE !== 'undefined' && localStorage.getItem(GROQ_KEY_STORAGE));
+        if (cached && !_keys.length) _keys = [cached];
+      }
+      _loaded  = true;
+      _loading = null;
+    })();
+    return _loading;
+  }
+
+  function _pick() {
+    if (!_keys.length) return { key: null, wait: 0 };
+    const now = Date.now();
+    for (let i = 0; i < _keys.length; i++) {
+      const idx = (_idx + i) % _keys.length;
+      const k   = _keys[idx];
+      if (now >= (_cd[k] || 0)) {
+        _idx = (idx + 1) % _keys.length;   // advance pointer for next caller
+        return { key: k, wait: 0 };
+      }
     }
+    // Every key is cooling — return the one that wakes soonest
+    const best = _keys.reduce((a,k) => (_cd[k]||0) < (_cd[a]||0) ? k : a, _keys[0]);
+    return { key: best, wait: Math.max(0, (_cd[best]||0) - Date.now()) };
+  }
+
+  function _setCooldown(key, retryAfterHeader) {
+    const secs = Math.min(Math.max(parseFloat(retryAfterHeader || '30'), 5), 120);
+    _cd[key] = Date.now() + secs * 1000;
+    console.warn(`[GroqRotator] Key …${key.slice(-6)} → cooldown ${secs}s`);
+  }
+
+  async function _call(body) {
+    await _load();
+    if (!_keys.length) throw new Error('No Groq API keys configured — add them in Portal › Settings.');
+    const maxTries = _keys.length + 2;
+    for (let t = 0; t < maxTries; t++) {
+      const { key, wait } = _pick();
+      if (wait > 0) {
+        console.warn(`[GroqRotator] All keys cooling — waiting ${Math.ceil(wait/1000)}s`);
+        await new Promise(r => setTimeout(r, wait + 300));
+      }
+      let resp;
+      try {
+        resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+          body: JSON.stringify(body)
+        });
+      } catch(netErr) {
+        throw new Error('Network error reaching Groq: ' + netErr.message);
+      }
+      if (resp.status === 429 || resp.status === 529 || resp.status === 503) {
+        _setCooldown(key, resp.headers.get('retry-after'));
+        continue;   // immediately try the next key
+      }
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}));
+        throw new Error(e?.error?.message || `Groq ${resp.status}`);
+      }
+      // Proactive: if only 1 request remaining on this key, give it a short buffer
+      const rem = resp.headers.get('x-ratelimit-remaining-requests');
+      if (rem !== null && parseInt(rem) < 2) _cd[key] = Date.now() + 8000;
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content || '';
+    }
+    throw new Error('All Groq API keys are currently rate-limited. Please wait a moment and try again.');
+  }
+
+  const _model = () => (typeof GROQ_OCR_MODEL !== 'undefined' ? GROQ_OCR_MODEL : 'qwen/qwen3.6-27b');
+
+  return {
+    // Force a fresh key reload from Firestore
+    reload() { _loaded = false; _loading = null; _keys = []; return _load(); },
+
+    // How many keys are loaded
+    keyCount() { return _keys.length; },
+
+    // Status for portal/debug display
+    status() {
+      const now = Date.now();
+      return _keys.map((k, i) => ({
+        n: i + 1,
+        tail: '…' + k.slice(-6),
+        ready: now >= (_cd[k] || 0),
+        coolSecs: Math.max(0, Math.ceil(((_cd[k] || 0) - now) / 1000))
+      }));
+    },
+
+    // Text / chat completion — teaching tools, finance AI, any non-vision call
+    text(prompt, systemMsg, opts = {}) {
+      return _call({
+        model: opts.model || _model(),
+        max_tokens: opts.max_tokens || 4096,
+        reasoning_format: opts.reasoning_format || 'hidden',
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+        ...(opts.response_format   ? { response_format: opts.response_format } : {}),
+        messages: [
+          ...(systemMsg ? [{ role: 'system', content: systemMsg }] : []),
+          { role: 'user', content: prompt }
+        ]
+      });
+    },
+
+    // Vision / image call — OCR, ledger scan, signboard, register, score sheets
+    vision(prompt, base64, mime, opts = {}) {
+      return _call({
+        model: opts.model || _model(),
+        max_tokens: opts.max_tokens || 1600,
+        reasoning_format: opts.reasoning_format || 'hidden',
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+        ...(opts.response_format   ? { response_format: opts.response_format } : {}),
+        messages: [
+          ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + base64 } },
+              { type: 'text', text: prompt }
+            ]
+          }
+        ]
+      });
+    }
+  };
+})();
+// ── End GroqRotator ─────────────────────────────────────────────────────────
+
     if (d.hfApiKey) {
       window.HF_API_KEY = d.hfApiKey;
       localStorage.setItem(HF_KEY_STORAGE, d.hfApiKey);
@@ -568,114 +733,10 @@ async function _fetchGroqKeyFromFirestore() {
   } catch(e) { /* offline — use whatever is in localStorage */ }
 }
 
-async function groqVisionOCR(base64, mime, _retry) {
-  if (_retry === undefined) _retry = 0;
-  const apiKey = getGroqKey();
-  if (!apiKey) throw new Error('No Groq API key');
-
-  const controller = new AbortController();
-  const fetchTimer = setTimeout(() => controller.abort(), 45000);
-
-  let resp;
-  try {
-    resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      },
-      body: JSON.stringify({
-        model: GROQ_OCR_MODEL,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + base64 } },
-            { type: 'text', text: GROQ_OCR_PROMPT }
-          ]
-        }],
-        temperature: 0.2,
-        max_tokens: 4096,
-        reasoning_format: 'hidden'
-      })
-    });
-    clearTimeout(fetchTimer);
-  } catch (fetchErr) {
-    clearTimeout(fetchTimer);
-    if (fetchErr.name === 'AbortError') {
-      if (_retry >= 2) throw new Error('Groq timed out — page skipped (slow connection or server busy)');
-      const ld = document.getElementById('csv-loading');
-      for (let s = 25; s > 0; s--) {
-        if (ld) ld.textContent = '⏳ Groq slow — retrying in ' + s + 's... (' + (_retry + 1) + '/2)';
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      return groqVisionOCR(base64, mime, _retry + 1);
-    }
-    if (_retry < 2) {
-      const ld = document.getElementById('csv-loading');
-      for (let s = 15; s > 0; s--) {
-        if (ld) ld.textContent = '⏳ Network error — retrying in ' + s + 's... (' + (_retry + 1) + '/2)';
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      return groqVisionOCR(base64, mime, _retry + 1);
-    }
-    throw fetchErr;
-  }
-
-  if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
-    if (_retry >= 2) {
-      const errData = await resp.json().catch(() => ({}));
-      if (resp.status === 429) _groqRateLimitedThisSession = true; // stop hammering Groq for the rest of this scan
-      throw new Error((errData.error && errData.error.message) || 'Groq unavailable — page skipped, try rescanning.');
-    }
-    const is429 = resp.status === 429;
-    const resetRaw = is429 ? (resp.headers.get('x-ratelimit-reset-tokens') || '65') : '25';
-    const waitSecs = Math.ceil(parseFloat(resetRaw)) + 5;
-    const reason = is429 ? 'rate limit' : 'over capacity';
-    const ld = document.getElementById('csv-loading');
-    for (let s = waitSecs; s > 0; s--) {
-      if (ld) ld.textContent = '⏳ Groq ' + reason + ' — retrying in ' + s + 's... (' + (_retry + 1) + '/2)';
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    return groqVisionOCR(base64, mime, _retry + 1);
-  }
-
-  if (resp.status === 401 || resp.status === 403) {
-    throw new Error('Groq API key invalid — check Settings');
-  }
-
-  if (!resp.ok) {
-    const errData = await resp.json().catch(() => ({}));
-    throw new Error((errData.error && errData.error.message) || ('Groq ' + resp.status));
-  }
-
-  const data = await resp.json();
-  let text = data.choices?.[0]?.message?.content || '';
-  if (!text.trim()) throw new Error('Groq returned empty response');
-  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  let jsonStr = text.trim();
-  const cb = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/); if (cb) jsonStr = cb[1].trim();
-  let parsed;
-  try { parsed = JSON.parse(jsonStr); }
-  catch(_) {
-    const fallbackNames = (typeof extractNamesFromText === 'function') ? extractNamesFromText(text) : [];
-    return fallbackNames.map(n => { const p=n.trim().toUpperCase().split(/\s+/); return {surname:p[0]||'',firstname:p.slice(1).join(' ')||'',fullName:n.trim().toUpperCase()}; }).filter(s=>s.fullName.length>=3);
-  }
-  if (parsed && !Array.isArray(parsed) && parsed.detected_class) {
-    const dc = String(parsed.detected_class).trim().toUpperCase();
-    if (dc) _lastDetectedClass = dc;
-  }
-  const names = Array.isArray(parsed) ? parsed : (parsed.names || parsed.students || []);
-  if (!Array.isArray(names) || !names.length) throw new Error('Groq returned 0 names');
-  return names.map(n => {
-    if (typeof n === 'string') {
-      const p = n.trim().toUpperCase().split(/\s+/);
-      return { surname: p[0]||'', firstname: p.slice(1).join(' ')||'', fullName: n.trim().toUpperCase() };
-    }
-    const sur=(n.surname||'').trim().toUpperCase(), fst=(n.firstname||n.first_name||n.firstName||'').trim().toUpperCase();
-    const full=(n.fullName||n.full_name||'').trim().toUpperCase()||(sur+' '+fst).trim();
-    return {surname:sur, firstname:fst, fullName:full};
-  }).filter(s=>s.fullName.length>=2);
+async function groqVisionOCR(base64, mime) {
+  return GroqRotator.vision(GROQ_OCR_PROMPT, base64, mime, {
+    max_tokens: 4096, temperature: 0.2, reasoning_format: 'hidden'
+  });
 }
 
 async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
@@ -4872,27 +4933,16 @@ function _parseScoreOcrJson(raw){
 }
 
 async function _groqScoreOCR(b64, mime, prompt){
-  const groqKey=getGroqKey();
-  if(!groqKey) throw new Error('No Groq key configured');
-  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),90000);
-  let r;
-  try {
-    r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqKey},body:JSON.stringify({
-      model: GROQ_OCR_MODEL,
-      temperature: 0.1,
-      max_tokens: 8192,
-      reasoning_format: 'hidden',
-      messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+b64}},{type:'text',text:prompt}]}]
-    })});
-  } finally { clearTimeout(timer); }
-  if(!r.ok){ const ed=await r.json().catch(()=>({})); throw new Error('Groq '+r.status+': '+(ed.error?.message||r.statusText)); }
-  const d=await r.json();
-  const raw=d.choices?.[0]?.message?.content||'[]';
+  const raw = await GroqRotator.vision(prompt, b64, mime, {
+    max_tokens: 8192, temperature: 0.1, reasoning_format: 'hidden'
+  });
   console.log('[Score OCR] Groq raw (first 400 chars):', raw.slice(0,400));
-  const parsed=_parseScoreOcrJson(raw);
-  if(!Array.isArray(parsed)||!parsed.length) throw new Error('Groq returned 0 score entries — raw: '+raw.slice(0,200));
+  const parsed = _parseScoreOcrJson(raw);
+  if(!Array.isArray(parsed)||!parsed.length)
+    throw new Error('Groq returned 0 score entries — raw: '+raw.slice(0,200));
   return parsed;
 }
+
 
 // _hfScoreOCR removed — Groq-only OCR pipeline
 
@@ -7422,16 +7472,9 @@ let _feeImportData = null;  // holds last scanned result for import confirm
 
 // ── 1. Get Groq key from public_ocr_keys (safe to read without admin auth) ──
 async function _getFeeGroqKey() {
-  if (_feeGroqKey) return _feeGroqKey;
-  try {
-    if (!db) return null;
-    const doc = await db.collection('public_ocr_keys').doc('main').get();
-    if (doc.exists && doc.data().groqApiKey) {
-      _feeGroqKey = doc.data().groqApiKey;
-      return _feeGroqKey;
-    }
-  } catch(e) { console.warn('Groq key fetch:', e.message); }
-  return null;
+  // GroqRotator handles key selection — just ensure it is loaded
+  await GroqRotator.reload().catch(()=>{});
+  return GroqRotator.keyCount() > 0 ? '__rotator__' : null;
 }
 
 // ── 2. File input handler wired from index.html ───────────────────────
@@ -7579,557 +7622,23 @@ function _extractJSONObject(text) {
   return null;
 }
 
-async function _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxTokens, _retry) {
-  if (_retry === undefined) _retry = 0;
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: maxTokens || 4096,
-      temperature: 0,
-      reasoning_format: 'hidden',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a JSON data extraction tool. Your output must be ONLY a valid JSON object — no explanations, no introductions, no markdown, no text of any kind outside the JSON. If you cannot determine a value, use null or "UNCLEAR" as specified in the prompt. You must always output the JSON object even if the image quality is poor.'
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
-            { type: 'text', text: userPrompt }
-          ]
-        }
-      ]
-    })
+async function _callGroqGenericVision(_apiKey, base64, mimeType, userPrompt, maxTokens) {
+  // _apiKey ignored — GroqRotator selects the key
+  const SYS = 'You are a JSON data extraction tool. Your output must be ONLY a valid JSON object — no explanation, no markdown, no extra text.';
+  return GroqRotator.vision(userPrompt, base64, mimeType, {
+    max_tokens: maxTokens || 4096, temperature: 0,
+    reasoning_format: 'hidden', system: SYS
   });
-
-  if (resp.status === 429 || resp.status === 503 || resp.status === 529) {
-    if (_retry >= 3) throw new Error('Groq rate-limited after multiple retries — try again shortly.');
-    const retryAfter = resp.headers.get('retry-after');
-    let waitMs = parseFloat(retryAfter) * 1000;
-    if (!waitMs || isNaN(waitMs)) waitMs = 15000;
-    waitMs = Math.min(Math.max(waitMs, 3000), 60000);
-    await new Promise(r => setTimeout(r, waitMs));
-    return _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxTokens, _retry + 1);
-  }
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
-  }
-
-  const data = await resp.json();
-  let raw = (data.choices?.[0]?.message?.content || '').trim();
-
-  // Strip reasoning blocks if any leaked through
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  // Strip markdown fences
-  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-
-  // Store for debugging (inspect via window._lastGroqRaw in browser console)
-  window._lastGroqRaw = raw;
-
-  // Attempt 1: parse directly
-  try { return JSON.parse(raw); } catch(e) {}
-
-  // Attempt 2: extract the outermost JSON object by brace-matching
-  const jsonStr = _extractJSONObject(raw);
-  if (jsonStr) { try { return JSON.parse(jsonStr); } catch(e) {} }
-
-  // Attempt 3: fix common Groq formatting issues then parse
-  if (jsonStr) {
-    try {
-      const fixed = jsonStr
-        .replace(/,\s*([}\]])/g, '$1')   // trailing commas
-        .replace(/:\s*undefined/g, ':null'); // undefined values
-      return JSON.parse(fixed);
-    } catch(e) {}
-  }
-
-  console.error('[Edu-BLOOM] Groq parse failed. Raw response (first 400 chars):', raw.slice(0, 400));
-  throw new Error('Could not read document. Tap console (F12) to see what Groq returned, or try a clearer photo.');
 }
 
-// _OCR_DISCIPLINE kept as alias for backward compatibility with _buildRetryPrompt
-const _OCR_DISCIPLINE = OCR_CORE_DISCIPLINE;
-
-function _isPremium() { return true; /* All schools are Premium — basic tier eliminated per Bayo's decision 2026-08-10. */ }
-// ── Premium gate for scan buttons ─────────────────────────────────────────
-function _gateScan(prefix, scanInputId) {
-  if (_isPremium()) { return true; }
-  const nudge = $(prefix + '-premium-nudge');
-  const scan = $(prefix + '-premium-scan');
-  if (nudge) { nudge.style.display = 'block'; }
-  if (scan) { scan.style.display = 'none'; }
-  toast('⭐ Premium feature — upgrade to scan');
-  return false;
-}
-
-function _gateScanFn(prefix) {
-  return function() { return _gateScan(prefix, prefix + '-scan-input'); };
-}
-
-
-// Parses common Nigerian D/M/YY or D/M/YYYY date text into YYYY-MM-DD
-function _parseNigerianDate(raw) {
-  const m = String(raw).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-  if (!m) return null;
-  let [, d, mo, y] = m;
-  if (y.length === 2) y = '20' + y;
-  d = d.padStart(2, '0'); mo = mo.padStart(2, '0');
-  return `${y}-${mo}-${d}`;
-}
-
-// ── 1. Expense receipt scan ─────────────────────────────────────────────
-async function scanExpenseReceipt(event) {
-  if (!_isPremium()) { _gateScan('exp'); return; }
-  const file = event.target.files[0]; if (!file) return;
-  event.target.value = '';
-  const fb = document.getElementById('exp-scan-fb');
-  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
-  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
-  show('📸 Reading receipt...');
-  try {
-    const resized = await _resizeFeeImage(file, 800);
-    const key = await _getFeeGroqKey();
-    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
-    const prompt = `You are reading a photograph of a Nigerian school expense receipt or payment teller/slip.
-Extract:
-  vendor      = the shop/vendor/payee name written on the receipt (text)
-  description = a short 3-8 word description of what was purchased or paid for
-  amount      = the TOTAL amount paid (integer, Naira)
-  date        = the date on the receipt if visible (raw text as written, e.g. "12/5/26")
-  category    = your single best guess, ONE of exactly: Staff Salaries, Utilities (NEPA/Generator), Building Maintenance, Teaching Materials, Government/Ministry Fees, Cleaning & Security, Transport, Examination Fees, Other
-${_OCR_DISCIPLINE}
-Output ONLY: {"vendor":"","description":"","amount":0,"date":"","category":""}`;
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 500);
-    if (fb) fb.style.display = 'none';
-    const descParts = [result.vendor, result.description].filter(v => v && v !== 'UNCLEAR');
-    if ($('exp-desc')) $('exp-desc').value = descParts.join(' — ');
-    if ($('exp-amt') && result.amount && result.amount !== 'UNCLEAR') $('exp-amt').value = result.amount;
-    const catSel = $('exp-cat');
-    if (catSel && result.category && result.category !== 'UNCLEAR') {
-      const opt = [...catSel.options].find(o => o.value === result.category);
-      if (opt) catSel.value = result.category;
-    }
-    show('✅ Filled from receipt — please verify before saving.');
-    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 4000);
-  } catch(e) {
-    show('❌ ' + (e.message || 'Could not read receipt. Try a clearer photo.'));
-  }
-}
-
-// ── 2. Payment teller/receipt scan ──────────────────────────────────────
-async function scanPaymentReceipt(event, idx) {
-  if (!_isPremium()) { toast('⭐ Premium feature — upgrade to scan receipts'); return; }
-  const file = event.target.files[0]; if (!file) return;
-  event.target.value = '';
-  const fb = document.getElementById('pay-scan-fb');
-  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
-  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
-  show('📸 Reading payment slip...');
-  try {
-    const resized = await _resizeFeeImage(file, 800);
-    const key = await _getFeeGroqKey();
-    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
-    const prompt = `You are reading a photograph of a Nigerian bank payment teller, POS slip, transfer receipt, or cash receipt for a school fee payment.
-Extract ALL of the following:
-  amount    = the amount paid (integer, Naira). Look for "AMOUNT", "N", "₦", or the largest numeric value. Common formats: 25,000 / 25000 / 25.000 all mean 25000.
-  date      = the date on the slip if visible (raw text as written, e.g. "12/5/26", "8th June 2026")
-  method    = your best guess, ONE of exactly: Bank Transfer, Cash, POS, Online — based on what kind of document this looks like
-  payer     = the name of the person who made the payment, if visible (text). Look near "FROM", "DEPOSITOR", "REMITTER", "CUSTOMER", "PAID BY".
-  recipient = the school or account name receiving the payment, if visible (text). Look near "TO", "BENEFICIARY", "ACCOUNT NAME".
-  reference = the transaction reference, teller number, or session ID, if visible (text). Look near "REF", "TELLER NO", "SESSION ID", "RRR", "TRANS ID".
-  account_no = the destination account number if visible (10-digit NUBAN, digits only)
-
-${_OCR_DISCIPLINE}
-Output ONLY: {"amount":0,"date":"","method":"","payer":"","recipient":"","reference":"","account_no":""}`;
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 500);
-    if (fb) fb.style.display = 'none';
-    if ($('pay-amt') && result.amount && result.amount !== 'UNCLEAR') $('pay-amt').value = result.amount;
-    if ($('pay-date') && result.date && result.date !== 'UNCLEAR') {
-      const parsed = _parseNigerianDate(result.date);
-      if (parsed) $('pay-date').value = parsed;
-    }
-    const methodSel = $('pay-method');
-    if (methodSel && result.method && result.method !== 'UNCLEAR') {
-      const opt = [...methodSel.options].find(o => o.value === result.method);
-      if (opt) methodSel.value = result.method;
-    }
-    const extra = [];
-    if (result.payer && result.payer !== 'UNCLEAR') extra.push('Payer: ' + result.payer);
-    if (result.reference && result.reference !== 'UNCLEAR') extra.push('Ref: ' + result.reference);
-    const msg = extra.length ? '✅ Filled from receipt — ' + extra.join(' · ') + '. Please verify before saving.' : '✅ Filled from receipt — please verify before saving.';
-    show(msg);
-    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 6000);
-  } catch(e) {
-    show('❌ ' + (e.message || 'Could not read receipt. Try a clearer photo.'));
-  }
-}
-
-// ── Universal student info prompt — reads ANY document format ────────────
-// Tells Groq what DATA to find, not what FORMAT to expect. Handles formal
-// admission forms, handwritten notebook pages, register tables, ID cards,
-// WhatsApp screenshots — all without any format assumptions.
-const _STUDENT_INFO_PROMPT = buildOcrPrompt('student_info');
-
-// ── Targeted retry prompts — one per field ────────────────────────────────
-// Used when the first scan misses a specific field. Narrower focus = better hit rate.
-function _buildRetryPrompt(fieldKey) {
-  const discipline = `Do NOT guess. If you cannot clearly see it, output UNCLEAR. Output ONLY valid JSON.`;
-  const map = {
-    name:         `Look ONLY for a Nigerian student's full name. Nigerian names: Yoruba (Adeoye, Ogunsola), Hausa (Musa, Aisha), Igbo (Emeka, Chioma). Could be under "Name:", "Student:", or in a column "Names". ${discipline} Output ONLY: {"name":""}`,
-    parent_phone: `Look ONLY for a Nigerian phone number. Starts with 07, 08, or 09 (11 digits, e.g. 07085369494) or +234. Could be near "Phone:", "WhatsApp:", "Tel:", "Parent:", or column "Phone No". ${discipline} Output ONLY: {"parent_phone":""}`,
-    class:        `Look ONLY for a student's class or grade. Nigerian classes: Basic 1-6, Primary 1-6, JSS 1-3, SSS 1-3, Nursery 1-2, KG. Could be near "Class:", "Form:", "Grade:", or column "Class". ${discipline} Output ONLY: {"class":""}`,
-    fee:          `Look ONLY for a school fee amount in Naira. Near "Fee:", "Amount:", "School Fee:", "Termly Fee:", ₦ symbol, or column "Fee". Return as integer only (e.g. 36000). ${discipline} Output ONLY: {"fee":null}`,
-    dob:          `Look ONLY for a date of birth. Near "D.O.B", "Date of Birth", "Born:", "DOB:". Return raw date text exactly as written. ${discipline} Output ONLY: {"dob":""}`,
-  };
-  return map[fieldKey] || '';
-}
-
-// ── Field maps: scan result key → HTML input ID ───────────────────────────
-const _SCAN_MAP_ADD  = { name:'ns-name', parent_phone:'ns-phone', class:'ns-class', fee:'ns-fee', dob:'ns-dob' };
-const _SCAN_MAP_EDIT = { name:'edit-s-name', parent_phone:'edit-s-phone', class:'edit-s-class', fee:'edit-s-fee', dob:'edit-s-dob' };
-
-// ── Fill form inputs from scan result, return what was found vs unclear ───
-function _fillStudentFromResult(result, fieldMap) {
-  const found = [], unclear = [];
-  const r = result || {};
-  const ok = (v) => v && v !== 'UNCLEAR' && v !== null;
-
-  if (fieldMap.name) {
-    if (ok(r.name)) { $(fieldMap.name).value = r.name; found.push('name'); }
-    else unclear.push('name');
-  }
-  if (fieldMap.parent_phone) {
-    if (ok(r.parent_phone)) { $(fieldMap.parent_phone).value = r.parent_phone.replace(/\D/g,''); found.push('phone'); }
-    else unclear.push('phone');
-  }
-  if (fieldMap.class) {
-    if (ok(r.class)) {
-      const el = $(fieldMap.class);
-      const opt = el ? [...el.options].find(o => o.value.toLowerCase() === r.class.toLowerCase()) : null;
-      if (opt) { el.value = opt.value; found.push('class'); } else unclear.push('class');
-    } else unclear.push('class');
-  }
-  if (fieldMap.fee) {
-    if (ok(r.fee) && Number(r.fee) > 0) { $(fieldMap.fee).value = Number(r.fee); found.push('fee'); }
-    else unclear.push('fee');
-  }
-  if (fieldMap.dob) {
-    if (ok(r.dob)) {
-      const parsed = _parseNigerianDate(r.dob);
-      if (parsed) { $(fieldMap.dob).value = parsed; found.push('dob'); }
-      else unclear.push('dob');
-    } else unclear.push('dob');
-  }
-  return { found, unclear };
-}
-
-// ── Render field-by-field scan feedback with per-field retry buttons ──────
-function _renderScanFeedback(fbEl, found, unclear, fieldMap, fbElId) {
-  if (!fbEl) return;
-  fbEl.style.display = 'block';
-  const labels = { name:'Name', parent_phone:'Phone', class:'Class', fee:'Fee', dob:'DOB' };
-  const mapJson = encodeURIComponent(JSON.stringify(fieldMap));
-  let html = '';
-  if (found.length)
-    html += `<div style="color:#22c55e;font-size:0.76rem;margin-bottom:0.25rem;">✅ Filled: ${found.join(', ')}</div>`;
-  if (unclear.length) {
-    html += `<div style="font-size:0.76rem;color:#f59e0b;margin-bottom:0.15rem;">⚠️ Not found — retry or type manually:</div>`;
-    unclear.forEach(f => {
-      const key = f === 'phone' ? 'parent_phone' : f;
-      html += `<div style="display:flex;align-items:center;gap:0.35rem;margin-bottom:0.2rem;">
-        <span style="font-size:0.75rem;color:var(--sub);min-width:40px;">${labels[key]||f}</span>
-        <button onclick="_triggerRetryField('${key}','${mapJson}','${fbElId}')"
-          style="font-size:0.68rem;padding:2px 8px;border-radius:5px;background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;cursor:pointer;">📷 Retry</button>
-      </div>`;
-    });
-  }
-  if (!found.length && !unclear.length)
-    html = '<span style="color:var(--danger);font-size:0.76rem;">❌ Nothing found. Try a clearer, flatter photo.</span>';
-  fbEl.innerHTML = html;
-}
-
-// ── Trigger a targeted retry scan for one missing field ───────────────────
-function _triggerRetryField(fieldKey, mapJson, fbElId) {
-  let inp = document.getElementById('_retry-field-input');
-  if (!inp) {
-    inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*';
-    inp.id = '_retry-field-input'; inp.style.display = 'none';
-    document.body.appendChild(inp);
-  }
-  inp.value = '';
-  inp.onchange = (e) => _doRetryField(e, fieldKey, mapJson, fbElId);
-  inp.click();
-}
-
-async function _doRetryField(event, fieldKey, mapJson, fbElId) {
-  const file = event.target.files[0]; if (!file) return;
-  const fb = document.getElementById(fbElId);
-  const note = m => { if (fb) fb.innerHTML += `<div style="font-size:0.75rem;color:var(--sub);margin-top:0.2rem;">${m}</div>`; };
-  note('📸 Scanning for ' + fieldKey + '...');
-  try {
-    const resized = await _resizeFeeImage(file, 800);
-    const key = await _getFeeGroqKey(); if (!key) { note('❌ Groq key not found.'); return; }
-    const prompt = _buildRetryPrompt(fieldKey); if (!prompt) { note('❌ Unknown field.'); return; }
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 4096);
-    const fieldMap = JSON.parse(decodeURIComponent(mapJson));
-    const value = result[fieldKey];
-    const el = fieldMap[fieldKey] ? $(fieldMap[fieldKey]) : null;
-    if (!value || value === 'UNCLEAR' || !el) {
-      note(`<span style="color:#f59e0b;">Still couldn't read ${fieldKey} — please type it manually.</span>`);
-      return;
-    }
-    if (fieldKey === 'parent_phone') el.value = value.replace(/\D/g,'');
-    else if (fieldKey === 'fee') { if (Number(value) > 0) el.value = Number(value); }
-    else if (fieldKey === 'dob') { const p = _parseNigerianDate(value); if (p) el.value = p; }
-    else if (fieldKey === 'class') {
-      const opt = [...el.options].find(o => o.value.toLowerCase() === value.toLowerCase());
-      if (opt) el.value = opt.value;
-    }
-    else el.value = value;
-    note(`<span style="color:#22c55e;">✅ ${fieldKey} filled!</span>`);
-  } catch(e) { note('❌ Retry failed — try typing manually.'); }
-}
-
-// ── 3. Student admission scan — universal, any document format ────────────
-async function scanStudentForm(event) {
-  if (!_isPremium()) { _gateScan('ns'); return; }
-  const file = event.target.files[0]; if (!file) return;
-  event.target.value = '';
-  const fb = document.getElementById('ns-scan-fb');
-  const show = m => { if (fb) { fb.style.display = 'block'; fb.innerHTML = `<span style="font-size:0.76rem;color:var(--sub);">${m}</span>`; } };
-  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
-  show('📸 Reading document...');
-  try {
-    const resized = await _resizeFeeImage(file, 800);
-    const key = await _getFeeGroqKey();
-    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, _STUDENT_INFO_PROMPT, 4096);
-    const { found, unclear } = _fillStudentFromResult(result, _SCAN_MAP_ADD);
-    _renderScanFeedback(fb, found, unclear, _SCAN_MAP_ADD, 'ns-scan-fb');
-  } catch(e) {
-    show('❌ ' + (e.message || 'Could not read document. Try a clearer photo.'));
-  }
-}
-
-// ── 3b. Scan to fill missing fields on existing student (Edit modal) ─────
-async function scanStudentFormEdit(idx, event) {
-  if (!_isPremium()) { _gateScan('ns'); return; }
-  const file = event.target.files[0]; if (!file) return;
-  event.target.value = '';
-  const fb = document.getElementById('edit-scan-fb');
-  const show = m => { if (fb) { fb.style.display = 'block'; fb.innerHTML = `<span style="font-size:0.76rem;color:var(--sub);">${m}</span>`; } };
-  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
-  show('📸 Reading document...');
-  try {
-    const resized = await _resizeFeeImage(file, 800);
-    const key = await _getFeeGroqKey();
-    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, _STUDENT_INFO_PROMPT, 4096);
-    const { found, unclear } = _fillStudentFromResult(result, _SCAN_MAP_EDIT);
-    _renderScanFeedback(fb, found, unclear, _SCAN_MAP_EDIT, 'edit-scan-fb');
-  } catch(e) {
-    show('❌ ' + (e.message || 'Could not read document. Try a clearer photo.'));
-  }
-}
-
-// ── 4. Staff ID/CV scan ──────────────────────────────────────────────────
-// Deliberately does NOT touch the password field — a scanned photo should
-// never generate or guess a login credential.
-async function scanStaffID(event) {
-  if (!_isPremium()) { _gateScan('sf'); return; }
-  const file = event.target.files[0]; if (!file) return;
-  event.target.value = '';
-  const fb = document.getElementById('sf-scan-fb');
-  const show = m => { if (fb) { fb.style.display = 'block'; fb.textContent = m; } };
-  if (!navigator.onLine) { show('❌ No internet connection.'); return; }
-  show('📸 Reading staff ID/CV...');
-  try {
-    const resized = await _resizeFeeImage(file, 800);
-    const key = await _getFeeGroqKey();
-    if (!key) { show('❌ Groq key not found — ask Bayo to add it in portal settings.'); return; }
-    const prompt = `You are reading a photograph of a staff ID card or CV/resume for a Nigerian school employee.
-Extract ALL of the following:
-  name  = the staff member's full name (text). Look near "NAME", "FULL NAME", "STAFF NAME". Nigerian names: Yoruba (Adeoye, Ogunsola, Olatunde), Hausa (Musa, Abdullahi), Igbo (Emeka, Chioma).
-  email = an email address if visible (text)
-  role  = the job title or position, if stated (text). Look near "POSITION", "ROLE", "DESIGNATION", "TITLE". Common Nigerian school roles: Teacher, Bursar, Head Teacher, Vice Principal, Admin, Sports Coach, Arts Teacher, Music Teacher.
-  phone = a phone number if visible (digits only). Look near "PHONE", "TEL", "MOBILE", "CONTACT".
-
-${_OCR_DISCIPLINE}
-Output ONLY: {"name":"","email":"","role":"","phone":""}`;
-    const result = await _callGroqGenericVision(key, resized.base64, resized.mimeType, prompt, 4096);
-    if (fb) fb.style.display = 'none';
-    if ($('sf-name') && result.name && result.name !== 'UNCLEAR') $('sf-name').value = result.name;
-    if ($('sf-email') && result.email && result.email !== 'UNCLEAR') $('sf-email').value = result.email;
-    const roleSel = $('sf-role');
-    if (roleSel && result.role && result.role !== 'UNCLEAR') {
-      const opt = [...roleSel.options].find(o => o.value.toLowerCase() === String(result.role).toLowerCase()
-        || o.value.toLowerCase().includes(String(result.role).toLowerCase())
-        || String(result.role).toLowerCase().includes(o.value.toLowerCase()));
-      if (opt) roleSel.value = opt.value;
-    }
-    const extra6 = [];
-    if (result.phone && result.phone !== 'UNCLEAR') extra6.push('Phone: ' + result.phone);
-    if (result.role && result.role !== 'UNCLEAR' && !roleSel?.value?.toLowerCase().includes(String(result.role).toLowerCase())) extra6.push('Role: ' + result.role);
-    const msg6 = extra6.length ? '✅ Filled from ID — ' + extra6.join(' · ') + '. Set a password before saving.' : '✅ Filled from ID — please verify name/email and set a password before saving.';
-    show(msg6);
-    setTimeout(() => { if (fb) fb.style.display = 'none'; }, 6000);
-  } catch(e) {
-    show('❌ ' + (e.message || 'Could not read ID. Try a clearer photo.'));
-  }
-}
-
-// ── 4. Groq Vision call with Nigerian fee ledger system prompt ────────
-async function _callGroqFeeVision(apiKey, base64, mimeType) {
-  const prompt = buildOcrPrompt('fee_ledger');
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: 4096,
-      temperature: 0.1,
-      reasoning_format: 'hidden',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a JSON data extraction tool. Output ONLY valid JSON — no markdown, no explanation text, no fences. If you cannot read a value, use null.'
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + base64 } },
-            { type: 'text', text: prompt }
-          ]
-        }
-      ]
-    })
+async function _callGroqFeeVision(_apiKey, base64, mimeType) {
+  const SYS = 'You are a JSON data extraction tool. Output ONLY valid JSON — no markdown, no explanation text, no extra words. Pure JSON only.';
+  return GroqRotator.vision(buildOcrPrompt('fee_ledger'), base64, mimeType, {
+    max_tokens: 4096, temperature: 0.1,
+    reasoning_format: 'hidden', system: SYS
   });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error('Groq ' + resp.status + ': ' + err.slice(0, 200));
-  }
-  const data = await resp.json();
-  let raw = (data.choices?.[0]?.message?.content || '').trim();
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-  window._lastGroqRaw = raw;
-  try { return JSON.parse(raw); } catch(e) {}
-  const extracted = _extractJSONObject(raw);
-  if (extracted) { try { return JSON.parse(extracted); } catch(e) {} }
-  throw new Error('Could not parse fee register response. Try a clearer, straighter photo of the register.');
 }
 
-// ── 5. Show review modal before importing ─────────────────────────────
-function _showFeeImportReview(data) {
-  const students = data.students || [];
-  if (!students.length) {
-    alert('No student records found. Try a closer, well-lit photo with the register page flat.');
-    return;
-  }
-
-  // Fuzzy name match against existing SD.students
-  function matchStudent(surname, firstname) {
-    const query = ((surname || '') + ' ' + (firstname || '')).toLowerCase().replace(/[^a-z\s]/g, '');
-    const words = query.split(/\s+/).filter(w => w.length > 1);
-    if (!words.length) return null;
-    let best = null, bestScore = 0;
-    SD.students.forEach((s, idx) => {
-      const sn = (s.name || '').toLowerCase().replace(/[^a-z\s]/g, '');
-      const sw = sn.split(/\s+/).filter(w => w.length > 1);
-      let shared = 0;
-      words.forEach(w => { if (sw.some(v => v === w || v.startsWith(w) || w.startsWith(v))) shared++; });
-      const score = shared / Math.max(words.length, sw.length, 1);
-      if (score > bestScore) { bestScore = score; best = { idx, name: s.name }; }
-    });
-    return bestScore >= 0.35 ? best : null;
-  }
-
-  const matched = students.map(s => ({ ...s, _match: matchStudent(s.surname, s.firstname) }));
-  const matchCount = matched.filter(s => s._match).length;
-
-  // Remove existing modal if any
-  document.getElementById('_fee_import_modal')?.remove();
-
-  const modal = document.createElement('div');
-  modal.id = '_fee_import_modal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9998;overflow-y:auto;padding:1rem 0;';
-
-  const box = document.createElement('div');
-  box.style.cssText = 'background:var(--s1);border-radius:14px;padding:1rem;max-width:580px;margin:0 auto;border:1px solid var(--border);';
-
-  // Header
-  const hdr = document.createElement('div');
-  hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;gap:0.5rem;';
-  hdr.innerHTML =
-    '<div><div style="font-weight:800;font-size:1rem;color:var(--text);">📋 Review Scanned Register</div>' +
-    '<div style="font-size:0.75rem;color:var(--sub);margin-top:3px;">' +
-    'Class: <b style="color:var(--text);">' + esc(data.class||'—') + '</b> · ' +
-    'Term: <b style="color:var(--text);">' + esc(data.term||'—') + '</b> · ' +
-    'Year: <b style="color:var(--text);">' + esc(data.year||'—') + '</b><br>' +
-    matchCount + ' of ' + students.length + ' students matched to existing records</div></div>' +
-    '<button onclick="document.getElementById(\'_fee_import_modal\').remove()" ' +
-    'style="background:none;border:none;color:var(--sub);font-size:1.4rem;cursor:pointer;padding:0;line-height:1;">✕</button>';
-  box.appendChild(hdr);
-
-  // Student rows
-  const rowsDiv = document.createElement('div');
-  matched.forEach((s, i) => {
-    const m = s._match;
-    const fullName = [s.surname, s.firstname].filter(Boolean).join(' ');
-    const statusColor = s.status === 'FULLY PAID' ? '#22c55e' : s.status === 'No Payment' ? '#ef4444' : '#f59e0b';
-    const totalPaid = (s.pmt1||0) + (s.pmt2||0) + (s.pmt3||0);
-
-    const row = document.createElement('div');
-    row.style.cssText = 'background:' + (i%2===0?'var(--s2)':'var(--s1)') + ';border:1px solid ' + (m?'var(--border)':'rgba(239,68,68,0.3)') + ';border-radius:8px;padding:0.55rem 0.7rem;margin-bottom:0.35rem;';
-    row.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">' +
-        '<div style="font-weight:700;font-size:0.86rem;">' + s.sn + '. ' + esc(fullName) + '</div>' +
-        '<span style="font-size:0.72rem;font-weight:700;color:' + statusColor + ';">' + esc(s.status||'—') + '</span>' +
-      '</div>' +
-      '<div style="font-size:0.71rem;margin-top:2px;color:' + (m?'#60a5fa':'#ef4444') + ';">' +
-        (m ? '✅ Matches: <b>' + esc(m.name) + '</b>' : '⚠️ No match — will be skipped') +
-      '</div>' +
-      (totalPaid ? '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;font-size:0.69rem;color:var(--sub);">' +
-        (s.pmt1 ? '<span>1st: <b style="color:var(--money);">₦' + Number(s.pmt1).toLocaleString('en-NG') + '</b>' + (s.date1?' ('+s.date1+')':'') + '</span>' : '') +
-        (s.pmt2 ? '<span>2nd: <b style="color:var(--money);">₦' + Number(s.pmt2).toLocaleString('en-NG') + '</b>' + (s.date2?' ('+s.date2+')':'') + '</span>' : '') +
-        (s.pmt3 ? '<span>3rd: <b style="color:var(--money);">₦' + Number(s.pmt3).toLocaleString('en-NG') + '</b>' + (s.date3?' ('+s.date3+')':'') + '</span>' : '') +
-        '<span>Total: <b style="color:var(--money);">₦' + totalPaid.toLocaleString('en-NG') + '</b></span>' +
-        '</div>' : '');
-    rowsDiv.appendChild(row);
-  });
-  box.appendChild(rowsDiv);
-
-  // Footer buttons
-  const ftr = document.createElement('div');
-  ftr.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.75rem;';
-
-  const importBtn = document.createElement('button');
-  importBtn.className = 'btn-brand';
-  importBtn.style.cssText = 'flex:1;';
-  importBtn.textContent = '✅ Import ' + matchCount + ' Matched Records';
-  importBtn.onclick = () => _confirmFeeImport(matched);
-  ftr.appendChild(importBtn);
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn-ghost';
-  cancelBtn.style.cssText = 'flex:0 0 auto;';
-  cancelBtn.textContent = 'Cancel';
-  cancelBtn.onclick = () => modal.remove();
-  ftr.appendChild(cancelBtn);
-
-  box.appendChild(ftr);
-  modal.appendChild(box);
-  // Close on backdrop tap
-  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-  document.body.appendChild(modal);
-}
-
-// ── 6. Confirm and apply the import ──────────────────────────────────
 async function _confirmFeeImport(matched) {
   let importedEntries = 0, skippedStudents = 0;
   const today = new Date().toISOString().split('T')[0];
@@ -9599,37 +9108,14 @@ const CURRICULUM = {
 // Cached Groq key
 let _groqKey = null;
 async function _getGroqKey(){
-  if(_groqKey) return _groqKey;
-  try{
-    const snap = await db.collection('public_ocr_keys').doc('main').get();
-    if(snap.exists) _groqKey = snap.data()?.groqApiKey || null;
-  }catch(e){}
-  return _groqKey;
+  // GroqRotator manages all keys — return first for any legacy callers
+  await GroqRotator.reload().catch(()=>{});
+  return GroqRotator.keyCount() > 0 ? window.GROQ_API_KEY : null;
 }
 
-// ── Shared Groq caller ────────────────────────────────────────────────────
+// ── Shared Groq caller (teaching tools) ──────────────────────────────────
 async function _callGroqTeach(prompt, systemMsg){
-  const key = await _getGroqKey();
-  if(!key) throw new Error('Groq API key not set. Ask your admin to add it in Settings.');
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: 8192,
-      reasoning_effort: 'none',
-      messages:[
-        {role:'system', content: systemMsg},
-        {role:'user',   content: prompt}
-      ]
-    })
-  });
-  if(!resp.ok){
-    const err = await resp.json().catch(()=>({}));
-    throw new Error(err?.error?.message || `Groq error ${resp.status}`);
-  }
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '';
+  return GroqRotator.text(prompt, systemMsg, { max_tokens: 8192 });
 }
 
 // ── Build subject dropdown HTML ───────────────────────────────────────────
@@ -10027,37 +9513,14 @@ const CURRICULUM = {
 // Cached Groq key
 let _groqKey = null;
 async function _getGroqKey(){
-  if(_groqKey) return _groqKey;
-  try{
-    const snap = await db.collection('public_ocr_keys').doc('main').get();
-    if(snap.exists) _groqKey = snap.data()?.groqApiKey || null;
-  }catch(e){}
-  return _groqKey;
+  // GroqRotator manages all keys — return first for any legacy callers
+  await GroqRotator.reload().catch(()=>{});
+  return GroqRotator.keyCount() > 0 ? window.GROQ_API_KEY : null;
 }
 
-// ── Shared Groq caller ────────────────────────────────────────────────────
+// ── Shared Groq caller (teaching tools) ──────────────────────────────────
 async function _callGroqTeach(prompt, systemMsg){
-  const key = await _getGroqKey();
-  if(!key) throw new Error('Groq API key not set. Ask your admin to add it in Settings.');
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: 8192,
-      reasoning_effort: 'none',
-      messages:[
-        {role:'system', content: systemMsg},
-        {role:'user',   content: prompt}
-      ]
-    })
-  });
-  if(!resp.ok){
-    const err = await resp.json().catch(()=>({}));
-    throw new Error(err?.error?.message || `Groq error ${resp.status}`);
-  }
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '';
+  return GroqRotator.text(prompt, systemMsg, { max_tokens: 8192 });
 }
 
 // ── Build subject dropdown HTML ───────────────────────────────────────────
