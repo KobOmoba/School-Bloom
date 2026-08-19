@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Payment Confirmation — Edu-BLOOM</title>
+<style>
+  :root{--brand:#3b82f6;--money:#10b981;--warn:#f59e0b;--danger:#ef4444;--bg:#080f1a;--card:#0f1d2e;--border:#1e3347;--text:#f0f6ff;--sub:#7a9bbf;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;min-height:100vh;padding:1.5rem;}
+  .wrap{max-width:420px;margin:0 auto;}
+  .logo{font-family:'Syne',system-ui,sans-serif;font-weight:800;font-size:1.5rem;text-align:center;margin-bottom:1.5rem;}
+  .logo .edu{color:#7c3aed;}.logo .bloom{color:#f97316;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.25rem;margin-bottom:1rem;}
+  .card-title{font-size:.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.75rem;}
+  .amount{font-size:2rem;font-weight:800;color:var(--money);text-align:center;margin:.5rem 0;}
+  .detail-row{display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.85rem;}
+  .detail-row:last-child{border-bottom:none;}
+  .detail-label{color:var(--sub);}
+  .detail-val{font-weight:600;text-align:right;}
+  .btn-paid{width:100%;background:var(--money);color:#fff;border:none;border-radius:12px;padding:1rem;font-size:1rem;font-weight:800;cursor:pointer;margin-top:.5rem;transition:.15s;}
+  .btn-paid:hover{background:#059669;}
+  .btn-paid:disabled{opacity:.5;cursor:default;}
+  .form-group{margin-bottom:.85rem;}
+  label{display:block;font-size:.78rem;font-weight:700;margin-bottom:.35rem;color:var(--sub);}
+  input,select{width:100%;padding:.65rem .85rem;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);font-size:.88rem;}
+  .upload-box{border:2px dashed var(--border);border-radius:12px;padding:1.5rem;text-align:center;cursor:pointer;transition:.15s;margin-bottom:.85rem;}
+  .upload-box:hover{border-color:var(--brand);}
+  .upload-box.has-file{border-color:var(--money);background:rgba(16,185,129,.06);}
+  .upload-icon{font-size:2rem;margin-bottom:.35rem;}
+  .upload-text{font-size:.82rem;color:var(--sub);}
+  .thumb{max-width:100%;border-radius:8px;margin-top:.5rem;display:none;}
+  .btn-submit{width:100%;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:.9rem;font-size:.95rem;font-weight:700;cursor:pointer;}
+  .btn-submit:disabled{opacity:.5;}
+  .success{text-align:center;padding:2rem 1rem;}
+  .success .icon{font-size:3.5rem;margin-bottom:1rem;}
+  .success h2{font-size:1.3rem;font-weight:800;margin-bottom:.5rem;}
+  .success p{color:var(--sub);font-size:.87rem;line-height:1.65;}
+  .err{color:var(--danger);font-size:.8rem;margin-top:.35rem;}
+  #step-form{display:none;}
+  .spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo"><span class="edu">Edu-</span><span class="bloom">BLOOM</span></div>
+
+  <!-- STEP 1: Payment details -->
+  <div id="step-details">
+    <div class="card">
+      <div class="card-title">💳 Fee Payment</div>
+      <div style="text-align:center;font-size:.9rem;color:var(--sub);margin-bottom:.5rem;" id="student-label">Loading…</div>
+      <div class="amount" id="amount-display">—</div>
+      <div style="text-align:center;font-size:.78rem;color:var(--sub);margin-bottom:1rem;" id="term-display"></div>
+    </div>
+
+    <div class="card" id="bank-card" style="display:none;">
+      <div class="card-title">🏦 Pay to this Account</div>
+      <div class="detail-row">
+        <span class="detail-label">Bank</span>
+        <span class="detail-val" id="d-bank">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Account Number</span>
+        <span class="detail-val" id="d-acct">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Account Name</span>
+        <span class="detail-val" id="d-acctname">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Reference</span>
+        <span class="detail-val" id="d-ref" style="color:var(--warn);">—</span>
+      </div>
+      <div style="margin-top:.75rem;font-size:.76rem;color:var(--sub);line-height:1.6;">
+        ⚠️ Use your child's <strong style="color:var(--text);">full name as the payment reference</strong> so the school can identify your payment.
+      </div>
+    </div>
+
+    <button class="btn-paid" id="btn-paid" onclick="showForm()">✅ I Have Paid — Upload Receipt</button>
+    <div style="text-align:center;font-size:.75rem;color:var(--sub);margin-top:.65rem;">
+      Tap after making the bank transfer to submit your receipt to the school.
+    </div>
+  </div>
+
+  <!-- STEP 2: Receipt upload form -->
+  <div id="step-form">
+    <div class="card">
+      <div class="card-title">📤 Submit Payment Receipt</div>
+      <p style="font-size:.84rem;color:var(--sub);margin-bottom:1rem;line-height:1.6;">
+        Upload a photo or screenshot of your bank debit alert or transfer receipt. The school will verify and update your child's fee record.
+      </p>
+
+      <div class="form-group">
+        <label>Your Name (Parent / Guardian)</label>
+        <input id="parent-name" placeholder="e.g. Mrs. Adesanya Fatima" type="text">
+      </div>
+
+      <div class="form-group">
+        <label>Your Phone Number</label>
+        <input id="parent-phone" placeholder="e.g. 08012345678" type="tel">
+      </div>
+
+      <div class="form-group">
+        <label>Receipt Photo / Screenshot <span style="color:var(--danger);">*</span></label>
+        <input type="file" id="receipt-input" accept="image/*" style="display:none;" onchange="handleReceiptFile(event)">
+        <div class="upload-box" id="upload-box" onclick="document.getElementById('receipt-input').click()">
+          <div class="upload-icon">📸</div>
+          <div class="upload-text">Tap to take a photo or choose from gallery</div>
+        </div>
+        <img id="receipt-thumb" class="thumb">
+        <div class="err" id="upload-err"></div>
+      </div>
+
+      <div id="submit-err" class="err" style="margin-bottom:.5rem;"></div>
+      <button class="btn-submit" id="btn-submit" onclick="submitReceipt()">📨 Submit Receipt to School</button>
+      <button onclick="showDetails()" style="width:100%;background:none;border:1px solid var(--border);border-radius:12px;padding:.7rem;font-size:.85rem;color:var(--sub);cursor:pointer;margin-top:.5rem;">← Back to Payment Details</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: Success -->
+  <div id="step-success" style="display:none;">
+    <div class="card success">
+      <div class="icon">✅</div>
+      <h2>Receipt Submitted!</h2>
+      <p>Your receipt has been sent to <strong id="success-school">the school</strong>.<br><br>
+      The bursar or principal will verify your payment and update <strong id="success-student">your ward</strong>'s fee record.<br><br>
+      You do not need to do anything else. Thank you! 🙏</p>
+      <div style="margin-top:1.5rem;font-size:.75rem;color:var(--sub);">Powered by Edu-BLOOM · school.edubloom.com.ng</div>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script>
+const FB_CONFIG = {
+  apiKey: "AIzaSyCVEdunN3s6XN_kpf4TpGg8YIRbmMq1GmM",
+  authDomain: "educationbloom-699ed.firebaseapp.com",
+  projectId: "educationbloom-699ed"
+};
+firebase.initializeApp(FB_CONFIG);
+const db = firebase.firestore();
+
+// Parse URL params
+const P = new URLSearchParams(location.search);
+const schoolId   = P.get('school')    || '';
+const studentId  = P.get('sid')       || '';
+const studentName= decodeURIComponent(P.get('sn')       || 'your ward');
+const amount     = parseFloat(P.get('amt')      || '0');
+const term       = decodeURIComponent(P.get('term')     || 'this term');
+const bankName   = decodeURIComponent(P.get('bank')     || '');
+const acctNum    = P.get('acct')      || '';
+const acctName   = decodeURIComponent(P.get('acctname') || '');
+const schoolName = decodeURIComponent(P.get('schoolname') || 'Your School');
+
+let receiptBase64 = null;
+
+function fmt(n) { return '₦' + Number(n).toLocaleString(); }
+
+// Populate UI
+document.getElementById('student-label').textContent  = 'Outstanding for ' + studentName;
+document.getElementById('amount-display').textContent = fmt(amount);
+document.getElementById('term-display').textContent   = term;
+document.getElementById('success-school').textContent = schoolName;
+document.getElementById('success-student').textContent= studentName;
+
+if (bankName && acctNum) {
+  document.getElementById('bank-card').style.display = 'block';
+  document.getElementById('d-bank').textContent     = bankName;
+  document.getElementById('d-acct').textContent     = acctNum;
+  document.getElementById('d-acctname').textContent = acctName || schoolName;
+  document.getElementById('d-ref').textContent      = studentName;
+}
+
+function showForm() {
+  document.getElementById('step-details').style.display = 'none';
+  document.getElementById('step-form').style.display    = 'block';
+}
+function showDetails() {
+  document.getElementById('step-form').style.display    = 'none';
+  document.getElementById('step-details').style.display = 'block';
+}
+
+function handleReceiptFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const errEl = document.getElementById('upload-err');
+  errEl.textContent = '';
+
+  if (file.size > 10 * 1024 * 1024) { errEl.textContent = 'File too large. Use a screenshot or lower-quality photo.'; return; }
+
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    // Compress to max 900px
+    const img = new Image();
+    img.onload = function() {
+      const MAX = 900;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      receiptBase64 = canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
+      const thumb = document.getElementById('receipt-thumb');
+      thumb.src = canvas.toDataURL('image/jpeg', 0.75);
+      thumb.style.display = 'block';
+      document.getElementById('upload-box').classList.add('has-file');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function submitReceipt() {
+  const parentName  = document.getElementById('parent-name').value.trim();
+  const parentPhone = document.getElementById('parent-phone').value.trim();
+  const errEl = document.getElementById('submit-err');
+  errEl.textContent = '';
+
+  if (!parentName)   { errEl.textContent = 'Please enter your name.'; return; }
+  if (!receiptBase64){ errEl.textContent = 'Please upload a photo of your receipt.'; return; }
+  if (!schoolId)     { errEl.textContent = 'Invalid payment link — missing school ID. Contact the school.'; return; }
+
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Submitting…';
+
+  try {
+    await db.collection('schools').doc(schoolId)
+      .collection('payment_receipts')
+      .add({
+        studentId,
+        studentName,
+        amount,
+        term,
+        parentName,
+        parentPhone: parentPhone.replace(/\D/g,''),
+        receiptImage: receiptBase64,
+        submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        status: 'pending',
+        schoolName
+      });
+
+    document.getElementById('step-form').style.display    = 'none';
+    document.getElementById('step-success').style.display = 'block';
+  } catch(e) {
+    errEl.textContent = 'Submission failed: ' + e.message + '. Please try again.';
+    btn.disabled = false;
+    btn.innerHTML = '📨 Submit Receipt to School';
+  }
+}
+</script>
+</body>
+</html>
