@@ -243,6 +243,8 @@ function toggleEye(inputId, btn) {
 
     <!-- 1. REVENUE -->
     <section id="sec-revenue" class="sec on">
+ <div id="receipt-review-section"></div>
+
       <div class="stats">
         <div class="stat stat-blue" onclick="dashTileClick('students')"><div class="sn" id="d-students">0</div><div class="sl">Students</div></div>
         <div class="stat stat-green" onclick="dashTileClick('collected')"><div class="sn" id="d-collected" style="color:var(--money);font-size:1rem;">₦0</div><div class="sl">Collected</div></div>
@@ -1617,7 +1619,7 @@ function toggleEye(inputId, btn) {
       <span id="nav-school-name">Edu-BLOOM</span>
     </div>
     <div class="nav-group-label">STUDENTS</div>
-    <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue</button>
+    <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue<span id="receipt-badge" style="display:none;background:#f59e0b;color:#000;border-radius:50%;min-width:16px;height:16px;font-size:0.65rem;font-weight:800;align-items:center;justify-content:center;margin-left:4px;padding:0 3px;"></span></button>
     <button class="nlink" data-t="students" onclick="go('students')"><span class="ni">🎓</span>Students</button>
     <button class="nlink" data-t="profile" onclick="go('profile')"><span class="ni">👤</span>Profile</button>
     <button class="nlink" data-t="scores" onclick="go('scores')"><span class="ni">📝</span>Scores</button>
@@ -1847,7 +1849,7 @@ function toggleEye(inputId, btn) {
     </div>
 
 
-<script src="app.js?v=20260818-rotator"></script>
+<script src="app.js?v=20260818-receipts"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
