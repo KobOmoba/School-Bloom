@@ -2102,6 +2102,41 @@ async function handleBulkPayment(e) {
   r.readAsText(f);
 }
 
+
+// ── POS Daily Summary (Revenue section) ──────────────────────────────────
+function _renderPosSummary() {
+  const el = document.getElementById('pos-summary');
+  if (!el || !canSeeFees()) return;
+  const today = new Date().toISOString().split('T')[0];
+  const posToday = [];
+  (SD.students || []).forEach(s => {
+    (s.paymentHistory || []).forEach(p => {
+      if (p.method === 'POS' && p.date === today)
+        posToday.push({ student: s.name, amount: p.amount, rrn: p.posRRN || '—', tid: p.posTerminal || '' });
+    });
+  });
+  if (!posToday.length) { el.innerHTML = ''; return; }
+  const total = posToday.reduce((t, p) => t + (p.amount || 0), 0);
+  const rows = posToday.map(p =>
+    `<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:0.3rem 0;border-bottom:1px solid var(--border);">
+      <span>${esc(p.student)}</span>
+      <span style="color:var(--money);font-weight:700;">${fmt(p.amount)}</span>
+      <span style="color:var(--sub);">RRN: ${esc(p.rrn)}</span>
+    </div>`
+  ).join('');
+  el.innerHTML = `
+    <div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:11px;padding:0.85rem;margin-bottom:0.75rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+        <div style="font-size:0.7rem;font-weight:800;color:var(--brand);letter-spacing:.08em;text-transform:uppercase;">🖨️ POS Payments Today</div>
+        <div style="font-weight:800;color:var(--money);font-size:0.9rem;">${fmt(total)}</div>
+      </div>
+      ${rows}
+      <div style="font-size:0.72rem;color:var(--sub);margin-top:0.4rem;line-height:1.5;">
+        Cross-check each RRN against today's POS terminal settlement report.
+      </div>
+    </div>`;
+}
+
 function _buildPayConfirmLink(s, owe) {
   // Builds the parent payment confirmation URL with all params
   const cfg = SD.config || {};
@@ -3023,6 +3058,7 @@ function _compressImage(file, maxDim, quality) {
 function buildFees(s, idx) {
   // Render pending receipts at top of Revenue for authorized staff
   _renderReceiptSection();
+  _renderPosSummary();
   if (!canSeeFees()) {
     return `<div class="card" style="text-align:center;padding:1.5rem;color:var(--sub);">
       <div style="font-size:1.5rem;margin-bottom:0.5rem;">🔒</div>
@@ -3044,21 +3080,59 @@ function buildFees(s, idx) {
     <button class="btn-brand" style="width:100%;margin-bottom:0.5rem;background:linear-gradient(135deg,#7c3aed,#2563eb);" onclick="document.getElementById('pay-scan-input').click()">📷 Scan Receipt</button>
     <div id="pay-scan-fb" style="display:none;font-size:0.78rem;color:var(--sub);margin-bottom:0.5rem;text-align:center;"></div>
     
-    <label>Amount (₦)</label><input type="number" id="pay-amt" placeholder="e.g. 25000">
-    <label>Method</label><select id="pay-method"><option>Bank Transfer</option><option>Cash</option><option>POS</option><option>Online</option></select>
-    <label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
+    <label>Amount (₦)</label>
+    <input type="number" id="pay-amt" placeholder="e.g. 25000">
+
+    <label>Payment Method</label>
+    <select id="pay-method" onchange="togglePosFields()" style="margin-bottom:0.35rem;">
+      <option value="Bank Transfer">Bank Transfer</option>
+      <option value="Cash">Cash</option>
+      <option value="POS">POS Machine</option>
+      <option value="Online">Online</option>
+      <option value="Cheque">Cheque</option>
+    </select>
+
+    <!-- POS-specific fields — shown only when POS is selected -->
+    <div id="pos-fields" style="display:none;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:9px;padding:0.7rem;margin-bottom:0.5rem;">
+      <div style="font-size:0.72rem;font-weight:800;color:var(--brand);letter-spacing:.08em;text-transform:uppercase;margin-bottom:0.45rem;">🖨️ POS Receipt Details</div>
+      <label>Receipt No. (RRN) <span style="color:var(--danger);">*</span>
+        <span style="font-weight:400;font-size:0.72rem;color:var(--sub);"> — printed on the POS slip</span>
+      </label>
+      <input type="text" id="pay-pos-rrn" placeholder="e.g. 000012345678" style="margin-bottom:0.4rem;">
+      <label>Terminal ID <span style="color:var(--sub);font-weight:400;font-size:0.72rem;">(optional)</span></label>
+      <input type="text" id="pay-pos-terminal" placeholder="e.g. 2380011">
+      <div style="font-size:0.72rem;color:var(--sub);margin-top:0.4rem;line-height:1.55;">
+        ⓘ The Proprietor can match the RRN against the bank statement to verify this payment.
+      </div>
+    </div>
+
+    <label>Date</label>
+    <input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}">
     <button class="btn-money" onclick="recordPayment(${idx})">💵 Record Payment</button>
     ${owe>0?`<button class="btn-wa" style="margin-top:0.4rem;" onclick="sendReminder(${idx})">📲 Send WhatsApp Reminder</button>`:''}
     ${(s.paymentHistory||[]).length?`<div style="margin-top:0.75rem;"><div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Payment History</div>${(s.paymentHistory||[]).map((p,pi)=>`
   <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
     <div style="flex:1;min-width:0;">
       <div style="font-size:0.8rem;font-weight:600;color:var(--money);">${fmt(p.amount)}</div>
-      <div style="font-size:0.7rem;color:var(--sub);">${p.date} · ${p.method}</div>
+      <div style="font-size:0.7rem;color:var(--sub);">${p.date} · ${p.method}${p.posRRN ? ` · <span style="color:var(--brand);">RRN: ${p.posRRN}</span>` : ''}${p.posTerminal ? ` · TID: ${p.posTerminal}` : ''}</div>
     </div>
     <button onclick="editPayment(${idx},${pi})" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#2563eb;white-space:nowrap;">✏️ Edit</button>
     <button onclick="deletePayment(${idx},${pi})" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:0.75rem;color:#dc2626;white-space:nowrap;">🗑️ Del</button>
   </div>`).join('')}</div>`:''}
     </div>`;
+}
+
+
+// ── POS payment field toggle ───────────────────────────────────────────────
+function togglePosFields() {
+  const method = $('pay-method')?.value;
+  const el = $('pos-fields');
+  if (!el) return;
+  el.style.display = method === 'POS' ? 'block' : 'none';
+  if (method !== 'POS') {
+    if ($('pay-pos-rrn'))      $('pay-pos-rrn').value = '';
+    if ($('pay-pos-terminal')) $('pay-pos-terminal').value = '';
+  }
 }
 
 async function recordPayment(idx) {
@@ -3078,8 +3152,8 @@ async function recordPayment(idx) {
   }
   await SQ.push('students', SD.students); checkTierStatus();
   await _logAudit('manual_payment', SD.students[idx].name, amt,
-    $('pay-method')?.value || 'Cash',
-    `Manual entry by ${currentStaff?.name || userRole}`);
+    method,
+    `${method === 'POS' ? `POS · RRN: ${posRRN}${posTID ? ' · TID: ' + posTID : ''}` : 'Manual entry'} by ${currentStaff?.name || userRole}`);
   if ($('pay-amt')) $('pay-amt').value = '';
   renderTab('fees'); renderBanner(); renderRevenue();
   alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
@@ -3099,21 +3173,38 @@ async function deletePayment(studentIdx, payIdx) {
   toast('🗑️ Payment deleted.');
 }
 
+function toggleEpPosFields() {
+  const method = $('ep-method')?.value;
+  const el = $('ep-pos-fields');
+  if (el) el.style.display = method === 'POS' ? 'block' : 'none';
+}
+
 function editPayment(studentIdx, payIdx) {
   const s = SD.students[studentIdx]; if (!s) return;
   const p = (s.paymentHistory || [])[payIdx]; if (!p) return;
   const html = `
-    <div style="display:flex;flex-direction:column;gap:0.5rem;">
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
       <div class="ct" style="margin:0 0 0.4rem;">✏️ Edit Payment</div>
-      <label>Amount (₦)</label><input id="ep-amt" type="number" value="${p.amount||''}">
-      <label>Method</label><select id="ep-method">${['Bank Transfer','Cash','POS','Online'].map(m=>`<option ${m===p.method?'selected':''}>${m}</option>`).join('')}</select>
-      <label>Date</label><input id="ep-date" type="date" value="${p.date||''}">
+      <label>Amount (₦)</label>
+      <input id="ep-amt" type="number" value="${p.amount||''}">
+      <label>Method</label>
+      <select id="ep-method" onchange="toggleEpPosFields()" style="margin-bottom:0.25rem;">
+        ${['Bank Transfer','Cash','POS','Online','Cheque'].map(m=>`<option ${m===p.method?'selected':''}>${m}</option>`).join('')}
+      </select>
+      <div id="ep-pos-fields" style="display:${p.method==='POS'?'block':'none'};background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:0.6rem;margin-bottom:0.25rem;">
+        <label>RRN <span style="color:var(--danger)">*</span></label>
+        <input id="ep-pos-rrn" type="text" value="${p.posRRN||''}" placeholder="POS Receipt Number">
+        <label style="margin-top:0.3rem;">Terminal ID</label>
+        <input id="ep-pos-terminal" type="text" value="${p.posTerminal||''}" placeholder="optional">
+      </div>
+      <label>Date</label>
+      <input id="ep-date" type="date" value="${p.date||''}">
       <div style="display:flex;gap:0.5rem;margin-top:0.4rem;">
         <button class="btn-brand" style="flex:1;" onclick="saveEditPayment(${studentIdx},${payIdx})">💾 Save</button>
         <button class="btn-ghost" style="flex:1;" onclick="closeM('edit-payment-modal')">Cancel</button>
       </div>
     </div>`;
-  let m = $('edit-payment-modal');
+let m = $('edit-payment-modal');
   if (!m) {
     m = document.createElement('div'); m.id = 'edit-payment-modal'; m.className = 'modal';
     m.innerHTML = `<div class="mbox"><button class="mclose" onclick="closeM('edit-payment-modal')">✕</button><div id="edit-payment-modal-body"></div></div>`;
@@ -3128,7 +3219,13 @@ async function saveEditPayment(studentIdx, payIdx) {
   const p = (s.paymentHistory || [])[payIdx]; if (!p) return;
   const oldAmt = p.amount || 0;
   const newAmt = parseFloat($('ep-amt').value) || 0; if (!newAmt) return alert('Enter a valid amount.');
-  p.amount = newAmt; p.method = $('ep-method').value; p.date = $('ep-date').value;
+  const newMethod = $('ep-method').value;
+  const newRRN    = ($('ep-pos-rrn')?.value || '').trim();
+  const newTID    = ($('ep-pos-terminal')?.value || '').trim();
+  if (newMethod === 'POS' && !newRRN) return alert('RRN is required for POS payments.');
+  p.amount = newAmt; p.method = newMethod; p.date = $('ep-date').value;
+  if (newRRN) p.posRRN = newRRN; else delete p.posRRN;
+  if (newTID) p.posTerminal = newTID; else delete p.posTerminal;
   s.paid = Math.max(0, (s.paid || 0) - oldAmt + newAmt);
   await SQ.push('students', SD.students); saveLocal('students', SD.students);
   await _logAudit('payment_edited', s.name, newAmt, p.method,
