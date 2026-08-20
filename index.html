@@ -1173,6 +1173,10 @@ function toggleEye(inputId, btn) {
 
 </div><!-- end grid -->
 </section>
+<section id="sec-audit" class="sec">
+  <!-- Rendered by renderAuditLog() — Proprietor only -->
+</section>
+
 <section id="sec-settings" class="sec">
       <div class="ct">⚙️ Settings</div>
       <div class="card">
@@ -1312,8 +1316,20 @@ function toggleEye(inputId, btn) {
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script src="app.js"></script>
+<script>
+// Show audit nav button for Proprietor after login
+(function _watchAuditNav() {
+  const orig = window.startApp;
+  if (typeof orig === 'function') return; // wait for app.js to define it
+  setTimeout(_watchAuditNav, 200);
+})();
+</script>
 </body>
 </html>
+<section id="sec-audit" class="sec">
+  <!-- Rendered by renderAuditLog() — Proprietor only -->
+</section>
+
 <section id="sec-settings" class="sec">
       <div class="card">
         <div class="ct">⚙️ School Settings</div>
@@ -1650,6 +1666,7 @@ function toggleEye(inputId, btn) {
     <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
 <button class="nlink" data-t="lessons"   onclick="go('lessons')"><span class="ni">📖</span><span class="nl">Lessons</span></button>
 <button class="nlink" data-t="questions" onclick="go('questions')"><span class="ni">❓</span><span class="nl">Questions</span></button>
+    <button class="nlink" data-t="audit" id="nav-audit" style="display:none;" onclick="go('audit')"><span class="ni">🔒</span><span class="nl">Audit</span></button>
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
   </nav>
 </div>
@@ -1849,7 +1866,7 @@ function toggleEye(inputId, btn) {
     </div>
 
 
-<script src="app.js?v=20260818-receipts"></script>
+<script src="app.js?v=20260818-audit"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
@@ -2174,5 +2191,13 @@ window.addEventListener('appinstalled', () => {
   <div style="margin-top:4px;">© 2026 AariNAT Company Limited</div>
 </div>
 
+<script>
+// Show audit nav button for Proprietor after login
+(function _watchAuditNav() {
+  const orig = window.startApp;
+  if (typeof orig === 'function') return; // wait for app.js to define it
+  setTimeout(_watchAuditNav, 200);
+})();
+</script>
 </body>
 </html>
