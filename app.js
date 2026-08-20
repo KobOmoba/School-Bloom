@@ -1215,6 +1215,9 @@ function canSeeFees() { return ['Principal', 'Bursar', 'Proprietor'].includes(us
 function getAssignedClass() { return currentStaff ? currentStaff.assignedClass : null; }
 
 function applyRoleRestrictions() {
+  // Show audit nav tab for Proprietor only
+  const auditNav = document.getElementById('nav-audit');
+  if (auditNav) auditNav.style.display = userRole === 'Proprietor' ? '' : 'none';
   const allowed = _allowedTabs();
   document.querySelectorAll('.nlink').forEach(btn => {
     const tab = btn.dataset.t;
