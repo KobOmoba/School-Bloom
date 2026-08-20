@@ -2072,8 +2072,22 @@ async function handleBulkPayment(e) {
       if (isAmbiguous) { skipped++; continue; }
       best.s.paid = (best.s.paid || 0) + amt;
       if (!best.s.paymentHistory) best.s.paymentHistory = [];
-      best.s.paymentHistory.unshift({ amount: amt, method: 'Bank Statement', date: new Date().toISOString().split('T')[0], by: 'CSV Import' });
+      const _entryDate = new Date().toISOString().split('T')[0];
+      best.s.paymentHistory.unshift({ amount: amt, method: 'Bank Statement', date: _entryDate, by: 'CSV Import', csvRef: csvName });
       matched++;
+      // Audit log every matched bank entry
+      _logAudit('bank_reconciled', best.s.name, amt, 'Bank Statement CSV',
+        `CSV ref: ${csvName}`, { studentId: best.s.id||'' });
+      // Auto-confirm any pending receipt for same student + within 10% of amount
+      if (db && schoolId && best.s.id) {
+        db.collection('schools').doc(schoolId).collection('payment_receipts')
+          .where('status','==','pending').where('studentId','==',best.s.id).get()
+          .then(rSnap => {
+            if (!rSnap || rSnap.empty) return;
+            const hit = rSnap.docs.find(d => Math.abs((d.data().amount||0)-amt)/Math.max(amt,1) < 0.1);
+            if (hit) hit.ref.update({ status:'confirmed_via_statement', confirmedAt:new Date(), csvRef:csvName });
+          }).catch(()=>{});
+      }
     }
     await SQ.push('students', SD.students); checkTierStatus();
     let msg = `✅ ${matched} matched and updated`;
@@ -3060,6 +3074,9 @@ async function recordPayment(idx) {
     } catch (e) { console.warn('recordPayment write failed:', e.message); }
   }
   await SQ.push('students', SD.students); checkTierStatus();
+  await _logAudit('manual_payment', SD.students[idx].name, amt,
+    $('pay-method')?.value || 'Cash',
+    `Manual entry by ${currentStaff?.name || userRole}`);
   if ($('pay-amt')) $('pay-amt').value = '';
   renderTab('fees'); renderBanner(); renderRevenue();
   alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
@@ -3069,9 +3086,12 @@ async function deletePayment(studentIdx, payIdx) {
   const s = SD.students[studentIdx]; if (!s) return;
   const p = (s.paymentHistory || [])[payIdx]; if (!p) return;
   if (!confirm(`Delete payment of ${fmt(p.amount)} on ${p.date}?`)) return;
-  s.paid = Math.max(0, (s.paid || 0) - (p.amount || 0));
+  const delAmt = p.amount || 0; const delMethod = p.method || 'Unknown';
+  s.paid = Math.max(0, (s.paid || 0) - delAmt);
   s.paymentHistory.splice(payIdx, 1);
   await SQ.push('students', SD.students); saveLocal('students', SD.students);
+  await _logAudit('payment_deleted', s.name, delAmt, delMethod,
+    `Deleted by ${currentStaff?.name || userRole}`);
   activeIdx = studentIdx; renderTab('fees'); renderBanner(); renderRevenue();
   toast('🗑️ Payment deleted.');
 }
@@ -3108,6 +3128,8 @@ async function saveEditPayment(studentIdx, payIdx) {
   p.amount = newAmt; p.method = $('ep-method').value; p.date = $('ep-date').value;
   s.paid = Math.max(0, (s.paid || 0) - oldAmt + newAmt);
   await SQ.push('students', SD.students); saveLocal('students', SD.students);
+  await _logAudit('payment_edited', s.name, newAmt, p.method,
+    `Edited from ${fmt(oldAmt)} → ${fmt(newAmt)} by ${currentStaff?.name || userRole}`);
   closeM('edit-payment-modal'); activeIdx = studentIdx; renderTab('fees'); renderBanner(); renderRevenue();
   toast('✅ Payment updated!');
 }
@@ -10066,8 +10088,10 @@ function _renderReceiptSection() {
         </div>
         ${thumb}
         <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-          <button onclick="approveReceipt('${r.id}')" style="flex:1;background:var(--money);color:#fff;border:none;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.82rem;cursor:pointer;">✅ Approve & Mark Paid</button>
-          <button onclick="rejectReceipt('${r.id}')" style="flex:1;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject</button>
+          <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:0.55rem;font-size:0.78rem;color:#93c5fd;margin-bottom:0.35rem;">
+            📊 Fee will update automatically when the bank statement CSV is uploaded and this payment is matched.
+          </div>
+          <button onclick="rejectReceipt('${r.id}')" style="width:100%;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.5rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject (Wrong / Duplicate / Fake)</button>
         </div>
       </div>`;
   }).join('');
@@ -10080,38 +10104,11 @@ function _renderReceiptSection() {
     <div style="height:1px;background:var(--border);margin:1rem 0;"></div>`;
 }
 
-async function approveReceipt(receiptId) {
-  const r = _pendingReceipts.find(x => x.id === receiptId);
-  if (!r) return;
-  if (!confirm(`Approve payment of ₦${Number(r.amount||0).toLocaleString()} for ${r.studentName}?\n\nThis will mark them as paid and remove the receipt from the queue.`)) return;
-
-  try {
-    // Find the student and update their paid amount
-    const idx = (SD.students||[]).findIndex(s =>
-      s.id === r.studentId ||
-      (s.name||'').toLowerCase() === (r.studentName||'').toLowerCase()
-    );
-    if (idx > -1) {
-      SD.students[idx].paid = (SD.students[idx].paid || 0) + Number(r.amount || 0);
-      if (!SD.students[idx].paymentHistory) SD.students[idx].paymentHistory = [];
-      SD.students[idx].paymentHistory.unshift({
-        amount: Number(r.amount), method: 'Bank Transfer (Receipt Verified)',
-        date: new Date().toISOString().split('T')[0],
-        verifiedBy: currentStaff?.name || userRole,
-        parentName: r.parentName
-      });
-      await SQ.push('students', SD.students);
-      saveLocal('students', SD.students);
-    }
-
-    // Mark receipt as approved in Firestore
-    await db.collection('schools').doc(schoolId)
-      .collection('payment_receipts').doc(receiptId)
-      .update({ status: 'approved', approvedAt: new Date(), approvedBy: currentStaff?.name || userRole });
-
-    toast(`✅ Payment approved — ${r.studentName}'s record updated.`);
-    renderRevenue(); renderStudentList();
-  } catch(e) { alert('Error approving: ' + e.message); }
+async function approveReceipt() {
+  // REMOVED — bank statement is the only authority for marking fees as paid.
+  // Receipts are verified automatically when the CSV bank statement is uploaded.
+  alert('Receipts cannot be manually approved.
+Upload the bank statement CSV to verify and match this payment automatically.');
 }
 
 async function rejectReceipt(receiptId) {
@@ -10129,6 +10126,8 @@ async function rejectReceipt(receiptId) {
         rejectedBy: currentStaff?.name || userRole,
         rejectionReason: reason || ''
       });
+    await _logAudit('receipt_rejected', r.studentName, r.amount||0, 'Receipt',
+      `Rejected by ${currentStaff?.name||userRole}. Reason: ${reason||'None given'}`);
     toast(`🗑️ Receipt rejected.`);
   } catch(e) { alert('Error rejecting: ' + e.message); }
 }
@@ -10142,6 +10141,135 @@ function showReceiptFull(receiptId) {
   </body></html>`);
 }
 // ── End Payment Receipt Review ─────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT LOG — Proprietor-only. Every fee change is logged and reversible.
+// Collection: schools/{schoolId}/audit_log
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function _logAudit(action, studentName, amount, method, note, meta) {
+  if (!db || !schoolId) return;
+  try {
+    await db.collection('schools').doc(schoolId).collection('audit_log').add({
+      action,           // 'bank_reconciled'|'manual_payment'|'payment_deleted'|'payment_edited'|'receipt_rejected'|'fee_reversed'
+      studentName: studentName || '—',
+      amount: Number(amount) || 0,
+      method: method || '—',
+      note: note || '',
+      meta: meta || {},
+      by:   currentStaff?.name || userRole || 'Unknown',
+      role: userRole || '—',
+      at:   firebase.firestore.FieldValue.serverTimestamp(),
+      canReverse:  ['bank_reconciled','manual_payment'].includes(action),
+      reversed:    false,
+      reversedAt:  null,
+      reversedBy:  null
+    });
+  } catch(e) { console.warn('[Audit] Log failed:', e.message); }
+}
+
+// ── Audit Log Viewer (Proprietor only) ────────────────────────────────────
+let _auditEntries = [];
+
+function renderAuditLog() {
+  const sec = document.getElementById('sec-audit');
+  if (!sec) return;
+  if (userRole !== 'Proprietor') {
+    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">🔒 Audit log is restricted to Proprietors only.</div>';
+    return;
+  }
+  sec.innerHTML = '<div style="text-align:center;color:var(--sub);padding:2rem;">Loading audit log…</div>';
+  if (!db || !schoolId) { sec.innerHTML = '<div style="padding:2rem;color:var(--sub);">Not connected.</div>'; return; }
+
+  db.collection('schools').doc(schoolId).collection('audit_log')
+    .orderBy('at','desc').limit(100)
+    .onSnapshot(snap => {
+      _auditEntries = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
+      _renderAuditEntries(sec);
+    }, e => { sec.innerHTML = `<div style="padding:2rem;color:var(--danger);">Error: ${e.message}</div>`; });
+}
+
+function _renderAuditEntries(sec) {
+  if (!_auditEntries.length) {
+    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">No audit entries yet.</div>';
+    return;
+  }
+  const now = Date.now();
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const ACTION_LABELS = {
+    bank_reconciled: { icon:'🏦', label:'Bank Statement Match', color:'var(--money)' },
+    manual_payment:  { icon:'✍️', label:'Manual Payment Entry', color:'var(--brand)' },
+    payment_deleted: { icon:'🗑️', label:'Payment Deleted', color:'var(--danger)' },
+    payment_edited:  { icon:'✏️', label:'Payment Edited', color:'var(--warn)' },
+    receipt_rejected:{ icon:'❌', label:'Receipt Rejected', color:'var(--sub)' },
+    fee_reversed:    { icon:'↩️', label:'Fee Reversed', color:'#a78bfa' }
+  };
+
+  const rows = _auditEntries.map(e => {
+    const al  = ACTION_LABELS[e.action] || { icon:'•', label: e.action, color:'var(--sub)' };
+    const ts  = e.at?.toDate ? e.at.toDate() : new Date();
+    const age = now - ts.getTime();
+    const canUndo = e.canReverse && !e.reversed && age < SEVEN_DAYS;
+    const dateStr = ts.toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric'}) + ' ' + ts.toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
+    return `
+    <div style="background:var(--card);border:1px solid ${e.reversed?'var(--border)':'var(--border)'};border-left:3px solid ${e.reversed?'var(--border)':al.color};border-radius:10px;padding:0.85rem;margin-bottom:0.5rem;${e.reversed?'opacity:0.5;':''}" >
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;">
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:0.85rem;color:${al.color};">${al.icon} ${al.label}${e.reversed?' <span style="color:var(--sub);font-weight:400;font-size:0.75rem;">(reversed)</span>':''}</div>
+          <div style="font-size:0.82rem;margin-top:0.2rem;"><strong>${esc(e.studentName||'—')}</strong> · ${fmt(e.amount||0)} · ${esc(e.method||'—')}</div>
+          <div style="font-size:0.74rem;color:var(--sub);margin-top:0.15rem;">By: ${esc(e.by||'—')} (${esc(e.role||'—')}) · ${dateStr}</div>
+          ${e.note?`<div style="font-size:0.74rem;color:var(--sub);">${esc(e.note)}</div>`:''}
+          ${e.reversed?`<div style="font-size:0.72rem;color:#a78bfa;margin-top:0.15rem;">↩ Reversed by ${esc(e.reversedBy||'—')}</div>`:''}
+        </div>
+        ${canUndo?`<button onclick="reverseAuditEntry('${e._id}')" style="background:#1e1254;color:#a78bfa;border:1px solid #7c3aed;border-radius:7px;padding:4px 10px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">↩ Reverse</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  sec.innerHTML = `
+    <div style="margin-bottom:1rem;">
+      <div style="font-size:0.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.25rem;">🔒 Proprietor Audit Log</div>
+      <div style="font-size:0.8rem;color:var(--sub);line-height:1.55;">Every fee change across all staff. Entries can be reversed within 7 days. Last 100 entries shown.</div>
+    </div>
+    ${rows}`;
+}
+
+async function reverseAuditEntry(entryId) {
+  if (userRole !== 'Proprietor') return alert('Only the Proprietor can reverse audit entries.');
+  const e = _auditEntries.find(x => x._id === entryId);
+  if (!e) return;
+  if (!e.canReverse) return alert('This entry type cannot be reversed.');
+  if (e.reversed) return alert('Already reversed.');
+  if (!confirm(`↩ Reverse this ${e.action==='bank_reconciled'?'bank statement match':'manual payment'} of ${fmt(e.amount)} for ${e.studentName}?
+
+This will subtract ₦${e.amount.toLocaleString()} from their paid balance and remove the matching payment history entry.`)) return;
+
+  try {
+    // Find student and subtract amount
+    const idx = (SD.students||[]).findIndex(s =>
+      (s.name||'').toLowerCase() === (e.studentName||'').toLowerCase()
+    );
+    if (idx > -1) {
+      SD.students[idx].paid = Math.max(0, (SD.students[idx].paid||0) - (e.amount||0));
+      // Remove the matching payment history entry (closest amount + method match)
+      const hist = SD.students[idx].paymentHistory || [];
+      const matchIdx = hist.findIndex(p => p.amount === e.amount && p.method === e.method);
+      if (matchIdx > -1) hist.splice(matchIdx, 1);
+      SD.students[idx].paymentHistory = hist;
+      await SQ.push('students', SD.students);
+      saveLocal('students', SD.students);
+    }
+    // Mark audit entry as reversed
+    await db.collection('schools').doc(schoolId).collection('audit_log').doc(entryId).update({
+      reversed: true, reversedAt: new Date(), reversedBy: currentStaff?.name || 'Proprietor'
+    });
+    // Log the reversal itself
+    await _logAudit('fee_reversed', e.studentName, e.amount, e.method, `Reversed: ${e.action}`, { originalEntryId: entryId });
+    toast(`↩ ${fmt(e.amount)} reversed for ${e.studentName}.`);
+    renderRevenue(); renderStudentList();
+  } catch(err) { alert('Reversal failed: ' + err.message); }
+}
+// ── End Audit Log ──────────────────────────────────────────────────────────
 
 // ── End Teaching Tools ─────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════
@@ -10627,8 +10755,10 @@ function _renderReceiptSection() {
         </div>
         ${thumb}
         <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-          <button onclick="approveReceipt('${r.id}')" style="flex:1;background:var(--money);color:#fff;border:none;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.82rem;cursor:pointer;">✅ Approve & Mark Paid</button>
-          <button onclick="rejectReceipt('${r.id}')" style="flex:1;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject</button>
+          <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:0.55rem;font-size:0.78rem;color:#93c5fd;margin-bottom:0.35rem;">
+            📊 Fee will update automatically when the bank statement CSV is uploaded and this payment is matched.
+          </div>
+          <button onclick="rejectReceipt('${r.id}')" style="width:100%;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.5rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject (Wrong / Duplicate / Fake)</button>
         </div>
       </div>`;
   }).join('');
@@ -10641,38 +10771,11 @@ function _renderReceiptSection() {
     <div style="height:1px;background:var(--border);margin:1rem 0;"></div>`;
 }
 
-async function approveReceipt(receiptId) {
-  const r = _pendingReceipts.find(x => x.id === receiptId);
-  if (!r) return;
-  if (!confirm(`Approve payment of ₦${Number(r.amount||0).toLocaleString()} for ${r.studentName}?\n\nThis will mark them as paid and remove the receipt from the queue.`)) return;
-
-  try {
-    // Find the student and update their paid amount
-    const idx = (SD.students||[]).findIndex(s =>
-      s.id === r.studentId ||
-      (s.name||'').toLowerCase() === (r.studentName||'').toLowerCase()
-    );
-    if (idx > -1) {
-      SD.students[idx].paid = (SD.students[idx].paid || 0) + Number(r.amount || 0);
-      if (!SD.students[idx].paymentHistory) SD.students[idx].paymentHistory = [];
-      SD.students[idx].paymentHistory.unshift({
-        amount: Number(r.amount), method: 'Bank Transfer (Receipt Verified)',
-        date: new Date().toISOString().split('T')[0],
-        verifiedBy: currentStaff?.name || userRole,
-        parentName: r.parentName
-      });
-      await SQ.push('students', SD.students);
-      saveLocal('students', SD.students);
-    }
-
-    // Mark receipt as approved in Firestore
-    await db.collection('schools').doc(schoolId)
-      .collection('payment_receipts').doc(receiptId)
-      .update({ status: 'approved', approvedAt: new Date(), approvedBy: currentStaff?.name || userRole });
-
-    toast(`✅ Payment approved — ${r.studentName}'s record updated.`);
-    renderRevenue(); renderStudentList();
-  } catch(e) { alert('Error approving: ' + e.message); }
+async function approveReceipt() {
+  // REMOVED — bank statement is the only authority for marking fees as paid.
+  // Receipts are verified automatically when the CSV bank statement is uploaded.
+  alert('Receipts cannot be manually approved.
+Upload the bank statement CSV to verify and match this payment automatically.');
 }
 
 async function rejectReceipt(receiptId) {
@@ -10690,6 +10793,8 @@ async function rejectReceipt(receiptId) {
         rejectedBy: currentStaff?.name || userRole,
         rejectionReason: reason || ''
       });
+    await _logAudit('receipt_rejected', r.studentName, r.amount||0, 'Receipt',
+      `Rejected by ${currentStaff?.name||userRole}. Reason: ${reason||'None given'}`);
     toast(`🗑️ Receipt rejected.`);
   } catch(e) { alert('Error rejecting: ' + e.message); }
 }
@@ -10703,5 +10808,134 @@ function showReceiptFull(receiptId) {
   </body></html>`);
 }
 // ── End Payment Receipt Review ─────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT LOG — Proprietor-only. Every fee change is logged and reversible.
+// Collection: schools/{schoolId}/audit_log
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function _logAudit(action, studentName, amount, method, note, meta) {
+  if (!db || !schoolId) return;
+  try {
+    await db.collection('schools').doc(schoolId).collection('audit_log').add({
+      action,           // 'bank_reconciled'|'manual_payment'|'payment_deleted'|'payment_edited'|'receipt_rejected'|'fee_reversed'
+      studentName: studentName || '—',
+      amount: Number(amount) || 0,
+      method: method || '—',
+      note: note || '',
+      meta: meta || {},
+      by:   currentStaff?.name || userRole || 'Unknown',
+      role: userRole || '—',
+      at:   firebase.firestore.FieldValue.serverTimestamp(),
+      canReverse:  ['bank_reconciled','manual_payment'].includes(action),
+      reversed:    false,
+      reversedAt:  null,
+      reversedBy:  null
+    });
+  } catch(e) { console.warn('[Audit] Log failed:', e.message); }
+}
+
+// ── Audit Log Viewer (Proprietor only) ────────────────────────────────────
+let _auditEntries = [];
+
+function renderAuditLog() {
+  const sec = document.getElementById('sec-audit');
+  if (!sec) return;
+  if (userRole !== 'Proprietor') {
+    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">🔒 Audit log is restricted to Proprietors only.</div>';
+    return;
+  }
+  sec.innerHTML = '<div style="text-align:center;color:var(--sub);padding:2rem;">Loading audit log…</div>';
+  if (!db || !schoolId) { sec.innerHTML = '<div style="padding:2rem;color:var(--sub);">Not connected.</div>'; return; }
+
+  db.collection('schools').doc(schoolId).collection('audit_log')
+    .orderBy('at','desc').limit(100)
+    .onSnapshot(snap => {
+      _auditEntries = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
+      _renderAuditEntries(sec);
+    }, e => { sec.innerHTML = `<div style="padding:2rem;color:var(--danger);">Error: ${e.message}</div>`; });
+}
+
+function _renderAuditEntries(sec) {
+  if (!_auditEntries.length) {
+    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">No audit entries yet.</div>';
+    return;
+  }
+  const now = Date.now();
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const ACTION_LABELS = {
+    bank_reconciled: { icon:'🏦', label:'Bank Statement Match', color:'var(--money)' },
+    manual_payment:  { icon:'✍️', label:'Manual Payment Entry', color:'var(--brand)' },
+    payment_deleted: { icon:'🗑️', label:'Payment Deleted', color:'var(--danger)' },
+    payment_edited:  { icon:'✏️', label:'Payment Edited', color:'var(--warn)' },
+    receipt_rejected:{ icon:'❌', label:'Receipt Rejected', color:'var(--sub)' },
+    fee_reversed:    { icon:'↩️', label:'Fee Reversed', color:'#a78bfa' }
+  };
+
+  const rows = _auditEntries.map(e => {
+    const al  = ACTION_LABELS[e.action] || { icon:'•', label: e.action, color:'var(--sub)' };
+    const ts  = e.at?.toDate ? e.at.toDate() : new Date();
+    const age = now - ts.getTime();
+    const canUndo = e.canReverse && !e.reversed && age < SEVEN_DAYS;
+    const dateStr = ts.toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric'}) + ' ' + ts.toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
+    return `
+    <div style="background:var(--card);border:1px solid ${e.reversed?'var(--border)':'var(--border)'};border-left:3px solid ${e.reversed?'var(--border)':al.color};border-radius:10px;padding:0.85rem;margin-bottom:0.5rem;${e.reversed?'opacity:0.5;':''}" >
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;">
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:0.85rem;color:${al.color};">${al.icon} ${al.label}${e.reversed?' <span style="color:var(--sub);font-weight:400;font-size:0.75rem;">(reversed)</span>':''}</div>
+          <div style="font-size:0.82rem;margin-top:0.2rem;"><strong>${esc(e.studentName||'—')}</strong> · ${fmt(e.amount||0)} · ${esc(e.method||'—')}</div>
+          <div style="font-size:0.74rem;color:var(--sub);margin-top:0.15rem;">By: ${esc(e.by||'—')} (${esc(e.role||'—')}) · ${dateStr}</div>
+          ${e.note?`<div style="font-size:0.74rem;color:var(--sub);">${esc(e.note)}</div>`:''}
+          ${e.reversed?`<div style="font-size:0.72rem;color:#a78bfa;margin-top:0.15rem;">↩ Reversed by ${esc(e.reversedBy||'—')}</div>`:''}
+        </div>
+        ${canUndo?`<button onclick="reverseAuditEntry('${e._id}')" style="background:#1e1254;color:#a78bfa;border:1px solid #7c3aed;border-radius:7px;padding:4px 10px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">↩ Reverse</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  sec.innerHTML = `
+    <div style="margin-bottom:1rem;">
+      <div style="font-size:0.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.25rem;">🔒 Proprietor Audit Log</div>
+      <div style="font-size:0.8rem;color:var(--sub);line-height:1.55;">Every fee change across all staff. Entries can be reversed within 7 days. Last 100 entries shown.</div>
+    </div>
+    ${rows}`;
+}
+
+async function reverseAuditEntry(entryId) {
+  if (userRole !== 'Proprietor') return alert('Only the Proprietor can reverse audit entries.');
+  const e = _auditEntries.find(x => x._id === entryId);
+  if (!e) return;
+  if (!e.canReverse) return alert('This entry type cannot be reversed.');
+  if (e.reversed) return alert('Already reversed.');
+  if (!confirm(`↩ Reverse this ${e.action==='bank_reconciled'?'bank statement match':'manual payment'} of ${fmt(e.amount)} for ${e.studentName}?
+
+This will subtract ₦${e.amount.toLocaleString()} from their paid balance and remove the matching payment history entry.`)) return;
+
+  try {
+    // Find student and subtract amount
+    const idx = (SD.students||[]).findIndex(s =>
+      (s.name||'').toLowerCase() === (e.studentName||'').toLowerCase()
+    );
+    if (idx > -1) {
+      SD.students[idx].paid = Math.max(0, (SD.students[idx].paid||0) - (e.amount||0));
+      // Remove the matching payment history entry (closest amount + method match)
+      const hist = SD.students[idx].paymentHistory || [];
+      const matchIdx = hist.findIndex(p => p.amount === e.amount && p.method === e.method);
+      if (matchIdx > -1) hist.splice(matchIdx, 1);
+      SD.students[idx].paymentHistory = hist;
+      await SQ.push('students', SD.students);
+      saveLocal('students', SD.students);
+    }
+    // Mark audit entry as reversed
+    await db.collection('schools').doc(schoolId).collection('audit_log').doc(entryId).update({
+      reversed: true, reversedAt: new Date(), reversedBy: currentStaff?.name || 'Proprietor'
+    });
+    // Log the reversal itself
+    await _logAudit('fee_reversed', e.studentName, e.amount, e.method, `Reversed: ${e.action}`, { originalEntryId: entryId });
+    toast(`↩ ${fmt(e.amount)} reversed for ${e.studentName}.`);
+    renderRevenue(); renderStudentList();
+  } catch(err) { alert('Reversal failed: ' + err.message); }
+}
+// ── End Audit Log ──────────────────────────────────────────────────────────
 
 // ── End Teaching Tools ─────────────────────────────────────────────────────
