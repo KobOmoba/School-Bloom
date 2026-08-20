@@ -547,25 +547,11 @@ function getHFKey() { return window.HF_API_KEY || localStorage.getItem(HF_KEY_ST
 
 // Keys sync from Firestore admin_settings/main — survives browsing-data clears
 async function _fetchGroqKeyFromFirestore() {
-  // Reads directly from Firestore now — no external proxy. public_ocr_keys/main
-  // holds ONLY the OCR keys (never anything sensitive), mirrored there by the
-  // portal whenever Bayo updates a key in Settings.
+  // GroqRotator loads all keys (groqApiKey…groqApiKey5) + HF key in one shot
   try {
     if (!db) return;
-    const doc = await db.collection('public_ocr_keys').doc('main').get();
-    if (!doc.exists) return; // fall back to whatever's cached in localStorage
-    const d = doc.data();
-    if (d.groqApiKey) {
-      window.GROQ_API_KEY = d.groqApiKey;
-      localStorage.setItem(GROQ_KEY_STORAGE, d.groqApiKey);
-      console.log('✅ Groq key loaded from Firestore');
-    }
-    if (d.hfApiKey) {
-      window.HF_API_KEY = d.hfApiKey;
-      localStorage.setItem(HF_KEY_STORAGE, d.hfApiKey);
-      console.log('✅ HF key loaded from Firestore');
-    }
-  } catch(e) { /* offline — use whatever is in localStorage */ }
+    await GroqRotator.reload();
+  } catch(e) { /* offline — GroqRotator falls back to cached key */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
