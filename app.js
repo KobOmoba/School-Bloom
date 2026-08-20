@@ -568,6 +568,179 @@ async function _fetchGroqKeyFromFirestore() {
   } catch(e) { /* offline — use whatever is in localStorage */ }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GroqRotator — Multi-key round-robin with Retry-After cooldown tracking
+// Reads groqApiKey, groqApiKey2 … groqApiKey5 from public_ocr_keys/main
+// All Groq calls route through GroqRotator.vision() or GroqRotator.text()
+// ═══════════════════════════════════════════════════════════════════════════
+const GroqRotator = (() => {
+  let _keys = [];
+  let _idx  = 0;
+  let _cd   = {};           // key → cooldown expiry timestamp
+  let _loaded  = false;
+  let _loading = null;      // in-flight promise dedup
+
+  async function _load() {
+    if (_loaded)  return;
+    if (_loading) return _loading;
+    _loading = (async () => {
+      try {
+        const snap = await db.collection('public_ocr_keys').doc('main').get();
+        if (snap.exists) {
+          const d = snap.data();
+          const found = [];
+          ['groqApiKey','groqApiKey2','groqApiKey3','groqApiKey4','groqApiKey5'].forEach(k => {
+            if (d[k] && d[k].startsWith('gsk_') && !found.includes(d[k])) found.push(d[k]);
+          });
+          if (Array.isArray(d.groqKeys)) {
+            d.groqKeys.forEach(k => { if (k && !found.includes(k)) found.push(k); });
+          }
+          if (found.length) {
+            _keys = found;
+            // Keep first key in legacy globals for any call sites not yet migrated
+            window.GROQ_API_KEY = _keys[0];
+            const store = typeof GROQ_KEY_STORAGE !== 'undefined' ? GROQ_KEY_STORAGE : 'groq_key';
+            localStorage.setItem(store, _keys[0]);
+            console.log(`[GroqRotator] ${_keys.length} key(s) ready`);
+          }
+          if (d.hfApiKey) {
+            window.HF_API_KEY = d.hfApiKey;
+            const hs = typeof HF_KEY_STORAGE !== 'undefined' ? HF_KEY_STORAGE : 'hf_key';
+            localStorage.setItem(hs, d.hfApiKey);
+          }
+        }
+      } catch(e) {
+        // Offline — fall back to whatever is already in the legacy globals
+        const cached = window.GROQ_API_KEY
+          || (typeof GROQ_KEY_STORAGE !== 'undefined' && localStorage.getItem(GROQ_KEY_STORAGE));
+        if (cached && !_keys.length) _keys = [cached];
+      }
+      _loaded  = true;
+      _loading = null;
+    })();
+    return _loading;
+  }
+
+  function _pick() {
+    if (!_keys.length) return { key: null, wait: 0 };
+    const now = Date.now();
+    for (let i = 0; i < _keys.length; i++) {
+      const idx = (_idx + i) % _keys.length;
+      const k   = _keys[idx];
+      if (now >= (_cd[k] || 0)) {
+        _idx = (idx + 1) % _keys.length;   // advance pointer for next caller
+        return { key: k, wait: 0 };
+      }
+    }
+    // Every key is cooling — return the one that wakes soonest
+    const best = _keys.reduce((a,k) => (_cd[k]||0) < (_cd[a]||0) ? k : a, _keys[0]);
+    return { key: best, wait: Math.max(0, (_cd[best]||0) - Date.now()) };
+  }
+
+  function _setCooldown(key, retryAfterHeader) {
+    const secs = Math.min(Math.max(parseFloat(retryAfterHeader || '30'), 5), 120);
+    _cd[key] = Date.now() + secs * 1000;
+    console.warn(`[GroqRotator] Key …${key.slice(-6)} → cooldown ${secs}s`);
+  }
+
+  async function _call(body) {
+    await _load();
+    if (!_keys.length) throw new Error('No Groq API keys configured — add them in Portal › Settings.');
+    const maxTries = _keys.length + 2;
+    for (let t = 0; t < maxTries; t++) {
+      const { key, wait } = _pick();
+      if (wait > 0) {
+        console.warn(`[GroqRotator] All keys cooling — waiting ${Math.ceil(wait/1000)}s`);
+        await new Promise(r => setTimeout(r, wait + 300));
+      }
+      let resp;
+      try {
+        resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+          body: JSON.stringify(body)
+        });
+      } catch(netErr) {
+        throw new Error('Network error reaching Groq: ' + netErr.message);
+      }
+      if (resp.status === 429 || resp.status === 529 || resp.status === 503) {
+        _setCooldown(key, resp.headers.get('retry-after'));
+        continue;   // immediately try the next key
+      }
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}));
+        throw new Error(e?.error?.message || `Groq ${resp.status}`);
+      }
+      // Proactive: if only 1 request remaining on this key, give it a short buffer
+      const rem = resp.headers.get('x-ratelimit-remaining-requests');
+      if (rem !== null && parseInt(rem) < 2) _cd[key] = Date.now() + 8000;
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content || '';
+    }
+    throw new Error('All Groq API keys are currently rate-limited. Please wait a moment and try again.');
+  }
+
+  const _model = () => (typeof GROQ_OCR_MODEL !== 'undefined' ? GROQ_OCR_MODEL : 'qwen/qwen3.6-27b');
+
+  return {
+    // Force a fresh key reload from Firestore
+    reload() { _loaded = false; _loading = null; _keys = []; return _load(); },
+
+    // How many keys are loaded
+    keyCount() { return _keys.length; },
+
+    // Status for portal/debug display
+    status() {
+      const now = Date.now();
+      return _keys.map((k, i) => ({
+        n: i + 1,
+        tail: '…' + k.slice(-6),
+        ready: now >= (_cd[k] || 0),
+        coolSecs: Math.max(0, Math.ceil(((_cd[k] || 0) - now) / 1000))
+      }));
+    },
+
+    // Text / chat completion — teaching tools, finance AI, any non-vision call
+    text(prompt, systemMsg, opts = {}) {
+      return _call({
+        model: opts.model || _model(),
+        max_tokens: opts.max_tokens || 4096,
+        reasoning_format: opts.reasoning_format || 'hidden',
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+        ...(opts.response_format   ? { response_format: opts.response_format } : {}),
+        messages: [
+          ...(systemMsg ? [{ role: 'system', content: systemMsg }] : []),
+          { role: 'user', content: prompt }
+        ]
+      });
+    },
+
+    // Vision / image call — OCR, ledger scan, signboard, register, score sheets
+    vision(prompt, base64, mime, opts = {}) {
+      return _call({
+        model: opts.model || _model(),
+        max_tokens: opts.max_tokens || 1600,
+        reasoning_format: opts.reasoning_format || 'hidden',
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+        ...(opts.response_format   ? { response_format: opts.response_format } : {}),
+        messages: [
+          ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + base64 } },
+              { type: 'text', text: prompt }
+            ]
+          }
+        ]
+      });
+    }
+  };
+})();
+// ── End GroqRotator ─────────────────────────────────────────────────────────
+
+
+
 async function groqVisionOCR(base64, mime, _retry) {
   if (_retry === undefined) _retry = 0;
   const apiKey = getGroqKey();
