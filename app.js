@@ -3136,10 +3136,21 @@ function togglePosFields() {
 }
 
 async function recordPayment(idx) {
-  const amt = parseFloat($('pay-amt')?.value); if (!amt || amt <= 0) return alert('Enter valid amount.');
+  const amt = parseFloat($('pay-amt')?.value); if (!amt || amt <= 0) return alert('Enter a valid amount.');
+  const method    = $('pay-method')?.value || 'Cash';
+  const posRRN    = ($('pay-pos-rrn')?.value || '').trim();
+  const posTID    = ($('pay-pos-terminal')?.value || '').trim();
+  if (method === 'POS' && !posRRN) {
+    return alert('POS Receipt Number (RRN) is required.\nIt is printed on the POS slip — labelled RRN, Receipt No., or Ref No.');
+  }
   SD.students[idx].paid = (SD.students[idx].paid || 0) + amt;
   if (!SD.students[idx].paymentHistory) SD.students[idx].paymentHistory = [];
-  SD.students[idx].paymentHistory.unshift({ amount: amt, method: $('pay-method')?.value || 'Cash', date: $('pay-date')?.value || new Date().toISOString().split('T')[0], by: userRole });
+  const histEntry = {
+    amount: amt, method, date: $('pay-date')?.value || new Date().toISOString().split('T')[0], by: userRole,
+    ...(posRRN ? { posRRN } : {}),
+    ...(posTID ? { posTerminal: posTID } : {})
+  };
+  SD.students[idx].paymentHistory.unshift(histEntry);
   const v2Id = SD.students[idx]?._v2Id;
   if (schoolId && v2Id && !SD.config?._demo) {
     try {
@@ -3154,7 +3165,10 @@ async function recordPayment(idx) {
   await _logAudit('manual_payment', SD.students[idx].name, amt,
     method,
     `${method === 'POS' ? `POS · RRN: ${posRRN}${posTID ? ' · TID: ' + posTID : ''}` : 'Manual entry'} by ${currentStaff?.name || userRole}`);
-  if ($('pay-amt')) $('pay-amt').value = '';
+  if ($('pay-amt'))       $('pay-amt').value = '';
+  if ($('pay-pos-rrn'))   $('pay-pos-rrn').value = '';
+  if ($('pay-pos-terminal')) $('pay-pos-terminal').value = '';
+  togglePosFields();
   renderTab('fees'); renderBanner(); renderRevenue();
   alert(`✅ ${fmt(amt)} recorded for ${SD.students[idx].name}`);
 }
