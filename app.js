@@ -2534,7 +2534,7 @@ function renderStudentList() {
       const name = currentStaff?.name || userRole;
       const classInfo = assignedCls ? ` · ${assignedCls} only` : '';
       bannerEl.style.display = 'flex';
-      bannerEl.innerHTML = `<span style="font-size:0.78rem;color:var(--sub);">👤 ${name} <strong>${userRole}</strong>${classInfo}</span>`;
+      bannerEl.innerHTML = `<span style="font-size:0.78rem;color:var(--sub);">👤 ${esc(name)} <strong>${esc(userRole)}</strong>${esc(classInfo)}</span>`;
     } else {
       bannerEl.style.display = 'none';
     }
