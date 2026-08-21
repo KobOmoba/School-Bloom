@@ -1314,19 +1314,6 @@ function toggleEye(inputId, btn) {
   </div>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-<script src="app.js"></script>
-<script>
-// Show audit nav button for Proprietor after login
-(function _watchAuditNav() {
-  const orig = window.startApp;
-  if (typeof orig === 'function') return; // wait for app.js to define it
-  setTimeout(_watchAuditNav, 200);
-})();
-</script>
-</body>
-</html>
 <section id="sec-audit" class="sec">
   <!-- Rendered by renderAuditLog() — Proprietor only -->
 </section>
@@ -1867,7 +1854,7 @@ function toggleEye(inputId, btn) {
     </div>
 
 
-<script src="app.js?v=20260818-rotator-fix"></script>
+<script src="app.js?v=20260820-security"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
