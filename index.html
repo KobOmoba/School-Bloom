@@ -86,6 +86,36 @@
 .profile-tab.active {
   background: var(--brand); color: #fff; border-color: var(--brand);
 }
+
+/* ── Login value props ─────────────────────────────────── */
+.login-props { display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.85rem; }
+.lp-item { display:flex; align-items:center; gap:0.55rem; font-size:0.76rem; color:var(--sub); background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:7px; padding:0.38rem 0.7rem; }
+.lp-item span { color:var(--text); font-weight:500; }
+
+/* ── Home dashboard cards ──────────────────────────────── */
+.home-grid { display:grid; gap:0.75rem; margin-bottom:1rem; }
+.home-grid-2 { grid-template-columns:1fr 1fr; }
+.hc { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:1.1rem 1.2rem; cursor:pointer; transition:.15s; }
+.hc:hover { border-color:var(--brand); transform:translateY(-1px); }
+.hc-big { padding:1.5rem; }
+.hc-icon { font-size:1.8rem; margin-bottom:0.5rem; }
+.hc-big .hc-icon { font-size:2.5rem; margin-bottom:0.75rem; }
+.hc-label { font-size:0.65rem; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; color:var(--sub); margin-bottom:0.2rem; }
+.hc-title { font-family:'Syne',sans-serif; font-weight:800; font-size:1rem; margin-bottom:0.15rem; }
+.hc-big .hc-title { font-size:1.25rem; }
+.hc-sub { font-size:0.78rem; color:var(--sub); line-height:1.55; }
+.hc-val { font-family:'Syne',sans-serif; font-weight:800; font-size:1.4rem; color:var(--money); }
+.hc-danger .hc-val { color:var(--danger); }
+.hc-purple { border-color:rgba(124,58,237,0.3); background:rgba(124,58,237,0.06); }
+.hc-purple .hc-title { color:#c4b5fd; }
+.hc-orange { border-color:rgba(249,115,22,0.3); background:rgba(249,115,22,0.06); }
+.hc-orange .hc-title { color:#fdba74; }
+.hc-green { border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.06); }
+.hc-green .hc-title { color:#6ee7b7; }
+.home-greeting { font-family:'Syne',sans-serif; font-size:1.1rem; font-weight:800; margin-bottom:0.25rem; }
+.home-date { font-size:0.78rem; color:var(--sub); margin-bottom:1.25rem; }
+.home-section-label { font-size:0.65rem; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; color:var(--sub); margin:1rem 0 0.5rem; }
+
 </style>
 <script>
 // Eye toggle — defined here so it works even if app.js has an error
@@ -128,7 +158,12 @@ function toggleEye(inputId, btn) {
 <div id="login" class="login" style="display:flex;">
   <div class="lbox">
     <div class="lbox-logo">Edu-BLOOM</div>
-    <div class="lbox-sub" style="font-weight:800;letter-spacing:0.04em;color:#a5f3fc;">GIVE YOUR SCHOOL THE PREMIUM EXPERIENCE</div>
+    <div class="lbox-sub" style="font-weight:700;letter-spacing:0.04em;color:#a5f3fc;margin-bottom:0.85rem;">GIVE YOUR SCHOOL THE PREMIUM EXPERIENCE</div>
+    <div class="login-props">
+      <div class="lp-item">📖 <span>AI lesson note for any subject in 30 seconds</span></div>
+      <div class="lp-item">🔒 <span>Proprietor fraud protection only you can see</span></div>
+      <div class="lp-item">💰 <span>Fee collection verified by your bank statement</span></div>
+    </div>
     <label>School ID</label>
     <input type="text" id="l-school" placeholder="e.g. BLOOM-ABK0042" autocapitalize="characters" 
       oninput="this.value=this.value.toUpperCase()" 
@@ -242,7 +277,9 @@ function toggleEye(inputId, btn) {
   <main class="wrap">
 
     <!-- 1. REVENUE -->
-    <section id="sec-revenue" class="sec on">
+    <section id="sec-home" class="sec"></section>
+
+    <section id="sec-revenue" class="sec">
  <div id="pos-summary"></div>
   <div id="receipt-review-section"></div>
 
@@ -1196,18 +1233,12 @@ function toggleEye(inputId, btn) {
   </div><!-- /main -->
 
   <nav id="bottomnav">
-    <button class="nlink on" data-t="dashboard" onclick="go('dashboard')"><span class="ni">🏠</span>Home</button>
-    <button class="nlink" data-t="students"  onclick="go('students')"><span class="ni">🎓</span>Students</button>
-    <button class="nlink" data-t="scores"    onclick="go('scores')"><span class="ni">📝</span>Scores</button>
-    <button class="nlink" data-t="fees"      onclick="go('fees')"><span class="ni">💰</span>Fees</button>
-    <button class="nlink" data-t="guarantee" onclick="go('guarantee')"><span class="ni">🏆</span>Guarantee</button>
-    <button class="nlink" data-t="attendance"onclick="go('attendance')"><span class="ni">📋</span>Attendance</button>
-    <button class="nlink" data-t="staff"     onclick="go('staff')"><span class="ni">👥</span>Staff</button>
-    <button class="nlink" data-t="expenses"  onclick="go('expenses')"><span class="ni">📉</span>Expenses</button>
-    <button class="nlink" data-t="lessons"   onclick="go('lessons')"><span class="ni">📖</span>Lessons</button>
-    <button class="nlink" data-t="questions" onclick="go('questions')"><span class="ni">❓</span>Questions</button>
-    <button class="nlink" data-t="settings"  onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
-  </nav>
+<button class="nlink on" data-t="home"     onclick="go('home')"><span class="ni">🏠</span><span class="nl">Home</span></button>
+<button class="nlink"    data-t="lessons"  onclick="go('lessons')"><span class="ni">📖</span><span class="nl">Lessons</span></button>
+<button class="nlink"    data-t="students" onclick="go('students')"><span class="ni">🎓</span><span class="nl">Students</span></button>
+<button class="nlink"    data-t="revenue"  onclick="go('revenue')"><span class="ni">💰</span><span class="nl">Revenue</span></button>
+<button class="nlink"    data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span><span class="nl">More</span></button>
+</nav>
 </div>
 
 <!-- MODALS -->
@@ -1622,39 +1653,47 @@ function toggleEye(inputId, btn) {
       </div>
       <span id="nav-school-name">Edu-BLOOM</span>
     </div>
-    <div class="nav-group-label">STUDENTS</div>
-    <button class="nlink on" data-t="revenue" onclick="go('revenue')"><span class="ni">💰</span>Revenue<span id="receipt-badge" style="display:none;background:#f59e0b;color:#000;border-radius:50%;min-width:16px;height:16px;font-size:0.65rem;font-weight:800;align-items:center;justify-content:center;margin-left:4px;padding:0 3px;"></span></button>
-    <button class="nlink" data-t="students" onclick="go('students')"><span class="ni">🎓</span>Students</button>
-    <button class="nlink" data-t="profile" onclick="go('profile')"><span class="ni">👤</span>Profile</button>
-    <button class="nlink" data-t="scores" onclick="go('scores')"><span class="ni">📝</span>Scores</button>
-    <button class="nlink" data-t="attendance" onclick="go('attendance')"><span class="ni">📅</span>Attendance</button>
-    <button class="nlink" data-t="scorecard" onclick="go('scorecard')"><span class="ni">📋</span>Report Card</button>
+    <div class="nav-group-label">TEACHING TOOLS</div>
+    <button class="nlink" data-t="lessons"   onclick="go('lessons')"><span class="ni">📖</span>Lesson Notes</button>
+    <button class="nlink" data-t="questions" onclick="go('questions')"><span class="ni">❓</span>CA & Exams</button>
 
-    <div class="nav-group-label">STAFF & FINANCE</div>
-    <button class="nlink" data-t="staff" onclick="go('staff')"><span class="ni">👥</span>Staff</button>
-    <button class="nlink" data-t="payroll" onclick="go('payroll')"><span class="ni">💸</span>Payroll</button>
+    <div class="nav-group-label">FEES & FINANCE</div>
+    <button class="nlink" data-t="revenue"  onclick="go('revenue')"><span class="ni">💰</span>Revenue<span id="receipt-badge" style="display:none;background:#f59e0b;color:#000;border-radius:50%;min-width:16px;height:16px;font-size:0.65rem;font-weight:800;align-items:center;justify-content:center;margin-left:4px;padding:0 3px;"></span></button>
     <button class="nlink" data-t="expenses" onclick="go('expenses')"><span class="ni">📉</span>Expenses</button>
-    <button class="nlink" data-t="finance" onclick="go('finance')"><span class="ni">🤖</span>Finance AI</button>
+    <button class="nlink" data-t="payroll"  onclick="go('payroll')"><span class="ni">💸</span>Payroll</button>
+    <button class="nlink" data-t="finance"  onclick="go('finance')"><span class="ni">🤖</span>Finance AI</button>
+
+    <div class="nav-group-label">STUDENTS</div>
+    <button class="nlink" data-t="students"   onclick="go('students')"><span class="ni">🎓</span>Students</button>
+    <button class="nlink" data-t="profile"    onclick="go('profile')"><span class="ni">👤</span>Student Profile</button>
+    <button class="nlink" data-t="scores"     onclick="go('scores')"><span class="ni">📝</span>Scores</button>
+    <button class="nlink" data-t="attendance" onclick="go('attendance')"><span class="ni">📅</span>Attendance</button>
+    <button class="nlink" data-t="scorecard"  onclick="go('scorecard')"><span class="ni">📋</span>Report Cards</button>
+
+    <div class="nav-group-label">STAFF</div>
+    <button class="nlink" data-t="staff" onclick="go('staff')"><span class="ni">👥</span>Staff</button>
+
+    <div class="nav-group-label">SAFETY & COMMS</div>
+    <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🛡️</span>Safety</button>
+    <button class="nlink" data-t="comms"    onclick="go('comms')"><span class="ni">📢</span>Communications</button>
+    <button class="nlink" data-t="ai"       onclick="go('ai');renderMorningAlertStatus();"><span class="ni">🔔</span>Alerts & Agents</button>
 
     <div class="nav-group-label">INSIGHTS</div>
     <button class="nlink" data-t="analytics" onclick="go('analytics')"><span class="ni">📊</span>Analytics</button>
-    <button class="nlink" data-t="security" onclick="go('security')"><span class="ni">🔒</span>Security</button>
-    <button class="nlink" data-t="ai" onclick="go('ai');renderMorningAlertStatus();"><span class="ni">🤖</span>Agents</button>
-    <button class="nlink" data-t="opps" onclick="go('opps')"><span class="ni">🔍</span>Scout</button>
+    <button class="nlink" data-t="opps"      onclick="go('opps')"><span class="ni">🔍</span>Opportunity Scout</button>
+    <button class="nlink" data-t="alumni"    onclick="go('alumni')"><span class="ni">🎓</span>Alumni</button>
 
     <div class="nav-group-label">EXTRAS</div>
     <button class="nlink" data-t="sports" onclick="go('sports')"><span class="ni">⚽</span>Sports</button>
-    <button class="nlink" data-t="arts" onclick="go('arts')"><span class="ni">🎨</span>Arts</button>
-    <button class="nlink" data-t="music" onclick="go('music')"><span class="ni">🎵</span>Music</button>
+    <button class="nlink" data-t="arts"   onclick="go('arts')"><span class="ni">🎨</span>Arts</button>
+    <button class="nlink" data-t="music"  onclick="go('music')"><span class="ni">🎵</span>Music</button>
     <button class="nlink" data-t="health" onclick="go('health')"><span class="ni">🏥</span>Health</button>
-    <button class="nlink" data-t="alumni" onclick="go('alumni')"><span class="ni">🎓</span>Alumni</button>
-    <button class="nlink" data-t="comms" onclick="go('comms')"><span class="ni">📢</span>Comms</button>
+
+    <div class="nav-group-label">🔒 PROPRIETOR ONLY</div>
+    <button class="nlink" data-t="audit" id="nav-audit" style="display:none;" onclick="go('audit')"><span class="ni">📋</span>Audit Log</button>
 
     <div class="nav-group-label">SYSTEM</div>
-    <button class="nlink" data-t="support" onclick="go('support')"><span class="ni">❓</span>Support</button>
-<button class="nlink" data-t="lessons"   onclick="go('lessons')"><span class="ni">📖</span><span class="nl">Lessons</span></button>
-<button class="nlink" data-t="questions" onclick="go('questions')"><span class="ni">❓</span><span class="nl">Questions</span></button>
-    <button class="nlink" data-t="audit" id="nav-audit" style="display:none;" onclick="go('audit')"><span class="ni">🔒</span><span class="nl">Audit</span></button>
+    <button class="nlink" data-t="support"  onclick="go('support')"><span class="ni">❓</span>Help & Support</button>
     <button class="nlink" data-t="settings" onclick="go('settings')"><span class="ni">⚙️</span>Settings</button>
   </nav>
 </div>
@@ -1854,7 +1893,7 @@ function toggleEye(inputId, btn) {
     </div>
 
 
-<script src="app.js?v=20260820-security"></script>
+<script src="app.js?v=20260818-makeover"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
