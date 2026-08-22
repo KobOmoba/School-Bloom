@@ -1344,13 +1344,13 @@ function defaultOpps() {
 const ROLE_TABS = {
   'Principal':       null,
   'Proprietor':      null,   // Same full access as Principal
-  'Class Teacher':   new Set(['students','sports','arts','music','health','comms','security','support']),
-  'Subject Teacher': new Set(['students','sports','arts','music','health','comms','security','support','scorecard']),
-  'Bursar':          new Set(['revenue','students','expenses','finance','comms','analytics','support']),
+  'Class Teacher':   new Set(['home','students','sports','arts','music','health','comms','security','support','lessons','questions']),
+  'Subject Teacher': new Set(['home','students','sports','arts','music','health','comms','security','support','scorecard','lessons','questions']),
+  'Bursar':          new Set(['home','revenue','students','expenses','finance','comms','analytics','support']),
 };
 const ROLE_DEFAULT_TAB = {
-  'Principal': 'revenue', 'Proprietor': 'revenue', 'Bursar': 'revenue',
-  'Class Teacher': 'students', 'Subject Teacher': 'scorecard'
+  'Principal': 'home', 'Proprietor': 'home', 'Bursar': 'home',
+  'Class Teacher': 'home', 'Subject Teacher': 'home'
 };
 
 // Normalise legacy role strings → canonical ROLE_TABS keys
@@ -1996,12 +1996,265 @@ function startApp() {
 
 // ── Navigation ─────────────────────────────────────────────────────────
 // Tap logo or school name anywhere → back to dashboard (revenue)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROLE-AWARE HOME DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════
+function renderHome() {
+  const sec = document.getElementById('sec-home');
+  if (!sec) return;
+
+  const role   = userRole || 'Principal';
+  const name   = currentStaff?.name || role;
+  const school = SD?.config?.name || SD?.schoolName || 'Your School';
+  const now    = new Date();
+  const dayStr = now.toLocaleDateString('en-NG',{weekday:'long',day:'numeric',month:'long'});
+
+  const s    = SD?.students || [];
+  const totalFee  = s.reduce((t,x) => t + (x.totalFee||0), 0);
+  const collected = s.reduce((t,x) => t + (x.paid||0), 0);
+  const owe       = totalFee - collected;
+  const pct       = totalFee > 0 ? Math.round((collected/totalFee)*100) : 0;
+  const pending   = typeof _pendingReceipts !== 'undefined' ? _pendingReceipts.length : 0;
+
+  // POS today
+  const today = now.toISOString().split('T')[0];
+  const posToday = [];
+  s.forEach(st => (st.paymentHistory||[]).forEach(p => {
+    if (p.method === 'POS' && p.date === today) posToday.push(p);
+  }));
+  const posTotal = posToday.reduce((t,p) => t+(p.amount||0), 0);
+
+  // Greeting
+  const hr = now.getHours();
+  const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+
+  const header = `
+    <div class="home-greeting">${greet}, ${name.split(' ')[0]}. 👋</div>
+    <div class="home-date">${dayStr} · ${school}</div>`;
+
+  // ── Proprietor ──────────────────────────────────────────────────────────
+  if (role === 'Proprietor') {
+    sec.innerHTML = header + `
+      <div class="home-section-label">Your Protected View</div>
+      <div class="home-grid">
+        <div class="hc hc-purple" onclick="go('audit')" style="cursor:pointer;">
+          <div class="hc-icon">📋</div>
+          <div class="hc-label">Proprietor Audit Log</div>
+          <div class="hc-title">Every fee change. Only you see this.</div>
+          <div class="hc-sub">Full log of all payments, edits, and deletions — with 7-day reversal.</div>
+        </div>
+      </div>
+      <div class="home-grid home-grid-2">
+        <div class="hc ${pending>0?'hc-orange':''}" onclick="go('revenue')">
+          <div class="hc-icon">📬</div>
+          <div class="hc-label">Pending Receipts</div>
+          <div class="hc-val">${pending}</div>
+          <div class="hc-sub">${pending>0?'Awaiting bank statement verification':'Nothing pending'}</div>
+        </div>
+        <div class="hc ${posTotal>0?'hc-green':''}" onclick="go('revenue')">
+          <div class="hc-icon">🖨️</div>
+          <div class="hc-label">POS Today</div>
+          <div class="hc-val">${posTotal>0?fmt(posTotal):'₦0'}</div>
+          <div class="hc-sub">${posToday.length} POS transaction${posToday.length===1?'':'s'} recorded</div>
+        </div>
+      </div>
+      <div class="home-section-label">Fee Overview</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc hc-danger" onclick="go('revenue')">
+          <div class="hc-icon">📊</div>
+          <div class="hc-label">Outstanding</div>
+          <div class="hc-val" style="color:var(--danger);">${fmt(owe)}</div>
+          <div class="hc-sub">${100-pct}% uncollected · tap to view</div>
+        </div>
+        <div class="hc hc-green" onclick="go('revenue')">
+          <div class="hc-icon">💰</div>
+          <div class="hc-label">Collected</div>
+          <div class="hc-val">${fmt(collected)}</div>
+          <div class="hc-sub">${pct}% of total expected</div>
+        </div>
+      </div>
+      <div class="home-section-label">Quick Access</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc" onclick="go('students')"><div class="hc-icon">🎓</div><div class="hc-title">Students (${s.length})</div></div>
+        <div class="hc" onclick="go('staff')"><div class="hc-icon">👥</div><div class="hc-title">Staff</div></div>
+        <div class="hc" onclick="go('analytics')"><div class="hc-icon">📊</div><div class="hc-title">Analytics</div></div>
+        <div class="hc" onclick="go('settings')"><div class="hc-icon">⚙️</div><div class="hc-title">Settings</div></div>
+      </div>`;
+    return;
+  }
+
+  // ── Principal ────────────────────────────────────────────────────────────
+  if (role === 'Principal') {
+    sec.innerHTML = header + `
+      <div class="home-section-label">Today's Overview</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc hc-danger" onclick="go('revenue')">
+          <div class="hc-icon">💰</div>
+          <div class="hc-label">Outstanding Fees</div>
+          <div class="hc-val" style="color:var(--danger);">${fmt(owe)}</div>
+          <div class="hc-sub">${100-pct}% of total not yet collected</div>
+        </div>
+        <div class="hc ${pending>0?'hc-orange':''}" onclick="go('revenue')">
+          <div class="hc-icon">📬</div>
+          <div class="hc-label">Receipts Pending</div>
+          <div class="hc-val">${pending}</div>
+          <div class="hc-sub">${pending>0?'Bank statement needed to verify':'All clear'}</div>
+        </div>
+      </div>
+      <div class="home-grid home-grid-2">
+        <div class="hc" onclick="go('students')">
+          <div class="hc-icon">🎓</div>
+          <div class="hc-label">Total Students</div>
+          <div class="hc-val" style="color:var(--brand);">${s.length}</div>
+        </div>
+        <div class="hc hc-green" onclick="go('revenue')">
+          <div class="hc-icon">✅</div>
+          <div class="hc-label">Collection Rate</div>
+          <div class="hc-val">${pct}%</div>
+        </div>
+      </div>
+      <div class="home-section-label">Quick Actions</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc hc-purple" onclick="go('lessons')"><div class="hc-icon">📖</div><div class="hc-title">Lesson Notes</div><div class="hc-sub">AI-generated for any subject</div></div>
+        <div class="hc hc-purple" onclick="go('questions')"><div class="hc-icon">❓</div><div class="hc-title">CA & Exams</div><div class="hc-sub">Full paper with answer key</div></div>
+        <div class="hc" onclick="go('students')"><div class="hc-icon">🎓</div><div class="hc-title">Students</div></div>
+        <div class="hc" onclick="go('staff')"><div class="hc-icon">👥</div><div class="hc-title">Staff</div></div>
+        <div class="hc" onclick="go('attendance')"><div class="hc-icon">📅</div><div class="hc-title">Attendance</div></div>
+        <div class="hc" onclick="go('analytics')"><div class="hc-icon">📊</div><div class="hc-title">Analytics</div></div>
+      </div>`;
+    return;
+  }
+
+  // ── Bursar ───────────────────────────────────────────────────────────────
+  if (role === 'Bursar') {
+    sec.innerHTML = header + `
+      <div class="home-section-label">Fee Status</div>
+      <div class="home-grid">
+        <div class="hc hc-danger" onclick="go('revenue')">
+          <div class="hc-icon">💰</div>
+          <div class="hc-label">Outstanding Fees — ${SD?.config?.currentTerm||'This Term'}</div>
+          <div class="hc-val" style="color:var(--danger);">${fmt(owe)}</div>
+          <div class="hc-sub">Collected: ${fmt(collected)} · ${pct}% — tap to view details and send reminders</div>
+        </div>
+      </div>
+      <div class="home-grid home-grid-2">
+        <div class="hc ${pending>0?'hc-orange':''}" onclick="go('revenue')">
+          <div class="hc-icon">📬</div>
+          <div class="hc-label">Pending Receipts</div>
+          <div class="hc-val">${pending}</div>
+          <div class="hc-sub">${pending>0?'Upload bank statement to verify':'Nothing pending'}</div>
+        </div>
+        <div class="hc ${posTotal>0?'hc-green':''}" onclick="go('revenue')">
+          <div class="hc-icon">🖨️</div>
+          <div class="hc-label">POS Today</div>
+          <div class="hc-val">${posTotal>0?fmt(posTotal):'₦0'}</div>
+          <div class="hc-sub">${posToday.length} transaction${posToday.length===1?'':'s'} — cross-check terminal</div>
+        </div>
+      </div>
+      <div class="home-section-label">Quick Actions</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc hc-green" onclick="go('revenue')"><div class="hc-icon">🏦</div><div class="hc-title">Upload Bank Statement</div><div class="hc-sub">CSV reconciliation</div></div>
+        <div class="hc" onclick="go('students')"><div class="hc-icon">🎓</div><div class="hc-title">Student Fees</div><div class="hc-sub">View & record payments</div></div>
+        <div class="hc" onclick="go('expenses')"><div class="hc-icon">📉</div><div class="hc-title">Expenses</div></div>
+        <div class="hc" onclick="go('finance')"><div class="hc-icon">🤖</div><div class="hc-title">Finance AI</div></div>
+      </div>`;
+    return;
+  }
+
+  // ── Class Teacher ─────────────────────────────────────────────────────────
+  if (role === 'Class Teacher') {
+    const cls = currentStaff?.assignedClass || 'your class';
+    const classStudents = s.filter(x => (x.class||'').toLowerCase() === cls.toLowerCase());
+    sec.innerHTML = header + `
+      <div class="home-section-label">Teaching Tools</div>
+      <div class="home-grid">
+        <div class="hc hc-big hc-purple" onclick="go('lessons')" style="text-align:center;">
+          <div class="hc-icon">📖</div>
+          <div class="hc-title">Generate Lesson Note</div>
+          <div class="hc-sub">Any subject · Any class · FG new curriculum · Ready in 30 seconds</div>
+          <div style="margin-top:0.85rem;background:var(--purple);color:#fff;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.88rem;">Start Now →</div>
+        </div>
+      </div>
+      <div class="home-grid">
+        <div class="hc hc-big hc-orange" onclick="go('questions')" style="text-align:center;">
+          <div class="hc-icon">❓</div>
+          <div class="hc-title">Set a CA or Exam Paper</div>
+          <div class="hc-sub">Objective · Theory · Short answer · Full marking scheme included · 60 seconds</div>
+          <div style="margin-top:0.85rem;background:var(--orange);color:#fff;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.88rem;">Create Paper →</div>
+        </div>
+      </div>
+      <div class="home-section-label">${cls} — Quick Access</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc" onclick="go('attendance')">
+          <div class="hc-icon">📅</div>
+          <div class="hc-title">Attendance</div>
+          <div class="hc-sub">${cls} register</div>
+        </div>
+        <div class="hc" onclick="go('scores')">
+          <div class="hc-icon">📝</div>
+          <div class="hc-title">Scores</div>
+          <div class="hc-sub">${classStudents.length} students</div>
+        </div>
+        <div class="hc" onclick="go('students')">
+          <div class="hc-icon">🎓</div>
+          <div class="hc-title">Student Profiles</div>
+        </div>
+        <div class="hc" onclick="go('scorecard')">
+          <div class="hc-icon">📋</div>
+          <div class="hc-title">Report Cards</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // ── Subject Teacher ───────────────────────────────────────────────────────
+  if (role === 'Subject Teacher') {
+    const subjs = currentStaff?.assignedSubjects?.join(', ') || 'your subjects';
+    sec.innerHTML = header + `
+      <div class="home-section-label">Teaching Tools</div>
+      <div class="home-grid">
+        <div class="hc hc-big hc-purple" onclick="go('lessons')" style="text-align:center;">
+          <div class="hc-icon">📖</div>
+          <div class="hc-title">Generate Lesson Note</div>
+          <div class="hc-sub">${subjs} · FG new curriculum · NTI 5-step format · 30 seconds</div>
+          <div style="margin-top:0.85rem;background:var(--purple);color:#fff;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.88rem;">Start Now →</div>
+        </div>
+      </div>
+      <div class="home-grid">
+        <div class="hc hc-big hc-orange" onclick="go('questions')" style="text-align:center;">
+          <div class="hc-icon">❓</div>
+          <div class="hc-title">Set a CA or Exam Paper</div>
+          <div class="hc-sub">Full exam paper with objective, theory, and complete marking scheme</div>
+          <div style="margin-top:0.85rem;background:var(--orange);color:#fff;border-radius:8px;padding:0.55rem;font-weight:700;font-size:0.88rem;">Create Paper →</div>
+        </div>
+      </div>
+      <div class="home-section-label">Quick Access</div>
+      <div class="home-grid home-grid-2">
+        <div class="hc" onclick="go('scores')"><div class="hc-icon">📝</div><div class="hc-title">Scores</div><div class="hc-sub">${subjs}</div></div>
+        <div class="hc" onclick="go('scorecard')"><div class="hc-icon">📋</div><div class="hc-title">Report Cards</div></div>
+        <div class="hc" onclick="go('students')"><div class="hc-icon">🎓</div><div class="hc-title">Students</div></div>
+        <div class="hc" onclick="go('attendance')"><div class="hc-icon">📅</div><div class="hc-title">Attendance</div></div>
+      </div>`;
+    return;
+  }
+
+  // ── Fallback ──────────────────────────────────────────────────────────────
+  sec.innerHTML = header + `<div class="home-grid home-grid-2">
+    <div class="hc" onclick="go('lessons')"><div class="hc-icon">📖</div><div class="hc-title">Lesson Notes</div></div>
+    <div class="hc" onclick="go('questions')"><div class="hc-icon">❓</div><div class="hc-title">CA & Exams</div></div>
+    <div class="hc" onclick="go('students')"><div class="hc-icon">🎓</div><div class="hc-title">Students</div></div>
+    <div class="hc" onclick="go('revenue')"><div class="hc-icon">💰</div><div class="hc-title">Revenue</div></div>
+  </div>`;
+}
+// ── End renderHome ─────────────────────────────────────────────────────────
+
 function goDashboard() {
   const nav = document.getElementById('mainNav');
   const backdrop = document.getElementById('navBackdrop');
   if (nav) nav.classList.remove('open');
   if (backdrop) backdrop.classList.remove('on');
-  go(ROLE_DEFAULT_TAB[userRole] || 'revenue');
+  go('home');
 }
 
 function go(tab) {
@@ -2016,7 +2269,7 @@ function go(tab) {
   const target = $(`sec-${tab}`); if (target) target.classList.add('on');
   const btn = document.querySelector(`[data-t="${tab}"]`); if (btn) btn.classList.add('on');
   const fn = {
-    revenue: renderRevenue, students: renderStudentList, staff: renderStaff,
+    home: renderHome, revenue: renderRevenue, students: renderStudentList, staff: renderStaff,
     sports: loadSports, arts: renderArts, music: renderMusic, health: renderHealth,
     alumni: renderAlumni, expenses: renderExpenses,
     finance: () => { checkFinance(); const score=_financeScore(); if(score<100&&!((SD.students||[]).some(s=>s.paid>0)||(SD.expenses||[]).length>0)){ FSA.start(); } else { const bar=$('fsa-bar'); if(bar) bar.style.width=score+'%'; } },
