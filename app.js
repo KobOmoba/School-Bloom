@@ -10292,8 +10292,8 @@ LESSON NOTE
 School: ${schoolName}
 Subject: ${subj}
 Class: ${cls}
-Topic: ${topic}${subtopic ? '
-Sub-Topic: ' + subtopic : ''}
+Topic: ${topic}${subtopic ? '\nSub-Topic: ' + subtopic : ''}
+
 Duration: ${duration} minutes  |  ${term} Term, Week ${week}
 Date: _______________  |  Time: _______________
 
@@ -10347,7 +10347,7 @@ ASSIGNMENT
 Alignment note: This lesson note is aligned with the Federal Government of Nigeria's revised National Curriculum Framework.
 ---`;
 
-  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';
+  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';\n\n\n\n\n
 
   try{
     const result = await _callGroqTeach(prompt, systemMsg);
@@ -10957,8 +10957,8 @@ LESSON NOTE
 School: ${schoolName}
 Subject: ${subj}
 Class: ${cls}
-Topic: ${topic}${subtopic ? '
-Sub-Topic: ' + subtopic : ''}
+Topic: ${topic}${subtopic ? '\nSub-Topic: ' + subtopic : ''}
+
 Duration: ${duration} minutes  |  ${term} Term, Week ${week}
 Date: _______________  |  Time: _______________
 
