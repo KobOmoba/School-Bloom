@@ -10280,9 +10280,7 @@ Details:
 - School: ${schoolName}
 - Class: ${cls}
 - Subject: ${subj}
-- Topic: ${topic}${subtopic ? '
-- Sub-Topic: ' + subtopic : ''}
-- Duration: ${duration} minutes
+- Topic: ${topic}${subtopic ? '\n- Sub-Topic: ' + subtopic : ''}\n- Duration: ${duration} minutes
 - ${term} Term, Week ${week}
 - School Level: ${levelLabel}
 
@@ -10947,9 +10945,7 @@ Details:
 - School: ${schoolName}
 - Class: ${cls}
 - Subject: ${subj}
-- Topic: ${topic}${subtopic ? '
-- Sub-Topic: ' + subtopic : ''}
-- Duration: ${duration} minutes
+- Topic: ${topic}${subtopic ? '\n- Sub-Topic: ' + subtopic : ''}\n- Duration: ${duration} minutes
 - ${term} Term, Week ${week}
 - School Level: ${levelLabel}
 
