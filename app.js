@@ -10347,13 +10347,13 @@ ASSIGNMENT
 Alignment note: This lesson note is aligned with the Federal Government of Nigeria's revised National Curriculum Framework.
 ---`;
 
-  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';\n\n\n\n\n
+  const systemMsg = "You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';\n\n\n\n\n try{ const result = await _callGroqTeach(prompt, systemMsg); if(out) out.innerHTML = result.replace(/ /g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>'); if(wrap) wrap.style.display = 'block";
 
-  try{
-    const result = await _callGroqTeach(prompt, systemMsg);
-    if(out) out.innerHTML = result.replace(/
-/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
-    if(wrap) wrap.style.display = 'block';
+
+
+
+
+
     // Store raw for print/copy
     wrap.dataset.raw = result;
   }catch(e){
