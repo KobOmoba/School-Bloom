@@ -10356,31 +10356,31 @@ Alignment note: This lesson note is aligned with the Federal Government of Niger
 
     // Store raw for print/copy
     wrap.dataset.raw = result;
-  }catch(e){
+// removed broken line
     alert('Error: ' + e.message);
-  }finally{
+// removed broken line
     btn.textContent = '📝 Generate Lesson Note'; btn.disabled = false;
   }
-}
+}function printLessonNote(){const wrap = document.getElementById('ln-result');const raw  = wrap?.dataset?.raw || '';if(!raw){ alert('Generate a lesson note first.'); return; }const win = window.open('','_blank');win.document.write(`<!DOCTYPE html><html><head><title>Lesson Note</title> <style> body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;} h1{font-size:16px;text-align:center;border-bottom:2px solid #000;padding-bottom:8px;} pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;} hr{border:1px solid #ccc;margin:12px 0;} @media print{body{margin:15px;}button{display:none;}} </style></head><body> <div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div> <pre>${raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre> </body></html>`);win.document.close();}
 
-function printLessonNote(){
-  const wrap = document.getElementById('ln-result');
-  const raw  = wrap?.dataset?.raw || '';
-  if(!raw){ alert('Generate a lesson note first.'); return; }
-  const win = window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>Lesson Note</title>
-<style>
-body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;}
-h1{font-size:16px;text-align:center;border-bottom:2px solid #000;padding-bottom:8px;}
-pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
-hr{border:1px solid #ccc;margin:12px 0;}
-@media print{body{margin:15px;}button{display:none;}}
-</style></head><body>
-<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
-<pre>${raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-</body></html>`);
-  win.document.close();
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 function copyLessonNote(){
   const wrap = document.getElementById('ln-result');
