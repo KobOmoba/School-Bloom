@@ -10201,15 +10201,18 @@ function updateQSubjects(){
 
 function renderLessons(){
   const sec = document.getElementById('sec-lessons');
-  if(!sec || sec.dataset.ready) return;
-  sec.dataset.ready = '1';
+  if(!sec) return;
+  // Always repopulate dropdowns (they reset when section is hidden/reshown)
   updateLessonSubjects();
+  if(sec.dataset.ready) return;   // heavier init only once
+  sec.dataset.ready = '1';
 }
 function renderQuestions(){
   const sec = document.getElementById('sec-questions');
-  if(!sec || sec.dataset.ready) return;
-  sec.dataset.ready = '1';
+  if(!sec) return;
   updateQSubjects();
+  if(sec.dataset.ready) return;
+  sec.dataset.ready = '1';
 }
 
 async function generateLessonNote(){
