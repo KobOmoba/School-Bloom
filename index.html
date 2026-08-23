@@ -136,6 +136,22 @@ function toggleEye(inputId, btn) {
   <script>
     window.GEMINI_API_KEY = '';  // ← paste your AIzaSy... key here
   </script>
+
+<script>
+// Listen for service worker update signal — reload to get latest version
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'SW_UPDATED' && !window._swReloading) {
+      window._swReloading = true;
+      console.log('[App] SW updated — reloading to get latest version');
+      window.location.reload();
+    }
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!window._swReloading) { window._swReloading = true; window.location.reload(); }
+  });
+}
+</script>
 </head>
 <body>
 
@@ -1893,7 +1909,7 @@ function toggleEye(inputId, btn) {
     </div>
 
 
-<script src="app.js?v=20260823-makeover"></script>
+<script src="app.js?v=20260823b"></script>
 
 <!-- Class Attendance Modal -->
 <div id="class-att-modal" class="modal">
