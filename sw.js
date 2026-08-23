@@ -5,7 +5,7 @@
 //  assets (icons/manifest/CDN), Network-First for Firestore
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME   = 'edubloom-School-Bloom-20260823-makeover';
+const CACHE_NAME   = 'edubloom-School-Bloom-20260823b-fix';
 const SHELL_ASSETS = [
   './',
   './index.html',
