@@ -10131,1058 +10131,248 @@ function triggerMorningAlertNow() {
 function triggerNoReplyCheckNow() {
   MorningAlertSystem.runNoReplyCheck();
 }
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // TEACHING TOOLS — Lesson Notes & Question Generator
 // Aligned with Federal Government of Nigeria New Curriculum
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── Nigerian Curriculum Subject Maps ─────────────────────────────────────
 const CURRICULUM = {
   primary: {
-    label: 'Primary',
-    classes: ['Primary 1','Primary 2','Primary 3','Primary 4','Primary 5','Primary 6'],
-    subjects: [
-      'English Language','Mathematics','Basic Science','Social Studies',
+    label:'Primary',
+    classes:['Primary 1','Primary 2','Primary 3','Primary 4','Primary 5','Primary 6'],
+    subjects:['English Language','Mathematics','Basic Science','Social Studies',
       'Cultural and Creative Arts (CCA)','Civic Education',
       'Physical and Health Education (PHE)','Agricultural Science',
       'Computer Studies / ICT','Religious Studies (CRS)','Religious Studies (IRS)',
       'Yoruba Language','Hausa Language','Igbo Language','French Language',
-      'Quantitative Reasoning','Verbal Reasoning'
-    ]
+      'Quantitative Reasoning','Verbal Reasoning']
   },
   jss: {
-    label: 'Junior Secondary (JSS)',
-    classes: ['JSS 1','JSS 2','JSS 3'],
-    subjects: [
-      'English Language','Mathematics','Basic Science and Technology (BST)',
+    label:'Junior Secondary (JSS)',
+    classes:['JSS 1','JSS 2','JSS 3'],
+    subjects:['English Language','Mathematics','Basic Science and Technology (BST)',
       'Social Studies','Civic Education','Cultural and Creative Arts',
       'Physical and Health Education (PHE)','Business Studies','Home Economics',
       'Agricultural Science','Computer Studies / ICT',
       'Christian Religious Knowledge (CRK)','Islamic Religious Knowledge (IRK)',
       'Yoruba Language','Hausa Language','Igbo Language','French Language',
-      'Arabic Language','Pre-Vocational Studies'
-    ]
+      'Arabic Language','Pre-Vocational Studies']
   },
   ss: {
-    label: 'Senior Secondary (SS)',
-    classes: ['SS 1','SS 2','SS 3'],
-    subjects: [
-      'English Language','Mathematics','Further Mathematics',
+    label:'Senior Secondary (SS)',
+    classes:['SS 1','SS 2','SS 3'],
+    subjects:['English Language','Mathematics','Further Mathematics',
       'Physics','Chemistry','Biology','Agricultural Science',
       'Economics','Commerce','Accounting / Financial Accounting','Business Studies',
-      'Government','History','Geography',
-      'Literature in English','Christian Religious Studies (CRS)','Islamic Studies',
+      'Government','History','Geography','Literature in English',
+      'Christian Religious Studies (CRS)','Islamic Studies',
       'Yoruba Language','Hausa Language','Igbo Language','French Language',
-      'Visual Arts','Music','Computer Science',
-      'Technical Drawing','Food and Nutrition','Health Science',
-      'Physical Education','Civic Education','Entrepreneurship'
-    ]
+      'Visual Arts','Music','Computer Science','Technical Drawing',
+      'Food and Nutrition','Health Science','Physical Education',
+      'Civic Education','Entrepreneurship']
   }
 };
 
-// Cached Groq key
-let _groqKey = null;
-async function _getGroqKey(){
-  if(_groqKey) return _groqKey;
-  try{
-    const snap = await db.collection('public_ocr_keys').doc('main').get();
-    if(snap.exists) _groqKey = snap.data()?.groqApiKey || null;
-  }catch(e){}
-  return _groqKey;
-}
-
-// ── Shared Groq caller ────────────────────────────────────────────────────
-async function _callGroqTeach(prompt, systemMsg){
-  const key = await _getGroqKey();
-  if(!key) throw new Error('Groq API key not set. Ask your admin to add it in Settings.');
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: 8192,
-      reasoning_effort: 'none',
-      messages:[
-        {role:'system', content: systemMsg},
-        {role:'user',   content: prompt}
-      ]
-    })
-  });
-  if(!resp.ok){
-    const err = await resp.json().catch(()=>({}));
-    throw new Error(err?.error?.message || `Groq error ${resp.status}`);
-  }
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
-// ── Build subject dropdown HTML ───────────────────────────────────────────
 function _buildSubjectOpts(level){
-  const map = CURRICULUM[level] || CURRICULUM.primary;
-  return map.subjects.map(s=>`<option value="${s}">${s}</option>`).join('');
+  const m = CURRICULUM[level] || CURRICULUM.primary;
+  return m.subjects.map(s => '<option value="' + s + '">' + s + '</option>').join('');
 }
-
 function _buildClassOpts(level){
-  const map = CURRICULUM[level] || CURRICULUM.primary;
-  return map.classes.map(c=>`<option value="${c}">${c}</option>`).join('');
+  const m = CURRICULUM[level] || CURRICULUM.primary;
+  return m.classes.map(c => '<option value="' + c + '">' + c + '</option>').join('');
 }
 
 function updateLessonSubjects(){
-  const level = document.getElementById('ln-level')?.value || 'primary';
+  const level = document.getElementById('ln-level') && document.getElementById('ln-level').value || 'primary';
   const subSel = document.getElementById('ln-subject');
   const clsSel = document.getElementById('ln-class');
   if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
   if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
 }
-
 function updateQSubjects(){
-  const level = document.getElementById('qg-level')?.value || 'primary';
+  const level = document.getElementById('qg-level') && document.getElementById('qg-level').value || 'primary';
   const subSel = document.getElementById('qg-subject');
   const clsSel = document.getElementById('qg-class');
   if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
   if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
 }
 
-// ── Render Lesson Notes section ───────────────────────────────────────────
 function renderLessons(){
   const sec = document.getElementById('sec-lessons');
   if(!sec || sec.dataset.ready) return;
   sec.dataset.ready = '1';
-  document.getElementById('ln-level-sel')?.addEventListener('change', updateLessonSubjects);
   updateLessonSubjects();
 }
-
-async function generateLessonNote(){
-  const level   = document.getElementById('ln-level')?.value    || 'primary';
-  const cls     = document.getElementById('ln-class')?.value    || '';
-  const subj    = document.getElementById('ln-subject')?.value  || '';
-  const topic   = (document.getElementById('ln-topic')?.value   || '').trim();
-  const subtopic= (document.getElementById('ln-subtopic')?.value|| '').trim();
-  const duration= document.getElementById('ln-duration')?.value || '40';
-  const term    = document.getElementById('ln-term')?.value     || '1st';
-  const week    = document.getElementById('ln-week')?.value     || '1';
-
-  if(!topic){ alert('Please enter the lesson topic.'); return; }
-
-  const btn = document.getElementById('ln-btn');
-  const out  = document.getElementById('ln-output');
-  const wrap = document.getElementById('ln-result');
-
-  btn.textContent = '⏳ Generating...'; btn.disabled = true;
-  if(wrap) wrap.style.display = 'none';
-
-  const schoolName = schoolData?.config?.name || schoolData?.schoolName || schoolData?.config?.schoolName || 'School';
-  const levelLabel = CURRICULUM[level]?.label || 'Primary';
-
-  const prompt = `Generate a complete, professionally formatted lesson note for a Nigerian school following the Federal Government of Nigeria's new curriculum.
-
-Details:
-- School: ${schoolName}
-- Class: ${cls}
-- Subject: ${subj}
-- Topic: ${topic}${subtopic ? '\n- Sub-Topic: ' + subtopic : ''}\n- Duration: ${duration} minutes
-- ${term} Term, Week ${week}
-- School Level: ${levelLabel}
-
-Write the lesson note in this exact format — follow every section heading precisely:
-
----
-LESSON NOTE
-
-School: ${schoolName}
-Subject: ${subj}
-Class: ${cls}
-Topic: ${topic}${subtopic ? '\nSub-Topic: ' + subtopic : ''}
-
-Duration: ${duration} minutes  |  ${term} Term, Week ${week}
-Date: _______________  |  Time: _______________
-
-BEHAVIOURAL OBJECTIVES
-By the end of the lesson, pupils/students should be able to:
-1. [specific, measurable objective using action verb]
-2. [specific, measurable objective]
-3. [specific, measurable objective]
-4. [specific, measurable objective — for longer lessons add a 5th]
-
-ENTRY BEHAVIOUR / PREVIOUS KNOWLEDGE
-[What pupils already know that links to this topic]
-
-INSTRUCTIONAL MATERIALS / RESOURCES
-• [Material 1 — specific and relevant to Nigerian classroom context]
-• [Material 2]
-• [Material 3]
-• [Additional materials as appropriate]
-
-REFERENCE BOOKS
-• [Approved Nigerian textbook title — Author, Publisher, Edition]
-• [Second reference]
-
-STEP I — INTRODUCTION (5 minutes)
-[Engaging introduction: teacher poses a question or shares a scenario that links prior knowledge to the new topic. Include sample teacher language and expected student responses.]
-
-STEP II — PRESENTATION / DEVELOPMENT (${Math.round(parseInt(duration)*0.35)} minutes)
-[Core content delivery — explain the first key concept clearly with Nigerian examples. Include teacher activity and expected student activity.]
-
-STEP III — FURTHER DEVELOPMENT (${Math.round(parseInt(duration)*0.25)} minutes)
-[Second concept or deeper exploration of the first — with examples, demonstrations, or board work. Teacher-student interaction included.]
-
-STEP IV — APPLICATION / CLASS ACTIVITY (${Math.round(parseInt(duration)*0.15)} minutes)
-[Students practise or apply the concept — guided exercise, group work, or worked examples on the board.]
-
-STEP V — EVALUATION / QUESTIONS (5 minutes)
-Ask students the following evaluation questions:
-1. [Evaluation question — tests first objective]
-2. [Evaluation question — tests second objective]
-3. [Evaluation question — tests third objective]
-4. [Evaluation question — slightly challenging]
-5. [Evaluation question — application/thinking question]
-
-CONCLUSION / SUMMARY (3 minutes)
-[Teacher summarises the key points of the lesson and links to the next lesson topic.]
-
-ASSIGNMENT
-[1–2 well-designed homework tasks appropriate for the class level, with clear instructions]
-
----
-Alignment note: This lesson note is aligned with the Federal Government of Nigeria's revised National Curriculum Framework.
----`;
-
-  const systemMsg = "You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';\n\n\n\n\n try{ const result = await _callGroqTeach(prompt, systemMsg); if(out) out.innerHTML = result.replace(/ /g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>'); if(wrap) wrap.style.display = 'block";
-
-
-
-
-
-
-    // Store raw for print/copy
-    wrap.dataset.raw = result;
-// removed broken line
-    alert('Error: ' + e.message);
-// removed broken line
-    btn.textContent = '📝 Generate Lesson Note'; btn.disabled = false;
-  }
-}function printLessonNote(){const wrap = document.getElementById('ln-result');const raw  = wrap?.dataset?.raw || '';if(!raw){ alert('Generate a lesson note first.'); return; }const win = window.open('','_blank');win.document.write(`<!DOCTYPE html><html><head><title>Lesson Note</title> <style> body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;} h1{font-size:16px;text-align:center;border-bottom:2px solid #000;padding-bottom:8px;} pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;} hr{border:1px solid #ccc;margin:12px 0;} @media print{body{margin:15px;}button{display:none;}} </style></head><body> <div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div> <pre>${raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre> </body></html>`);win.document.close();}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function copyLessonNote(){
-  const wrap = document.getElementById('ln-result');
-  const raw  = wrap?.dataset?.raw || '';
-  if(!raw){ alert('Generate a lesson note first.'); return; }
-  navigator.clipboard.writeText(raw).then(()=>alert('✅ Lesson note copied to clipboard!'));
-}
-
-// ── Render Question Generator section ────────────────────────────────────
 function renderQuestions(){
   const sec = document.getElementById('sec-questions');
   if(!sec || sec.dataset.ready) return;
   sec.dataset.ready = '1';
-  document.getElementById('qg-level-sel')?.addEventListener('change', updateQSubjects);
   updateQSubjects();
 }
 
-async function generateQuestions(){
-  const level   = document.getElementById('qg-level')?.value      || 'primary';
-  const cls     = document.getElementById('qg-class')?.value      || '';
-  const subj    = document.getElementById('qg-subject')?.value    || '';
-  const topics  = (document.getElementById('qg-topics')?.value    || '').trim();
-  const examType= document.getElementById('qg-type')?.value       || 'CA Test';
-  const nObj    = parseInt(document.getElementById('qg-n-obj')?.value  || '0');
-  const nTheory = parseInt(document.getElementById('qg-n-theory')?.value || '0');
-  const nShort  = parseInt(document.getElementById('qg-n-short')?.value  || '0');
-  const nFill   = parseInt(document.getElementById('qg-n-fill')?.value   || '0');
-  const marks   = document.getElementById('qg-marks')?.value      || '100';
-
-  if(!topics){ alert('Please enter the topic(s) to cover.'); return; }
-  if((nObj + nTheory + nShort + nFill) === 0){
-    alert('Please set at least one question count greater than 0.'); return;
-  }
-
-  const btn   = document.getElementById('qg-btn');
-  const wrap  = document.getElementById('qg-result');
-  const out   = document.getElementById('qg-output');
-  const ansOut= document.getElementById('qg-answer-output');
-
-  btn.textContent = '⏳ Generating...'; btn.disabled = true;
-  if(wrap) wrap.style.display = 'none';
-
-  const schoolName = schoolData?.config?.name || schoolData?.schoolName || 'School';
-  const sections = [];
-  if(nObj    > 0) sections.push(`${nObj} multiple-choice (objective) questions — each with options A, B, C, D`);
-  if(nTheory > 0) sections.push(`${nTheory} theory/essay questions`);
-  if(nShort  > 0) sections.push(`${nShort} short-answer questions`);
-  if(nFill   > 0) sections.push(`${nFill} fill-in-the-blank questions`);
-
-  const prompt = `Generate a complete, properly formatted Nigerian school ${examType} for the following:
-
-School: ${schoolName}
-Subject: ${subj}
-Class: ${cls}
-Topic(s): ${topics}
-Type: ${examType}
-Total Marks: ${marks}
-Questions required:
-${sections.map((s,i)=>`• ${s}`).join('
-')}
-
-PART 1 — QUESTION PAPER:
-Format exactly as a Nigerian school exam paper:
-
----
-${schoolName.toUpperCase()}
-${examType.toUpperCase()} EXAMINATION
-Subject: ${subj}  |  Class: ${cls}
-${topics.length < 60 ? 'Topic: ' + topics : ''}
-Total Marks: ${marks}  |  Time Allowed: ___________
-Name: _________________________  |  Date: ___________
-
-INSTRUCTIONS: Answer ALL questions. Write clearly and legibly.
-
-${nObj > 0 ? `SECTION A — OBJECTIVE (${nObj} Questions)
-Choose the correct answer from options A, B, C, D.
-
-[Generate ${nObj} objective questions on the topic. Each question should be on a new line, numbered 1–${nObj}, with options A B C D on the next line. Cover different aspects of the topic. Vary difficulty: easy, medium, hard.]
-
-` : ''}${nFill > 0 ? `SECTION ${nObj>0?'B':'A'} — FILL IN THE BLANKS (${nFill} Questions)
-Complete each sentence with the correct word or phrase.
-
-[Generate ${nFill} fill-in-the-blank sentences numbered correctly. Leave a blank line for the answer.]
-
-` : ''}${nShort > 0 ? `SECTION ${nObj>0||nFill>0?'C':'A'} — SHORT ANSWER (${nShort} Questions)
-Answer the following questions briefly.
-
-[Generate ${nShort} short-answer questions numbered correctly. Each should require 1–3 sentences.]
-
-` : ''}${nTheory > 0 ? `SECTION ${sections.length > 1 ? 'D' : 'A'} — THEORY / ESSAY (${nTheory} Questions)
-Answer ALL questions. Show all workings where necessary.
-
-[Generate ${nTheory} theory/essay questions numbered correctly. Each should be substantive, open-ended, and appropriate for ${cls}. State marks per question in brackets e.g. (10 marks).]
-
-` : ''}---
-
-PART 2 — ANSWER KEY / MARKING SCHEME:
-(Separate this section clearly with === ANSWER KEY === on its own line)
-
-=== ANSWER KEY / MARKING SCHEME ===
-Subject: ${subj}  |  Class: ${cls}  |  ${examType}
-
-[Provide the complete answer to EVERY question:
-- Objective: list A/B/C/D answers (e.g. 1. B  2. A  3. C ...)
-- Fill in blank: the exact word(s)
-- Short answer: model answer in 1–3 sentences
-- Theory: full model answer with marking points and marks allocation (e.g. "2 marks for defining X, 3 marks for explaining Y...")]
-
-Total: ${marks} marks
-===`;
-
-  const systemMsg = 'You are a senior Nigerian school examiner and curriculum specialist with expertise in the Federal Government of Nigeria's new curriculum. You create exam questions that are clear, unambiguous, age-appropriate, curriculum-aligned, and follow the standard Nigerian exam format. Use Nigerian names, scenarios, and examples. Always include a complete answer key.';
-
-  try{
-    const result = await _callGroqTeach(prompt, systemMsg);
-    // Split into question paper and answer key
-    const splitIdx = result.indexOf('=== ANSWER KEY');
-    const qPaper = splitIdx > -1 ? result.slice(0, splitIdx) : result;
-    const ansKey  = splitIdx > -1 ? result.slice(splitIdx) : '';
-
-    const fmt = t => t.replace(/
-/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
-    if(out)    out.innerHTML    = fmt(qPaper);
-    if(ansOut) ansOut.innerHTML = fmt(ansKey);
-    if(wrap){
-      wrap.style.display = 'block';
-      wrap.dataset.qPaper = qPaper;
-      wrap.dataset.ansKey  = ansKey;
-      wrap.dataset.raw     = result;
-    }
-    // Show answer key section
-    const ansSection = document.getElementById('qg-ans-section');
-    if(ansSection) ansSection.style.display = ansKey ? 'block' : 'none';
-  }catch(e){
-    alert('Error: ' + e.message);
-  }finally{
-    btn.textContent = '❓ Generate Questions'; btn.disabled = false;
-  }
-}
-
-function toggleAnswerKey(){
-  const el  = document.getElementById('qg-answer-output');
-  const btn = document.getElementById('qg-ans-toggle');
-  if(!el) return;
-  const showing = el.style.display !== 'none';
-  el.style.display = showing ? 'none' : 'block';
-  if(btn) btn.textContent = showing ? '👁 Show Answer Key' : '🙈 Hide Answer Key';
-}
-
-function printQuestions(mode){
-  const wrap = document.getElementById('qg-result');
-  if(!wrap){ alert('Generate questions first.'); return; }
-  const text = mode === 'answers'
-    ? (wrap.dataset.qPaper || '') + '\n\n' + (wrap.dataset.ansKey || '')
-    : (wrap.dataset.qPaper || '');
-  const win = window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>${mode==='answers'?'Questions + Answer Key':'Question Paper'}</title>
-<style>
-body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.8;color:#000;}
-pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
-hr{border-top:1px solid #000;margin:14px 0;}
-@media print{body{margin:15px;}button{display:none;}}
-</style></head><body>
-<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
-<pre>${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-</body></html>`);
-  win.document.close();
-}
-
-function copyQuestions(){
-  const wrap = document.getElementById('qg-result');
-  const raw  = wrap?.dataset?.raw || '';
-  if(!raw){ alert('Generate questions first.'); return; }
-  navigator.clipboard.writeText(raw).then(()=>alert('✅ Questions and answer key copied!'));
-}
-// ── Payment Receipt Review (Bursar / Principal / Proprietor only) ─────────
-let _pendingReceipts = [];
-let _receiptListener = null;
-
-function _startReceiptListener() {
-  if (!db || !schoolId || !canSeeFees()) return;
-  if (_receiptListener) return; // already listening
-  _receiptListener = db.collection('schools').doc(schoolId)
-    .collection('payment_receipts')
-    .where('status','==','pending')
-    .onSnapshot(snap => {
-      _pendingReceipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      _updateReceiptBadge();
-      // Re-render revenue if it's currently visible
-      const rev = document.getElementById('sec-revenue');
-      if (rev && rev.classList.contains('on')) _renderReceiptSection();
-    }, () => {});
-}
-
-function _updateReceiptBadge() {
-  const n = _pendingReceipts.length;
-  const badge = document.getElementById('receipt-badge');
-  if (badge) {
-    badge.textContent = n > 0 ? String(n) : '';
-    badge.style.display = n > 0 ? 'inline-flex' : 'none';
-  }
-}
-
-function _renderReceiptSection() {
-  const el = document.getElementById('receipt-review-section');
-  if (!el || !canSeeFees()) return;
-
-  if (!_pendingReceipts.length) {
-    el.innerHTML = '';
-    return;
-  }
-
-  const cards = _pendingReceipts.map(r => {
-    const date = r.submittedAt?.toDate
-      ? r.submittedAt.toDate().toLocaleDateString('en-NG', {day:'numeric',month:'short',year:'numeric'})
-      : 'Just now';
-    const thumb = r.receiptImage
-      ? `<img src="data:image/jpeg;base64,${r.receiptImage}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin:0.5rem 0;cursor:pointer;" onclick="showReceiptFull('${r.id}')">`
-      : '<div style="padding:1rem;text-align:center;color:var(--sub);font-size:0.8rem;">No image attached</div>';
-    return `
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:0.65rem;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;">
-          <div>
-            <div style="font-weight:700;font-size:0.9rem;">${esc(r.studentName||'—')}</div>
-            <div style="font-size:0.76rem;color:var(--sub);">${esc(r.term||'')} · ₦${Number(r.amount||0).toLocaleString()}</div>
-            <div style="font-size:0.74rem;color:var(--sub);">From: ${esc(r.parentName||'Parent')} · ${date}</div>
-          </div>
-          <span style="background:rgba(245,158,11,0.15);color:#fcd34d;border-radius:6px;padding:2px 8px;font-size:0.68rem;font-weight:800;">PENDING</span>
-        </div>
-        ${thumb}
-        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-          <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:0.55rem;font-size:0.78rem;color:#93c5fd;margin-bottom:0.35rem;">
-            📊 Fee will update automatically when the bank statement CSV is uploaded and this payment is matched.
-          </div>
-          <button onclick="rejectReceipt('${r.id}')" style="width:100%;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.5rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject (Wrong / Duplicate / Fake)</button>
-        </div>
-      </div>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div style="font-size:0.7rem;font-weight:800;color:var(--warn);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.65rem;">
-      📬 Payment Receipts Awaiting Review (${_pendingReceipts.length})
-    </div>
-    ${cards}
-    <div style="height:1px;background:var(--border);margin:1rem 0;"></div>`;
-}
-
-async function approveReceipt() {
-  // REMOVED — bank statement is the only authority for marking fees as paid.
-  // Receipts are verified automatically when the CSV bank statement is uploaded.
-  alert('Receipts cannot be manually approved.
-Upload the bank statement CSV to verify and match this payment automatically.');
-}
-
-async function rejectReceipt(receiptId) {
-  const r = _pendingReceipts.find(x => x.id === receiptId);
-  if (!r) return;
-  const reason = prompt(`Reject this receipt from ${r.parentName} for ${r.studentName}?\n\nOptional: enter a reason to note (not sent to parent automatically):`, '');
-  if (reason === null) return; // cancelled
-
-  try {
-    await db.collection('schools').doc(schoolId)
-      .collection('payment_receipts').doc(receiptId)
-      .update({
-        status: 'rejected',
-        rejectedAt: new Date(),
-        rejectedBy: currentStaff?.name || userRole,
-        rejectionReason: reason || ''
-      });
-    await _logAudit('receipt_rejected', r.studentName, r.amount||0, 'Receipt',
-      `Rejected by ${currentStaff?.name||userRole}. Reason: ${reason||'None given'}`);
-    toast(`🗑️ Receipt rejected.`);
-  } catch(e) { alert('Error rejecting: ' + e.message); }
-}
-
-function showReceiptFull(receiptId) {
-  const r = _pendingReceipts.find(x => x.id === receiptId);
-  if (!r || !r.receiptImage) return;
-  const win = window.open('', '_blank');
-  win.document.write(`<html><body style="background:#000;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-    <img src="data:image/jpeg;base64,${r.receiptImage}" style="max-width:100%;max-height:100vh;object-fit:contain;">
-  </body></html>`);
-}
-// ── End Payment Receipt Review ─────────────────────────────────────────────
-
-// ═══════════════════════════════════════════════════════════════════════════
-// AUDIT LOG — Proprietor-only. Every fee change is logged and reversible.
-// Collection: schools/{schoolId}/audit_log
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function _logAudit(action, studentName, amount, method, note, meta) {
-  if (!db || !schoolId) return;
-  try {
-    await db.collection('schools').doc(schoolId).collection('audit_log').add({
-      action,           // 'bank_reconciled'|'manual_payment'|'payment_deleted'|'payment_edited'|'receipt_rejected'|'fee_reversed'
-      studentName: studentName || '—',
-      amount: Number(amount) || 0,
-      method: method || '—',
-      note: note || '',
-      meta: meta || {},
-      by:   currentStaff?.name || userRole || 'Unknown',
-      role: userRole || '—',
-      at:   firebase.firestore.FieldValue.serverTimestamp(),
-      canReverse:  ['bank_reconciled','manual_payment'].includes(action),
-      reversed:    false,
-      reversedAt:  null,
-      reversedBy:  null
-    });
-  } catch(e) { console.warn('[Audit] Log failed:', e.message); }
-}
-
-// ── Audit Log Viewer (Proprietor only) ────────────────────────────────────
-let _auditEntries = [];
-
-function renderAuditLog() {
-  const sec = document.getElementById('sec-audit');
-  if (!sec) return;
-  if (userRole !== 'Proprietor') {
-    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">🔒 Audit log is restricted to Proprietors only.</div>';
-    return;
-  }
-  sec.innerHTML = '<div style="text-align:center;color:var(--sub);padding:2rem;">Loading audit log…</div>';
-  if (!db || !schoolId) { sec.innerHTML = '<div style="padding:2rem;color:var(--sub);">Not connected.</div>'; return; }
-
-  db.collection('schools').doc(schoolId).collection('audit_log')
-    .orderBy('at','desc').limit(100)
-    .onSnapshot(snap => {
-      _auditEntries = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-      _renderAuditEntries(sec);
-    }, e => { sec.innerHTML = `<div style="padding:2rem;color:var(--danger);">Error: ${e.message}</div>`; });
-}
-
-function _renderAuditEntries(sec) {
-  if (!_auditEntries.length) {
-    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">No audit entries yet.</div>';
-    return;
-  }
-  const now = Date.now();
-  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
-  const ACTION_LABELS = {
-    bank_reconciled: { icon:'🏦', label:'Bank Statement Match', color:'var(--money)' },
-    manual_payment:  { icon:'✍️', label:'Manual Payment Entry', color:'var(--brand)' },
-    payment_deleted: { icon:'🗑️', label:'Payment Deleted', color:'var(--danger)' },
-    payment_edited:  { icon:'✏️', label:'Payment Edited', color:'var(--warn)' },
-    receipt_rejected:{ icon:'❌', label:'Receipt Rejected', color:'var(--sub)' },
-    fee_reversed:    { icon:'↩️', label:'Fee Reversed', color:'#a78bfa' }
-  };
-
-  const rows = _auditEntries.map(e => {
-    const al  = ACTION_LABELS[e.action] || { icon:'•', label: e.action, color:'var(--sub)' };
-    const ts  = e.at?.toDate ? e.at.toDate() : new Date();
-    const age = now - ts.getTime();
-    const canUndo = e.canReverse && !e.reversed && age < SEVEN_DAYS;
-    const dateStr = ts.toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric'}) + ' ' + ts.toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
-    return `
-    <div style="background:var(--card);border:1px solid ${e.reversed?'var(--border)':'var(--border)'};border-left:3px solid ${e.reversed?'var(--border)':al.color};border-radius:10px;padding:0.85rem;margin-bottom:0.5rem;${e.reversed?'opacity:0.5;':''}" >
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;">
-        <div style="flex:1;">
-          <div style="font-weight:700;font-size:0.85rem;color:${al.color};">${al.icon} ${al.label}${e.reversed?' <span style="color:var(--sub);font-weight:400;font-size:0.75rem;">(reversed)</span>':''}</div>
-          <div style="font-size:0.82rem;margin-top:0.2rem;"><strong>${esc(e.studentName||'—')}</strong> · ${fmt(e.amount||0)} · ${esc(e.method||'—')}</div>
-          <div style="font-size:0.74rem;color:var(--sub);margin-top:0.15rem;">By: ${esc(e.by||'—')} (${esc(e.role||'—')}) · ${dateStr}</div>
-          ${e.note?`<div style="font-size:0.74rem;color:var(--sub);">${esc(e.note)}</div>`:''}
-          ${e.reversed?`<div style="font-size:0.72rem;color:#a78bfa;margin-top:0.15rem;">↩ Reversed by ${esc(e.reversedBy||'—')}</div>`:''}
-        </div>
-        ${canUndo?`<button onclick="reverseAuditEntry('${e._id}')" style="background:#1e1254;color:#a78bfa;border:1px solid #7c3aed;border-radius:7px;padding:4px 10px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">↩ Reverse</button>`:''}
-      </div>
-    </div>`;
-  }).join('');
-
-  sec.innerHTML = `
-    <div style="margin-bottom:1rem;">
-      <div style="font-size:0.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.25rem;">🔒 Proprietor Audit Log</div>
-      <div style="font-size:0.8rem;color:var(--sub);line-height:1.55;">Every fee change across all staff. Entries can be reversed within 7 days. Last 100 entries shown.</div>
-    </div>
-    ${rows}`;
-}
-
-async function reverseAuditEntry(entryId) {
-  if (userRole !== 'Proprietor') return alert('Only the Proprietor can reverse audit entries.');
-  const e = _auditEntries.find(x => x._id === entryId);
-  if (!e) return;
-  if (!e.canReverse) return alert('This entry type cannot be reversed.');
-  if (e.reversed) return alert('Already reversed.');
-  if (!confirm(`↩ Reverse this ${e.action==='bank_reconciled'?'bank statement match':'manual payment'} of ${fmt(e.amount)} for ${e.studentName}?
-
-This will subtract ₦${e.amount.toLocaleString()} from their paid balance and remove the matching payment history entry.`)) return;
-
-  try {
-    // Find student and subtract amount
-    const idx = (SD.students||[]).findIndex(s =>
-      (s.name||'').toLowerCase() === (e.studentName||'').toLowerCase()
-    );
-    if (idx > -1) {
-      SD.students[idx].paid = Math.max(0, (SD.students[idx].paid||0) - (e.amount||0));
-      // Remove the matching payment history entry (closest amount + method match)
-      const hist = SD.students[idx].paymentHistory || [];
-      const matchIdx = hist.findIndex(p => p.amount === e.amount && p.method === e.method);
-      if (matchIdx > -1) hist.splice(matchIdx, 1);
-      SD.students[idx].paymentHistory = hist;
-      await SQ.push('students', SD.students);
-      saveLocal('students', SD.students);
-    }
-    // Mark audit entry as reversed
-    await db.collection('schools').doc(schoolId).collection('audit_log').doc(entryId).update({
-      reversed: true, reversedAt: new Date(), reversedBy: currentStaff?.name || 'Proprietor'
-    });
-    // Log the reversal itself
-    await _logAudit('fee_reversed', e.studentName, e.amount, e.method, `Reversed: ${e.action}`, { originalEntryId: entryId });
-    toast(`↩ ${fmt(e.amount)} reversed for ${e.studentName}.`);
-    renderRevenue(); renderStudentList();
-  } catch(err) { alert('Reversal failed: ' + err.message); }
-}
-// ── End Audit Log ──────────────────────────────────────────────────────────
-
-// ── End Teaching Tools ─────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════
-// TEACHING TOOLS — Lesson Notes & Question Generator
-// Aligned with Federal Government of Nigeria New Curriculum
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ── Nigerian Curriculum Subject Maps ─────────────────────────────────────
-const CURRICULUM = {
-  primary: {
-    label: 'Primary',
-    classes: ['Primary 1','Primary 2','Primary 3','Primary 4','Primary 5','Primary 6'],
-    subjects: [
-      'English Language','Mathematics','Basic Science','Social Studies',
-      'Cultural and Creative Arts (CCA)','Civic Education',
-      'Physical and Health Education (PHE)','Agricultural Science',
-      'Computer Studies / ICT','Religious Studies (CRS)','Religious Studies (IRS)',
-      'Yoruba Language','Hausa Language','Igbo Language','French Language',
-      'Quantitative Reasoning','Verbal Reasoning'
-    ]
-  },
-  jss: {
-    label: 'Junior Secondary (JSS)',
-    classes: ['JSS 1','JSS 2','JSS 3'],
-    subjects: [
-      'English Language','Mathematics','Basic Science and Technology (BST)',
-      'Social Studies','Civic Education','Cultural and Creative Arts',
-      'Physical and Health Education (PHE)','Business Studies','Home Economics',
-      'Agricultural Science','Computer Studies / ICT',
-      'Christian Religious Knowledge (CRK)','Islamic Religious Knowledge (IRK)',
-      'Yoruba Language','Hausa Language','Igbo Language','French Language',
-      'Arabic Language','Pre-Vocational Studies'
-    ]
-  },
-  ss: {
-    label: 'Senior Secondary (SS)',
-    classes: ['SS 1','SS 2','SS 3'],
-    subjects: [
-      'English Language','Mathematics','Further Mathematics',
-      'Physics','Chemistry','Biology','Agricultural Science',
-      'Economics','Commerce','Accounting / Financial Accounting','Business Studies',
-      'Government','History','Geography',
-      'Literature in English','Christian Religious Studies (CRS)','Islamic Studies',
-      'Yoruba Language','Hausa Language','Igbo Language','French Language',
-      'Visual Arts','Music','Computer Science',
-      'Technical Drawing','Food and Nutrition','Health Science',
-      'Physical Education','Civic Education','Entrepreneurship'
-    ]
-  }
-};
-
-// Cached Groq key
-let _groqKey = null;
-async function _getGroqKey(){
-  if(_groqKey) return _groqKey;
-  try{
-    const snap = await db.collection('public_ocr_keys').doc('main').get();
-    if(snap.exists) _groqKey = snap.data()?.groqApiKey || null;
-  }catch(e){}
-  return _groqKey;
-}
-
-// ── Shared Groq caller ────────────────────────────────────────────────────
-async function _callGroqTeach(prompt, systemMsg){
-  const key = await _getGroqKey();
-  if(!key) throw new Error('Groq API key not set. Ask your admin to add it in Settings.');
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      max_tokens: 8192,
-      reasoning_effort: 'none',
-      messages:[
-        {role:'system', content: systemMsg},
-        {role:'user',   content: prompt}
-      ]
-    })
-  });
-  if(!resp.ok){
-    const err = await resp.json().catch(()=>({}));
-    throw new Error(err?.error?.message || `Groq error ${resp.status}`);
-  }
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
-// ── Build subject dropdown HTML ───────────────────────────────────────────
-function _buildSubjectOpts(level){
-  const map = CURRICULUM[level] || CURRICULUM.primary;
-  return map.subjects.map(s=>`<option value="${s}">${s}</option>`).join('');
-}
-
-function _buildClassOpts(level){
-  const map = CURRICULUM[level] || CURRICULUM.primary;
-  return map.classes.map(c=>`<option value="${c}">${c}</option>`).join('');
-}
-
-function updateLessonSubjects(){
-  const level = document.getElementById('ln-level')?.value || 'primary';
-  const subSel = document.getElementById('ln-subject');
-  const clsSel = document.getElementById('ln-class');
-  if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
-  if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
-}
-
-function updateQSubjects(){
-  const level = document.getElementById('qg-level')?.value || 'primary';
-  const subSel = document.getElementById('qg-subject');
-  const clsSel = document.getElementById('qg-class');
-  if(subSel) subSel.innerHTML = _buildSubjectOpts(level);
-  if(clsSel) clsSel.innerHTML = _buildClassOpts(level);
-}
-
-// ── Render Lesson Notes section ───────────────────────────────────────────
-function renderLessons(){
-  const sec = document.getElementById('sec-lessons');
-  if(!sec || sec.dataset.ready) return;
-  sec.dataset.ready = '1';
-  document.getElementById('ln-level-sel')?.addEventListener('change', updateLessonSubjects);
-  updateLessonSubjects();
-}
-
 async function generateLessonNote(){
-  const level   = document.getElementById('ln-level')?.value    || 'primary';
-  const cls     = document.getElementById('ln-class')?.value    || '';
-  const subj    = document.getElementById('ln-subject')?.value  || '';
-  const topic   = (document.getElementById('ln-topic')?.value   || '').trim();
-  const subtopic= (document.getElementById('ln-subtopic')?.value|| '').trim();
-  const duration= document.getElementById('ln-duration')?.value || '40';
-  const term    = document.getElementById('ln-term')?.value     || '1st';
-  const week    = document.getElementById('ln-week')?.value     || '1';
+  const level    = (document.getElementById('ln-level') || {}).value    || 'primary';
+  const cls      = (document.getElementById('ln-class') || {}).value    || '';
+  const subj     = (document.getElementById('ln-subject') || {}).value  || '';
+  const topic    = ((document.getElementById('ln-topic') || {}).value   || '').trim();
+  const subtopic = ((document.getElementById('ln-subtopic') || {}).value|| '').trim();
+  const duration = (document.getElementById('ln-duration') || {}).value || '40';
+  const term     = (document.getElementById('ln-term') || {}).value     || '1st';
+  const week     = (document.getElementById('ln-week') || {}).value     || '1';
 
   if(!topic){ alert('Please enter the lesson topic.'); return; }
 
-  const btn = document.getElementById('ln-btn');
+  const btn  = document.getElementById('ln-btn');
   const out  = document.getElementById('ln-output');
   const wrap = document.getElementById('ln-result');
+  const ph   = document.getElementById('ln-placeholder');
 
-  btn.textContent = '⏳ Generating...'; btn.disabled = true;
+  btn.textContent = '\u23F3 Generating...'; btn.disabled = true;
   if(wrap) wrap.style.display = 'none';
+  if(ph)   ph.style.display   = 'block';
 
-  const schoolName = schoolData?.config?.name || schoolData?.schoolName || schoolData?.config?.schoolName || 'School';
-  const levelLabel = CURRICULUM[level]?.label || 'Primary';
+  const schoolName  = (SD && SD.config && (SD.config.name || SD.config.schoolName)) || 'Your School';
+  const levelLabel  = (CURRICULUM[level] && CURRICULUM[level].label) || 'Primary';
+  const subtopicLine = subtopic ? ('\nSub-Topic: ' + subtopic) : '';
 
-  const prompt = `Generate a complete, professionally formatted lesson note for a Nigerian school following the Federal Government of Nigeria's new curriculum.
+  const promptLines = [
+    'Generate a complete, professionally formatted lesson note for a Nigerian school following the FG new curriculum.',
+    '',
+    'Details:',
+    '- School: ' + schoolName,
+    '- Class: ' + cls,
+    '- Subject: ' + subj,
+    '- Topic: ' + topic + (subtopic ? ' / Sub-Topic: ' + subtopic : ''),
+    '- Duration: ' + duration + ' minutes',
+    '- ' + term + ' Term, Week ' + week,
+    '- School Level: ' + levelLabel,
+    '',
+    'Write a complete lesson note using the NTI/NCCE 5-step format:',
+    'LESSON NOTE header with School, Subject, Class, Topic, Duration, Term, Week, Date and Time fields.',
+    'BEHAVIOURAL OBJECTIVES (4 action-verb objectives).',
+    'ENTRY BEHAVIOUR / PREVIOUS KNOWLEDGE.',
+    'INSTRUCTIONAL MATERIALS (Nigerian classroom resources).',
+    'REFERENCE BOOKS (approved Nigerian textbooks).',
+    'STEP I — INTRODUCTION (5 minutes).',
+    'STEP II — PRESENTATION / DEVELOPMENT (proportional to duration).',
+    'STEP III — FURTHER DEVELOPMENT.',
+    'STEP IV — APPLICATION / CLASS ACTIVITY.',
+    'STEP V — EVALUATION (5 evaluation questions).',
+    'CONCLUSION / SUMMARY.',
+    'ASSIGNMENT (1-2 homework tasks).',
+    '',
+    'Use Nigerian names, examples, and context throughout. Align to the FG new national curriculum.'
+  ];
 
-Details:
-- School: ${schoolName}
-- Class: ${cls}
-- Subject: ${subj}
-- Topic: ${topic}${subtopic ? '\n- Sub-Topic: ' + subtopic : ''}\n- Duration: ${duration} minutes
-- ${term} Term, Week ${week}
-- School Level: ${levelLabel}
-
-Write the lesson note in this exact format — follow every section heading precisely:
-
----
-LESSON NOTE
-
-School: ${schoolName}
-Subject: ${subj}
-Class: ${cls}
-Topic: ${topic}${subtopic ? '\nSub-Topic: ' + subtopic : ''}
-
-Duration: ${duration} minutes  |  ${term} Term, Week ${week}
-Date: _______________  |  Time: _______________
-
-BEHAVIOURAL OBJECTIVES
-By the end of the lesson, pupils/students should be able to:
-1. [specific, measurable objective using action verb]
-2. [specific, measurable objective]
-3. [specific, measurable objective]
-4. [specific, measurable objective — for longer lessons add a 5th]
-
-ENTRY BEHAVIOUR / PREVIOUS KNOWLEDGE
-[What pupils already know that links to this topic]
-
-INSTRUCTIONAL MATERIALS / RESOURCES
-• [Material 1 — specific and relevant to Nigerian classroom context]
-• [Material 2]
-• [Material 3]
-• [Additional materials as appropriate]
-
-REFERENCE BOOKS
-• [Approved Nigerian textbook title — Author, Publisher, Edition]
-• [Second reference]
-
-STEP I — INTRODUCTION (5 minutes)
-[Engaging introduction: teacher poses a question or shares a scenario that links prior knowledge to the new topic. Include sample teacher language and expected student responses.]
-
-STEP II — PRESENTATION / DEVELOPMENT (${Math.round(parseInt(duration)*0.35)} minutes)
-[Core content delivery — explain the first key concept clearly with Nigerian examples. Include teacher activity and expected student activity.]
-
-STEP III — FURTHER DEVELOPMENT (${Math.round(parseInt(duration)*0.25)} minutes)
-[Second concept or deeper exploration of the first — with examples, demonstrations, or board work. Teacher-student interaction included.]
-
-STEP IV — APPLICATION / CLASS ACTIVITY (${Math.round(parseInt(duration)*0.15)} minutes)
-[Students practise or apply the concept — guided exercise, group work, or worked examples on the board.]
-
-STEP V — EVALUATION / QUESTIONS (5 minutes)
-Ask students the following evaluation questions:
-1. [Evaluation question — tests first objective]
-2. [Evaluation question — tests second objective]
-3. [Evaluation question — tests third objective]
-4. [Evaluation question — slightly challenging]
-5. [Evaluation question — application/thinking question]
-
-CONCLUSION / SUMMARY (3 minutes)
-[Teacher summarises the key points of the lesson and links to the next lesson topic.]
-
-ASSIGNMENT
-[1–2 well-designed homework tasks appropriate for the class level, with clear instructions]
-
----
-Alignment note: This lesson note is aligned with the Federal Government of Nigeria's revised National Curriculum Framework.
----`;
-
-  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert with deep knowledge of the Federal Government of Nigeria's new national curriculum. You write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';
+  const systemMsg = 'You are a senior Nigerian school teacher and curriculum expert. Write clear, practical, detailed lesson notes that teachers can use immediately in the classroom. Always use Nigerian context (examples, names, places). Follow the NTI/NCCE lesson note format exactly.';
 
   try{
-    const result = await _callGroqTeach(prompt, systemMsg);
-    if(out) out.innerHTML = result.replace(/
-/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
-    if(wrap) wrap.style.display = 'block';
-    // Store raw for print/copy
-    wrap.dataset.raw = result;
+    const result = await GroqRotator.text(promptLines.join('\n'), systemMsg, { max_tokens: 8192 });
+    if(out) out.innerHTML = result.replace(/\n/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+    if(wrap){ wrap.style.display = 'block'; wrap.dataset.raw = result; }
+    if(ph)   ph.style.display = 'none';
   }catch(e){
     alert('Error: ' + e.message);
   }finally{
-    btn.textContent = '📝 Generate Lesson Note'; btn.disabled = false;
+    btn.textContent = '\uD83D\uDCD6 Generate Lesson Note'; btn.disabled = false;
   }
 }
 
 function printLessonNote(){
   const wrap = document.getElementById('ln-result');
-  const raw  = wrap?.dataset?.raw || '';
+  const raw  = wrap && wrap.dataset && wrap.dataset.raw || '';
   if(!raw){ alert('Generate a lesson note first.'); return; }
   const win = window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>Lesson Note</title>
-<style>
-body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;}
-h1{font-size:16px;text-align:center;border-bottom:2px solid #000;padding-bottom:8px;}
-pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
-hr{border:1px solid #ccc;margin:12px 0;}
-@media print{body{margin:15px;}button{display:none;}}
-</style></head><body>
-<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
-<pre>${raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-</body></html>`);
+  win.document.write('<!DOCTYPE html><html><head><title>Lesson Note</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.7;color:#000;}pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}hr{border:1px solid #ccc;margin:12px 0;}@media print{body{margin:15px;}button{display:none;}}</style></head><body><div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">\uD83D\uDDB6\uFE0F Print</button></div><pre>' + raw.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre></body></html>');
   win.document.close();
 }
 
 function copyLessonNote(){
   const wrap = document.getElementById('ln-result');
-  const raw  = wrap?.dataset?.raw || '';
+  const raw  = wrap && wrap.dataset && wrap.dataset.raw || '';
   if(!raw){ alert('Generate a lesson note first.'); return; }
-  navigator.clipboard.writeText(raw).then(()=>alert('✅ Lesson note copied to clipboard!'));
-}
-
-// ── Render Question Generator section ────────────────────────────────────
-function renderQuestions(){
-  const sec = document.getElementById('sec-questions');
-  if(!sec || sec.dataset.ready) return;
-  sec.dataset.ready = '1';
-  document.getElementById('qg-level-sel')?.addEventListener('change', updateQSubjects);
-  updateQSubjects();
+  navigator.clipboard.writeText(raw).then(function(){ alert('\u2705 Lesson note copied to clipboard!'); });
 }
 
 async function generateQuestions(){
-  const level   = document.getElementById('qg-level')?.value      || 'primary';
-  const cls     = document.getElementById('qg-class')?.value      || '';
-  const subj    = document.getElementById('qg-subject')?.value    || '';
-  const topics  = (document.getElementById('qg-topics')?.value    || '').trim();
-  const examType= document.getElementById('qg-type')?.value       || 'CA Test';
-  const nObj    = parseInt(document.getElementById('qg-n-obj')?.value  || '0');
-  const nTheory = parseInt(document.getElementById('qg-n-theory')?.value || '0');
-  const nShort  = parseInt(document.getElementById('qg-n-short')?.value  || '0');
-  const nFill   = parseInt(document.getElementById('qg-n-fill')?.value   || '0');
-  const marks   = document.getElementById('qg-marks')?.value      || '100';
+  const level   = (document.getElementById('qg-level') || {}).value      || 'primary';
+  const cls     = (document.getElementById('qg-class') || {}).value      || '';
+  const subj    = (document.getElementById('qg-subject') || {}).value    || '';
+  const topics  = ((document.getElementById('qg-topics') || {}).value    || '').trim();
+  const examType= (document.getElementById('qg-type') || {}).value       || 'CA Test';
+  const nObj    = parseInt((document.getElementById('qg-n-obj') || {}).value    || '0');
+  const nTheory = parseInt((document.getElementById('qg-n-theory') || {}).value || '0');
+  const nShort  = parseInt((document.getElementById('qg-n-short') || {}).value  || '0');
+  const nFill   = parseInt((document.getElementById('qg-n-fill') || {}).value   || '0');
+  const marks   = (document.getElementById('qg-marks') || {}).value      || '100';
 
   if(!topics){ alert('Please enter the topic(s) to cover.'); return; }
-  if((nObj + nTheory + nShort + nFill) === 0){
-    alert('Please set at least one question count greater than 0.'); return;
-  }
+  if((nObj + nTheory + nShort + nFill) === 0){ alert('Please set at least one question count greater than 0.'); return; }
 
-  const btn   = document.getElementById('qg-btn');
-  const wrap  = document.getElementById('qg-result');
-  const out   = document.getElementById('qg-output');
-  const ansOut= document.getElementById('qg-answer-output');
+  const btn    = document.getElementById('qg-btn');
+  const wrap   = document.getElementById('qg-result');
+  const out    = document.getElementById('qg-output');
+  const ansOut = document.getElementById('qg-answer-output');
+  const ph     = document.getElementById('qg-placeholder');
 
-  btn.textContent = '⏳ Generating...'; btn.disabled = true;
+  btn.textContent = '\u23F3 Generating...'; btn.disabled = true;
   if(wrap) wrap.style.display = 'none';
+  if(ph)   ph.style.display   = 'block';
 
-  const schoolName = schoolData?.config?.name || schoolData?.schoolName || 'School';
+  const schoolName = (SD && SD.config && (SD.config.name || SD.config.schoolName)) || 'Your School';
+
   const sections = [];
-  if(nObj    > 0) sections.push(`${nObj} multiple-choice (objective) questions — each with options A, B, C, D`);
-  if(nTheory > 0) sections.push(`${nTheory} theory/essay questions`);
-  if(nShort  > 0) sections.push(`${nShort} short-answer questions`);
-  if(nFill   > 0) sections.push(`${nFill} fill-in-the-blank questions`);
+  if(nObj    > 0) sections.push(nObj    + ' multiple-choice (objective) questions with options A, B, C, D');
+  if(nTheory > 0) sections.push(nTheory + ' theory/essay questions');
+  if(nShort  > 0) sections.push(nShort  + ' short-answer questions');
+  if(nFill   > 0) sections.push(nFill   + ' fill-in-the-blank questions');
 
-  const prompt = `Generate a complete, properly formatted Nigerian school ${examType} for the following:
+  const promptLines = [
+    'Generate a complete Nigerian school ' + examType + ' for:',
+    'School: ' + schoolName + ', Subject: ' + subj + ', Class: ' + cls,
+    'Topics: ' + topics + ', Total Marks: ' + marks,
+    'Questions needed: ' + sections.join('; '),
+    '',
+    'PART 1 — QUESTION PAPER:',
+    'Format as a proper Nigerian exam paper with school name, subject, class, date, time, total marks, instructions, section headers, and all questions numbered correctly.',
+    nObj    > 0 ? 'SECTION A — OBJECTIVE (' + nObj    + ' questions): each with A B C D options' : '',
+    nFill   > 0 ? 'SECTION — FILL IN BLANK (' + nFill   + ' questions)' : '',
+    nShort  > 0 ? 'SECTION — SHORT ANSWER ('  + nShort  + ' questions)' : '',
+    nTheory > 0 ? 'SECTION — THEORY/ESSAY ('  + nTheory + ' questions with marks allocation)' : '',
+    '',
+    'PART 2 — ANSWER KEY:',
+    'Separate with exactly this line: === ANSWER KEY / MARKING SCHEME ===',
+    'Provide complete answers for every question with marks allocation for theory.',
+    '',
+    'Use Nigerian names, examples, and Nigerian curriculum context throughout.'
+  ].filter(Boolean);
 
-School: ${schoolName}
-Subject: ${subj}
-Class: ${cls}
-Topic(s): ${topics}
-Type: ${examType}
-Total Marks: ${marks}
-Questions required:
-${sections.map((s,i)=>`• ${s}`).join('
-')}
-
-PART 1 — QUESTION PAPER:
-Format exactly as a Nigerian school exam paper:
-
----
-${schoolName.toUpperCase()}
-${examType.toUpperCase()} EXAMINATION
-Subject: ${subj}  |  Class: ${cls}
-${topics.length < 60 ? 'Topic: ' + topics : ''}
-Total Marks: ${marks}  |  Time Allowed: ___________
-Name: _________________________  |  Date: ___________
-
-INSTRUCTIONS: Answer ALL questions. Write clearly and legibly.
-
-${nObj > 0 ? `SECTION A — OBJECTIVE (${nObj} Questions)
-Choose the correct answer from options A, B, C, D.
-
-[Generate ${nObj} objective questions on the topic. Each question should be on a new line, numbered 1–${nObj}, with options A B C D on the next line. Cover different aspects of the topic. Vary difficulty: easy, medium, hard.]
-
-` : ''}${nFill > 0 ? `SECTION ${nObj>0?'B':'A'} — FILL IN THE BLANKS (${nFill} Questions)
-Complete each sentence with the correct word or phrase.
-
-[Generate ${nFill} fill-in-the-blank sentences numbered correctly. Leave a blank line for the answer.]
-
-` : ''}${nShort > 0 ? `SECTION ${nObj>0||nFill>0?'C':'A'} — SHORT ANSWER (${nShort} Questions)
-Answer the following questions briefly.
-
-[Generate ${nShort} short-answer questions numbered correctly. Each should require 1–3 sentences.]
-
-` : ''}${nTheory > 0 ? `SECTION ${sections.length > 1 ? 'D' : 'A'} — THEORY / ESSAY (${nTheory} Questions)
-Answer ALL questions. Show all workings where necessary.
-
-[Generate ${nTheory} theory/essay questions numbered correctly. Each should be substantive, open-ended, and appropriate for ${cls}. State marks per question in brackets e.g. (10 marks).]
-
-` : ''}---
-
-PART 2 — ANSWER KEY / MARKING SCHEME:
-(Separate this section clearly with === ANSWER KEY === on its own line)
-
-=== ANSWER KEY / MARKING SCHEME ===
-Subject: ${subj}  |  Class: ${cls}  |  ${examType}
-
-[Provide the complete answer to EVERY question:
-- Objective: list A/B/C/D answers (e.g. 1. B  2. A  3. C ...)
-- Fill in blank: the exact word(s)
-- Short answer: model answer in 1–3 sentences
-- Theory: full model answer with marking points and marks allocation (e.g. "2 marks for defining X, 3 marks for explaining Y...")]
-
-Total: ${marks} marks
-===`;
-
-  const systemMsg = 'You are a senior Nigerian school examiner and curriculum specialist with expertise in the Federal Government of Nigeria's new curriculum. You create exam questions that are clear, unambiguous, age-appropriate, curriculum-aligned, and follow the standard Nigerian exam format. Use Nigerian names, scenarios, and examples. Always include a complete answer key.';
+  const systemMsg = 'You are a senior Nigerian school examiner. Create clear, age-appropriate, curriculum-aligned exam questions in standard Nigerian exam format. Always include a complete answer key.';
 
   try{
-    const result = await _callGroqTeach(prompt, systemMsg);
-    // Split into question paper and answer key
+    const result = await GroqRotator.text(promptLines.join('\n'), systemMsg, { max_tokens: 8192 });
     const splitIdx = result.indexOf('=== ANSWER KEY');
-    const qPaper = splitIdx > -1 ? result.slice(0, splitIdx) : result;
-    const ansKey  = splitIdx > -1 ? result.slice(splitIdx) : '';
+    const qPaper   = splitIdx > -1 ? result.slice(0, splitIdx) : result;
+    const ansKey   = splitIdx > -1 ? result.slice(splitIdx) : '';
 
-    const fmt = t => t.replace(/
-/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
-    if(out)    out.innerHTML    = fmt(qPaper);
-    if(ansOut) ansOut.innerHTML = fmt(ansKey);
+    const fmt2 = function(t){ return t.replace(/\n/g,'<br>').replace(/---/g,'<hr>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>'); };
+    if(out)    out.innerHTML    = fmt2(qPaper);
+    if(ansOut) ansOut.innerHTML = fmt2(ansKey);
     if(wrap){
-      wrap.style.display = 'block';
+      wrap.style.display  = 'block';
       wrap.dataset.qPaper = qPaper;
-      wrap.dataset.ansKey  = ansKey;
-      wrap.dataset.raw     = result;
+      wrap.dataset.ansKey = ansKey;
+      wrap.dataset.raw    = result;
     }
-    // Show answer key section
+    if(ph) ph.style.display = 'none';
     const ansSection = document.getElementById('qg-ans-section');
     if(ansSection) ansSection.style.display = ansKey ? 'block' : 'none';
   }catch(e){
     alert('Error: ' + e.message);
   }finally{
-    btn.textContent = '❓ Generate Questions'; btn.disabled = false;
+    btn.textContent = '\u2753 Generate Questions'; btn.disabled = false;
   }
 }
 
@@ -11192,7 +10382,7 @@ function toggleAnswerKey(){
   if(!el) return;
   const showing = el.style.display !== 'none';
   el.style.display = showing ? 'none' : 'block';
-  if(btn) btn.textContent = showing ? '👁 Show Answer Key' : '🙈 Hide Answer Key';
+  if(btn) btn.textContent = showing ? '\uD83D\uDC41 Show Answer Key' : '\uD83D\uDE48 Hide Answer Key';
 }
 
 function printQuestions(mode){
@@ -11202,262 +10392,15 @@ function printQuestions(mode){
     ? (wrap.dataset.qPaper || '') + '\n\n' + (wrap.dataset.ansKey || '')
     : (wrap.dataset.qPaper || '');
   const win = window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>${mode==='answers'?'Questions + Answer Key':'Question Paper'}</title>
-<style>
-body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.8;color:#000;}
-pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}
-hr{border-top:1px solid #000;margin:14px 0;}
-@media print{body{margin:15px;}button{display:none;}}
-</style></head><body>
-<div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">🖨️ Print</button></div>
-<pre>${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-</body></html>`);
+  win.document.write('<!DOCTYPE html><html><head><title>' + (mode==='answers'?'Questions + Answer Key':'Question Paper') + '</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;font-size:13px;line-height:1.8;color:#000;}pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;}hr{border-top:1px solid #000;margin:14px 0;}@media print{body{margin:15px;}button{display:none;}}</style></head><body><div style="text-align:right;margin-bottom:12px;"><button onclick="window.print()">\uD83D\uDDB6\uFE0F Print</button></div><pre>' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre></body></html>');
   win.document.close();
 }
 
 function copyQuestions(){
   const wrap = document.getElementById('qg-result');
-  const raw  = wrap?.dataset?.raw || '';
+  const raw  = wrap && wrap.dataset && wrap.dataset.raw || '';
   if(!raw){ alert('Generate questions first.'); return; }
-  navigator.clipboard.writeText(raw).then(()=>alert('✅ Questions and answer key copied!'));
+  navigator.clipboard.writeText(raw).then(function(){ alert('\u2705 Questions and answer key copied!'); });
 }
-// ── Payment Receipt Review (Bursar / Principal / Proprietor only) ─────────
-let _pendingReceipts = [];
-let _receiptListener = null;
-
-function _startReceiptListener() {
-  if (!db || !schoolId || !canSeeFees()) return;
-  if (_receiptListener) return; // already listening
-  _receiptListener = db.collection('schools').doc(schoolId)
-    .collection('payment_receipts')
-    .where('status','==','pending')
-    .onSnapshot(snap => {
-      _pendingReceipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      _updateReceiptBadge();
-      // Re-render revenue if it's currently visible
-      const rev = document.getElementById('sec-revenue');
-      if (rev && rev.classList.contains('on')) _renderReceiptSection();
-    }, () => {});
-}
-
-function _updateReceiptBadge() {
-  const n = _pendingReceipts.length;
-  const badge = document.getElementById('receipt-badge');
-  if (badge) {
-    badge.textContent = n > 0 ? String(n) : '';
-    badge.style.display = n > 0 ? 'inline-flex' : 'none';
-  }
-}
-
-function _renderReceiptSection() {
-  const el = document.getElementById('receipt-review-section');
-  if (!el || !canSeeFees()) return;
-
-  if (!_pendingReceipts.length) {
-    el.innerHTML = '';
-    return;
-  }
-
-  const cards = _pendingReceipts.map(r => {
-    const date = r.submittedAt?.toDate
-      ? r.submittedAt.toDate().toLocaleDateString('en-NG', {day:'numeric',month:'short',year:'numeric'})
-      : 'Just now';
-    const thumb = r.receiptImage
-      ? `<img src="data:image/jpeg;base64,${r.receiptImage}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin:0.5rem 0;cursor:pointer;" onclick="showReceiptFull('${r.id}')">`
-      : '<div style="padding:1rem;text-align:center;color:var(--sub);font-size:0.8rem;">No image attached</div>';
-    return `
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:0.65rem;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;">
-          <div>
-            <div style="font-weight:700;font-size:0.9rem;">${esc(r.studentName||'—')}</div>
-            <div style="font-size:0.76rem;color:var(--sub);">${esc(r.term||'')} · ₦${Number(r.amount||0).toLocaleString()}</div>
-            <div style="font-size:0.74rem;color:var(--sub);">From: ${esc(r.parentName||'Parent')} · ${date}</div>
-          </div>
-          <span style="background:rgba(245,158,11,0.15);color:#fcd34d;border-radius:6px;padding:2px 8px;font-size:0.68rem;font-weight:800;">PENDING</span>
-        </div>
-        ${thumb}
-        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-          <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:0.55rem;font-size:0.78rem;color:#93c5fd;margin-bottom:0.35rem;">
-            📊 Fee will update automatically when the bank statement CSV is uploaded and this payment is matched.
-          </div>
-          <button onclick="rejectReceipt('${r.id}')" style="width:100%;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.5rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject (Wrong / Duplicate / Fake)</button>
-        </div>
-      </div>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div style="font-size:0.7rem;font-weight:800;color:var(--warn);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.65rem;">
-      📬 Payment Receipts Awaiting Review (${_pendingReceipts.length})
-    </div>
-    ${cards}
-    <div style="height:1px;background:var(--border);margin:1rem 0;"></div>`;
-}
-
-async function approveReceipt() {
-  // REMOVED — bank statement is the only authority for marking fees as paid.
-  // Receipts are verified automatically when the CSV bank statement is uploaded.
-  alert('Receipts cannot be manually approved.
-Upload the bank statement CSV to verify and match this payment automatically.');
-}
-
-async function rejectReceipt(receiptId) {
-  const r = _pendingReceipts.find(x => x.id === receiptId);
-  if (!r) return;
-  const reason = prompt(`Reject this receipt from ${r.parentName} for ${r.studentName}?\n\nOptional: enter a reason to note (not sent to parent automatically):`, '');
-  if (reason === null) return; // cancelled
-
-  try {
-    await db.collection('schools').doc(schoolId)
-      .collection('payment_receipts').doc(receiptId)
-      .update({
-        status: 'rejected',
-        rejectedAt: new Date(),
-        rejectedBy: currentStaff?.name || userRole,
-        rejectionReason: reason || ''
-      });
-    await _logAudit('receipt_rejected', r.studentName, r.amount||0, 'Receipt',
-      `Rejected by ${currentStaff?.name||userRole}. Reason: ${reason||'None given'}`);
-    toast(`🗑️ Receipt rejected.`);
-  } catch(e) { alert('Error rejecting: ' + e.message); }
-}
-
-function showReceiptFull(receiptId) {
-  const r = _pendingReceipts.find(x => x.id === receiptId);
-  if (!r || !r.receiptImage) return;
-  const win = window.open('', '_blank');
-  win.document.write(`<html><body style="background:#000;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-    <img src="data:image/jpeg;base64,${r.receiptImage}" style="max-width:100%;max-height:100vh;object-fit:contain;">
-  </body></html>`);
-}
-// ── End Payment Receipt Review ─────────────────────────────────────────────
-
-// ═══════════════════════════════════════════════════════════════════════════
-// AUDIT LOG — Proprietor-only. Every fee change is logged and reversible.
-// Collection: schools/{schoolId}/audit_log
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function _logAudit(action, studentName, amount, method, note, meta) {
-  if (!db || !schoolId) return;
-  try {
-    await db.collection('schools').doc(schoolId).collection('audit_log').add({
-      action,           // 'bank_reconciled'|'manual_payment'|'payment_deleted'|'payment_edited'|'receipt_rejected'|'fee_reversed'
-      studentName: studentName || '—',
-      amount: Number(amount) || 0,
-      method: method || '—',
-      note: note || '',
-      meta: meta || {},
-      by:   currentStaff?.name || userRole || 'Unknown',
-      role: userRole || '—',
-      at:   firebase.firestore.FieldValue.serverTimestamp(),
-      canReverse:  ['bank_reconciled','manual_payment'].includes(action),
-      reversed:    false,
-      reversedAt:  null,
-      reversedBy:  null
-    });
-  } catch(e) { console.warn('[Audit] Log failed:', e.message); }
-}
-
-// ── Audit Log Viewer (Proprietor only) ────────────────────────────────────
-let _auditEntries = [];
-
-function renderAuditLog() {
-  const sec = document.getElementById('sec-audit');
-  if (!sec) return;
-  if (userRole !== 'Proprietor') {
-    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">🔒 Audit log is restricted to Proprietors only.</div>';
-    return;
-  }
-  sec.innerHTML = '<div style="text-align:center;color:var(--sub);padding:2rem;">Loading audit log…</div>';
-  if (!db || !schoolId) { sec.innerHTML = '<div style="padding:2rem;color:var(--sub);">Not connected.</div>'; return; }
-
-  db.collection('schools').doc(schoolId).collection('audit_log')
-    .orderBy('at','desc').limit(100)
-    .onSnapshot(snap => {
-      _auditEntries = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-      _renderAuditEntries(sec);
-    }, e => { sec.innerHTML = `<div style="padding:2rem;color:var(--danger);">Error: ${e.message}</div>`; });
-}
-
-function _renderAuditEntries(sec) {
-  if (!_auditEntries.length) {
-    sec.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--sub);">No audit entries yet.</div>';
-    return;
-  }
-  const now = Date.now();
-  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
-  const ACTION_LABELS = {
-    bank_reconciled: { icon:'🏦', label:'Bank Statement Match', color:'var(--money)' },
-    manual_payment:  { icon:'✍️', label:'Manual Payment Entry', color:'var(--brand)' },
-    payment_deleted: { icon:'🗑️', label:'Payment Deleted', color:'var(--danger)' },
-    payment_edited:  { icon:'✏️', label:'Payment Edited', color:'var(--warn)' },
-    receipt_rejected:{ icon:'❌', label:'Receipt Rejected', color:'var(--sub)' },
-    fee_reversed:    { icon:'↩️', label:'Fee Reversed', color:'#a78bfa' }
-  };
-
-  const rows = _auditEntries.map(e => {
-    const al  = ACTION_LABELS[e.action] || { icon:'•', label: e.action, color:'var(--sub)' };
-    const ts  = e.at?.toDate ? e.at.toDate() : new Date();
-    const age = now - ts.getTime();
-    const canUndo = e.canReverse && !e.reversed && age < SEVEN_DAYS;
-    const dateStr = ts.toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric'}) + ' ' + ts.toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'});
-    return `
-    <div style="background:var(--card);border:1px solid ${e.reversed?'var(--border)':'var(--border)'};border-left:3px solid ${e.reversed?'var(--border)':al.color};border-radius:10px;padding:0.85rem;margin-bottom:0.5rem;${e.reversed?'opacity:0.5;':''}" >
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;">
-        <div style="flex:1;">
-          <div style="font-weight:700;font-size:0.85rem;color:${al.color};">${al.icon} ${al.label}${e.reversed?' <span style="color:var(--sub);font-weight:400;font-size:0.75rem;">(reversed)</span>':''}</div>
-          <div style="font-size:0.82rem;margin-top:0.2rem;"><strong>${esc(e.studentName||'—')}</strong> · ${fmt(e.amount||0)} · ${esc(e.method||'—')}</div>
-          <div style="font-size:0.74rem;color:var(--sub);margin-top:0.15rem;">By: ${esc(e.by||'—')} (${esc(e.role||'—')}) · ${dateStr}</div>
-          ${e.note?`<div style="font-size:0.74rem;color:var(--sub);">${esc(e.note)}</div>`:''}
-          ${e.reversed?`<div style="font-size:0.72rem;color:#a78bfa;margin-top:0.15rem;">↩ Reversed by ${esc(e.reversedBy||'—')}</div>`:''}
-        </div>
-        ${canUndo?`<button onclick="reverseAuditEntry('${e._id}')" style="background:#1e1254;color:#a78bfa;border:1px solid #7c3aed;border-radius:7px;padding:4px 10px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">↩ Reverse</button>`:''}
-      </div>
-    </div>`;
-  }).join('');
-
-  sec.innerHTML = `
-    <div style="margin-bottom:1rem;">
-      <div style="font-size:0.7rem;font-weight:800;color:var(--sub);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.25rem;">🔒 Proprietor Audit Log</div>
-      <div style="font-size:0.8rem;color:var(--sub);line-height:1.55;">Every fee change across all staff. Entries can be reversed within 7 days. Last 100 entries shown.</div>
-    </div>
-    ${rows}`;
-}
-
-async function reverseAuditEntry(entryId) {
-  if (userRole !== 'Proprietor') return alert('Only the Proprietor can reverse audit entries.');
-  const e = _auditEntries.find(x => x._id === entryId);
-  if (!e) return;
-  if (!e.canReverse) return alert('This entry type cannot be reversed.');
-  if (e.reversed) return alert('Already reversed.');
-  if (!confirm(`↩ Reverse this ${e.action==='bank_reconciled'?'bank statement match':'manual payment'} of ${fmt(e.amount)} for ${e.studentName}?
-
-This will subtract ₦${e.amount.toLocaleString()} from their paid balance and remove the matching payment history entry.`)) return;
-
-  try {
-    // Find student and subtract amount
-    const idx = (SD.students||[]).findIndex(s =>
-      (s.name||'').toLowerCase() === (e.studentName||'').toLowerCase()
-    );
-    if (idx > -1) {
-      SD.students[idx].paid = Math.max(0, (SD.students[idx].paid||0) - (e.amount||0));
-      // Remove the matching payment history entry (closest amount + method match)
-      const hist = SD.students[idx].paymentHistory || [];
-      const matchIdx = hist.findIndex(p => p.amount === e.amount && p.method === e.method);
-      if (matchIdx > -1) hist.splice(matchIdx, 1);
-      SD.students[idx].paymentHistory = hist;
-      await SQ.push('students', SD.students);
-      saveLocal('students', SD.students);
-    }
-    // Mark audit entry as reversed
-    await db.collection('schools').doc(schoolId).collection('audit_log').doc(entryId).update({
-      reversed: true, reversedAt: new Date(), reversedBy: currentStaff?.name || 'Proprietor'
-    });
-    // Log the reversal itself
-    await _logAudit('fee_reversed', e.studentName, e.amount, e.method, `Reversed: ${e.action}`, { originalEntryId: entryId });
-    toast(`↩ ${fmt(e.amount)} reversed for ${e.studentName}.`);
-    renderRevenue(); renderStudentList();
-  } catch(err) { alert('Reversal failed: ' + err.message); }
-}
-// ── End Audit Log ──────────────────────────────────────────────────────────
-
 // ── End Teaching Tools ─────────────────────────────────────────────────────
+
