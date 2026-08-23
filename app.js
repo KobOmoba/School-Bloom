@@ -1113,41 +1113,36 @@ const SQ = {
   },
   ping() {
     const el = $('sync');
-    if (navigator.onLine) {
-      this._offlineSince = null; this._probing = false;
-      if (el) {
-        el.className = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
-        el.textContent = this.q.length ? '● Syncing' : '● Online';
+    if (!this._probing) {
+      this._probing = true;
+      if (el && el.textContent !== '● Online' && el.textContent !== '● Syncing') {
+        el.className = 'sdot sd-sync'; el.textContent = '● Connecting...';
       }
-      if (db && this.q.length) this.flush();
-    } else {
-      if (!this._probing) {
-        this._probing = true;
-        if (el) { el.className = 'sdot sd-sync'; el.textContent = '● Connecting...'; }
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        fetch('https://clients3.google.com/generate_204', {
-          method: 'GET', mode: 'no-cors', cache: 'no-store', signal: controller.signal
-        }).then(() => {
-          clearTimeout(timeoutId);
-          this._offlineSince = null; this._probing = false;
+      // Probe Firestore directly — more reliable than navigator.onLine on
+      // Nigerian 4G networks where navigator.onLine can return false incorrectly.
+      // Use a tiny no-auth Firestore read to confirm actual connectivity.
+      const probeUrl = 'https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)/documents/public_ocr_keys/main?fields=updatedAt';
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 7000);
+      fetch(probeUrl, { cache: 'no-store', signal: controller.signal })
+        .then(r => {
+          clearTimeout(tid); this._probing = false;
+          this._offlineSince = null;
           if (el) {
             el.className = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
             el.textContent = this.q.length ? '● Syncing' : '● Online';
           }
           if (db && this.q.length) this.flush();
-        }).catch(() => {
-          clearTimeout(timeoutId);
-          this._probing = false;
+        })
+        .catch(() => {
+          clearTimeout(tid); this._probing = false;
           if (!this._offlineSince) this._offlineSince = Date.now();
-          // Use a persistent offline timestamp — UI updates after 5s
           setTimeout(() => {
-            if (this._offlineSince && !navigator.onLine && el) {
-              el.className = 'sdot sd-off'; el.textContent = '● Offline';
+            if (this._offlineSince) {
+              if (el) { el.className = 'sdot sd-off'; el.textContent = '● Offline'; }
             }
-          }, 5000);
+          }, 3000);
         });
-      }
     }
   },
   async flush() {
