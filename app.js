@@ -1123,21 +1123,30 @@ const SQ = {
     this._probing = true;
     el.className   = 'sdot sd-sync';
     el.textContent = '● Connecting...';
-    const API_KEY = 'AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o';
-    const PROBE   = 'https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)/documents/public_ocr_keys/main?fields=updatedAt&key=' + API_KEY;
-    const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 8000);
-    fetch(PROBE, { cache: 'no-store', signal: ctrl.signal })
+    // navigator.onLine===false is reliable (device has no radio connection).
+    // navigator.onLine===true is NOT reliable on Nigerian 4G — probe to confirm.
+    if (!navigator.onLine) {
+      this._probing = false;
+      el.className   = 'sdot sd-off';
+      el.textContent = '● Offline';
+      return;
+    }
+    // Probe with generate_204 — standard Android/Chrome connectivity check.
+    // Lighter and faster than Firestore REST. mode:no-cors avoids CORS errors;
+    // fetch still resolves in .then() (opaque response) proving network reachable.
+    const PROBE = 'https://connectivitycheck.gstatic.com/generate_204';
+    const ctrl  = new AbortController();
+    const tid   = setTimeout(() => ctrl.abort(), 15000); // 15 s for Nigerian 4G
+    fetch(PROBE, { cache: 'no-store', mode: 'no-cors', signal: ctrl.signal })
       .then(() => {
         clearTimeout(tid); this._probing = false; this._offlineSince = null;
         el.className   = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
         el.textContent = this.q.length ? '● Syncing' : '● Online';
         if (db && this.q.length) this.flush();
       })
-      .catch(err => {
+      .catch(() => {
         clearTimeout(tid); this._probing = false;
         if (!this._offlineSince) this._offlineSince = Date.now();
-        // Only show Offline after confirmed failure — not on abort/timeout alone
         el.className   = 'sdot sd-off';
         el.textContent = navigator.onLine ? '● Limited' : '● Offline';
       });
