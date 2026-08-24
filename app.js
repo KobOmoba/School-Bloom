@@ -18,7 +18,10 @@ let db = null;
 try {
   const fbApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FB);
   db = firebase.firestore(fbApp);
-  db.settings({ experimentalForceLongPolling: true, merge: true });
+  // experimentalForceLongPolling was causing Firestore to time out on some
+  // Nigerian 4G routes. experimentalAutoDetectLongPolling lets the SDK
+  // choose WebSockets or long-polling based on what actually works.
+  db.settings({ experimentalAutoDetectLongPolling: true, merge: true });
   db.enablePersistence({ synchronizeTabs: true })
     .then(() => console.log('✅ Offline persistence enabled'))
     .catch(err => {
@@ -1113,36 +1116,20 @@ const SQ = {
   },
   ping() {
     const el = $('sync');
-    if (!this._probing) {
-      this._probing = true;
-      if (el && el.textContent !== '● Online' && el.textContent !== '● Syncing') {
-        el.className = 'sdot sd-sync'; el.textContent = '● Connecting...';
-      }
-      // Probe Firestore directly — more reliable than navigator.onLine on
-      // Nigerian 4G networks where navigator.onLine can return false incorrectly.
-      // Use a tiny no-auth Firestore read to confirm actual connectivity.
-      const probeUrl = 'https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)/documents/public_ocr_keys/main?fields=updatedAt';
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 7000);
-      fetch(probeUrl, { cache: 'no-store', signal: controller.signal })
-        .then(r => {
-          clearTimeout(tid); this._probing = false;
-          this._offlineSince = null;
-          if (el) {
-            el.className = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
-            el.textContent = this.q.length ? '● Syncing' : '● Online';
-          }
-          if (db && this.q.length) this.flush();
-        })
-        .catch(() => {
-          clearTimeout(tid); this._probing = false;
-          if (!this._offlineSince) this._offlineSince = Date.now();
-          setTimeout(() => {
-            if (this._offlineSince) {
-              if (el) { el.className = 'sdot sd-off'; el.textContent = '● Offline'; }
-            }
-          }, 3000);
-        });
+    if (!el) return;
+    // Use navigator.onLine as primary signal.
+    // If online: show Online/Syncing immediately and flush any queued writes.
+    // If offline: show Offline. The 'online' event listener (below) will
+    // update when the browser detects connectivity is restored.
+    if (navigator.onLine) {
+      this._offlineSince = null;
+      el.className = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
+      el.textContent  = this.q.length ? '● Syncing' : '● Online';
+      if (db && this.q.length) this.flush();
+    } else {
+      if (!this._offlineSince) this._offlineSince = Date.now();
+      el.className   = 'sdot sd-off';
+      el.textContent = '● Offline';
     }
   },
   async flush() {
@@ -1967,7 +1954,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260806-b';
+  if (vEl) vEl.textContent = 'v20260823-c';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -1978,8 +1965,7 @@ function startApp() {
   SQ.ping();
   // Pull Groq/HF OCR keys from admin_settings — survives browsing-data clears
   _fetchGroqKeyFromFirestore();
-  const firstTabs = { Principal: 'revenue', Bursar: 'revenue', 'Class Teacher': 'students', 'Subject Teacher': 'scorecard' };
-  go(firstTabs[userRole] || 'revenue');
+  go('home');   // role-aware home dashboard
   setTimeout(() => SQ.flush(), 500);
   setTimeout(() => SQ.silentPull(), 2000);
   [1000, 3000, 6000].forEach(ms => setTimeout(() => {
