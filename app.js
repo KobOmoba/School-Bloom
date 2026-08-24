@@ -35,11 +35,11 @@ try {
 
 // ── Pricing Tiers ────────────────────────────────────────────────────────
 const TIERS = [
-  { name: 'Small (1–50)', max: 50, price: 10000 },
-  { name: 'Medium (51–100)', max: 100, price: 20000 },
-  { name: 'Large (101–200)', max: 200, price: 35000 },
-  { name: 'Extra Large (201–350)', max: 350, price: 55000 },
-  { name: 'Unlimited (351+)', max: 999999, price: 75000 }
+  { name: 'Premium · 1–50',   max: 50,     price: 15000 },
+  { name: 'Premium · 51–100', max: 100,    price: 25000 },
+  { name: 'Premium · 101–200',max: 200,    price: 38000 },
+  { name: 'Premium · 201–350',max: 350,    price: 55000 },
+  { name: 'Premium · 351+',   max: 999999, price: 75000 }
 ];
 function getTier(count) {
   return TIERS.find(t => count <= t.max) || TIERS[TIERS.length - 1];
@@ -1116,21 +1116,31 @@ const SQ = {
   },
   ping() {
     const el = $('sync');
-    if (!el) return;
-    // Use navigator.onLine as primary signal.
-    // If online: show Online/Syncing immediately and flush any queued writes.
-    // If offline: show Offline. The 'online' event listener (below) will
-    // update when the browser detects connectivity is restored.
-    if (navigator.onLine) {
-      this._offlineSince = null;
-      el.className = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
-      el.textContent  = this.q.length ? '● Syncing' : '● Online';
-      if (db && this.q.length) this.flush();
-    } else {
-      if (!this._offlineSince) this._offlineSince = Date.now();
-      el.className   = 'sdot sd-off';
-      el.textContent = '● Offline';
-    }
+    if (!el || this._probing) return;
+    // navigator.onLine is unreliable on Nigerian 4G networks — it can return
+    // false even with active data. Probe Firestore directly with the API key.
+    // Any HTTP response (even 400/401) proves the network is reachable.
+    this._probing = true;
+    el.className   = 'sdot sd-sync';
+    el.textContent = '● Connecting...';
+    const API_KEY = 'AIzaSyCVEdunn3AZndDP5Rm1Z3Kv1e6G6W2mB_o';
+    const PROBE   = 'https://firestore.googleapis.com/v1/projects/educationbloom-699ed/databases/(default)/documents/public_ocr_keys/main?fields=updatedAt&key=' + API_KEY;
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 8000);
+    fetch(PROBE, { cache: 'no-store', signal: ctrl.signal })
+      .then(() => {
+        clearTimeout(tid); this._probing = false; this._offlineSince = null;
+        el.className   = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
+        el.textContent = this.q.length ? '● Syncing' : '● Online';
+        if (db && this.q.length) this.flush();
+      })
+      .catch(err => {
+        clearTimeout(tid); this._probing = false;
+        if (!this._offlineSince) this._offlineSince = Date.now();
+        // Only show Offline after confirmed failure — not on abort/timeout alone
+        el.className   = 'sdot sd-off';
+        el.textContent = navigator.onLine ? '● Limited' : '● Offline';
+      });
   },
   async flush() {
     if (!db || !this.q.length || this._syncing) return;
@@ -1943,7 +1953,9 @@ function startApp() {
   $('hdr-school').textContent = name;
   $('hdr-role').textContent = userRole + (currentStaff?.assignedClass ? ' · ' + currentStaff.assignedClass : '');
   $('hdr-term').textContent = SD.config.currentTerm || 'Term 1';
-  const isPrem = SD.config.plan === 'premium';
+  // _isPremium() permanently returns true — all schools are Premium.
+  // Do NOT check SD.config.plan which may not be set to 'premium' in Firestore.
+  const isPrem = typeof _isPremium === 'function' ? _isPremium() : true;
   $('planBadge').textContent = isPrem ? 'PREMIUM ✨' : 'BASIC';
   $('planBadge').className = 'plan-badge ' + (isPrem ? 'plan-premium' : 'plan-basic');
 
@@ -1954,7 +1966,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260823-c';
+  if (vEl) vEl.textContent = 'v20260823-d';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
