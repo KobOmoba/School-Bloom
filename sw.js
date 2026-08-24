@@ -5,19 +5,17 @@
 //  assets (icons/manifest/CDN), Network-First for Firestore
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME   = 'edubloom-School-Bloom-20260823b-fix';
+const CACHE_NAME   = 'edubloom-School-Bloom-20260823c';
 const SHELL_ASSETS = [
+  // Same-origin files only — CDN URLs intentionally excluded.
+  // cache.addAll() is all-or-nothing: one CDN timeout blocks the entire
+  // SW install and the old SW stays in control indefinitely.
+  // CDN files are cached lazily on first request in the fetch handler.
   './',
   './index.html',
   './app.js',
   './style.css',
-  './icon-192x192.png',
-  './icon-512x512.png',
-  './apple-touch-icon.png',
   './manifest.json',
-  // Firebase SDK (cached from CDN)
-  'https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js',
-  'https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js',
 ];
 
 // These files change during active development. Cache-First was freezing
