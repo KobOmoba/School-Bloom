@@ -1187,7 +1187,9 @@ const SQ = {
     } catch (e) { console.warn('Silent pull failed (offline?):', e.message); }
   }
 };
-window.addEventListener('online', () => { SQ.ping(); SQ.flush().then(() => SQ.silentPull()); });
+window.addEventListener('online',  () => { SQ._probing = false; SQ.ping(); });
+window.addEventListener('offline', () => { SQ._probing = false; SQ.ping(); });
+setInterval(() => { SQ._probing = false; SQ.ping(); }, 30000);
 window.addEventListener('offline', () => SQ.ping());
 
 // ── Helpers ────────────────────────────────────────────────────────────────
