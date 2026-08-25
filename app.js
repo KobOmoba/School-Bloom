@@ -1116,34 +1116,12 @@ const SQ = {
   },
   ping() {
     const el = $('sync');
-    if (!el || this._probing) return;
-    // Always probe the network — never trust navigator.onLine alone.
-    // generate_204 with mode:no-cors resolves with opaque response if reachable.
-    this._probing = true;
-    el.className   = 'sdot sd-sync';
-    el.textContent = '● Connecting...';
-    // Do NOT short-circuit on !navigator.onLine — it is unreliable on
-    // many Nigerian 4G networks and returns false even with active data.
-    // Always run the actual network probe. Only the probe result matters.
-    // Probe with generate_204 — standard Android/Chrome connectivity check.
-    // Lighter and faster than Firestore REST. mode:no-cors avoids CORS errors;
-    // fetch still resolves in .then() (opaque response) proving network reachable.
-    const PROBE = 'https://connectivitycheck.gstatic.com/generate_204';
-    const ctrl  = new AbortController();
-    const tid   = setTimeout(() => ctrl.abort(), 15000); // 15 s for Nigerian 4G
-    fetch(PROBE, { cache: 'no-store', mode: 'no-cors', signal: ctrl.signal })
-      .then(() => {
-        clearTimeout(tid); this._probing = false; this._offlineSince = null;
-        el.className   = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
-        el.textContent = this.q.length ? '● Syncing' : '● Online';
-        if (db && this.q.length) this.flush();
-      })
-      .catch(() => {
-        clearTimeout(tid); this._probing = false;
-        if (!this._offlineSince) this._offlineSince = Date.now();
-        el.className   = 'sdot sd-off';
-        el.textContent = navigator.onLine ? '● Limited' : '● Offline';
-      });
+    if (!el) return;
+    const net   = navigator.onLine;
+    const ready = net && !!db;
+    el.className   = 'sdot ' + (ready ? (this.q.length ? 'sd-sync' : 'sd-on') : 'sd-off');
+    el.textContent = ready ? (this.q.length ? '● Syncing' : '● Online') : '● Offline';
+    if (ready && this.q.length && !this._syncing) this.flush();
   },
   async flush() {
     if (!db || !this.q.length || this._syncing) return;
