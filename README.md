@@ -6,70 +6,74 @@
 
 ---
 
-## App Overview
-
-Vanilla JS/HTML PWA. School staff manage fees, attendance, scores, expenses, staff, safety, and reports.
-Firebase Firestore for data. Offline-first with localStorage cache + SQ sync queue.
-No Firebase Auth per school — login via School ID + staff email/password (custom RBAC).
-
----
-
 ## Current Versions
 
 | File | Version |
 |------|---------|
-| app.js | `?v=20260823c` |
-| sw.js CACHE_NAME | `edubloom-School-Bloom-20260823c` |
+| app.js | `?v=20260824-probe-fix` |
+| sw.js CACHE_NAME | `edubloom-School-Bloom-20260824-probe-fix` |
 
 ---
 
 ## Session History
 
-### 2026-08-24 — Firebase + SW offline reliability fixes (direct production)
+### 2026-08-24 — Fix: false offline indicator on Nigerian 4G
 
-Three commits pushed directly to production:
-- `fix(sw)`: Removed CDN URLs (gstatic.com Firebase SDK) from SHELL_ASSETS —
-  service worker install was failing when CDN unreachable offline. Firebase SDK
-  now loaded from network only (not pre-cached), which is correct behaviour.
-- `fix(firebase)`: Switched from `experimentalForceLongPolling` to `AutoDetectLongPolling`.
-  Also added simple Firestore ping in `go(home)` / `startApp` to trigger connection.
-  Fixes "offline" indicator on Nigerian 4G where navigator.onLine returns true
-  but Firestore socket is not yet connected.
-- Cache bumped to `20260823c` after these fixes.
+**Problem:** App showed "● Offline" despite active internet connection.
 
----
+**Root cause:** `SQ.ping()` was probing `firestore.googleapis.com` directly via
+fetch with an 8-second timeout. On Nigerian 4G, high latency routes caused the
+timeout to fire before any response arrived. The AbortError went to `.catch()`,
+which showed "● Offline" or "● Limited" even though the network was live.
 
-### 2026-08-23 — Syntax repairs + lessons dropdown + SW auto-reload (direct production)
-
-- `fix(syntax)`: Collapsed duplicate teaching-tools blocks, cleaned broken template literals
-- `fix(lessons)`: Class/Subject dropdowns always repopulate when lessons section opens
-- `fix(sw)`: SW notifies clients on activate → page auto-reloads on new SW
-- `fix(sw)`: Listens for SW_UPDATED + controllerchange → auto-reload
-- `fix(ping)`: Probes Firestore directly instead of navigator.onLine (fixes Nigerian 4G false offline)
-- Multiple CACHE_NAME bumps: 20260823-makeover → 20260823b-fix → 20260823c
+**Fix:**
+- Replaced Firestore REST probe with `https://connectivitycheck.gstatic.com/generate_204`
+  — the standard Android/Chrome connectivity check URL. Returns 204, faster,
+  lighter, works on all Nigerian networks, Brave-safe.
+- Added `mode: 'no-cors'` — avoids CORS errors entirely. Fetch resolves in
+  `.then()` with an opaque response, which is enough to prove network is reachable.
+- Timeout raised from 8 s to 15 s — accommodates Nigerian 4G high-latency routes.
+- Added `navigator.onLine === false` fast-path — if device radio is off (airplane
+  mode, no SIM), skip the probe and show "● Offline" immediately. This case is
+  reliable unlike `navigator.onLine === true`.
 
 ---
 
-### 2026-08-22 — Syntax repairs (direct production)
+### 2026-08-24 — Firebase + SW offline reliability fixes
 
-- `fix(syntax)`: Repaired generateLessonNote + generateQuestions (broken string concatenation)
-- `fix(syntax)`: Fixed systemMsg apostrophe + broken regex — Enter Portal + Try Demo restored
-- `fix(syntax)`: Iterative repair of all broken strings
+- SW: CDN URLs removed from SHELL_ASSETS (install no longer fails offline)
+- Firebase: AutoDetectLongPolling replaces experimentalForceLongPolling
+- Firestore ping: probes Firestore directly in go(home) / startApp
+- SW: auto-reload on new service worker via SW_UPDATED + controllerchange
+- Cache bumped to 20260823c
+
+---
+
+### 2026-08-23 — Syntax repairs + lessons dropdown + SW auto-reload
+
+- Duplicate teaching-tools blocks removed; broken template literals repaired
+- Lessons dropdown: Class/Subject selects always repopulate on section open
+- SW auto-reload notification on activate
+- Multiple cache bumps: 20260823-makeover → 20260823b-fix → 20260823c
+
+---
+
+### 2026-08-22 — Syntax repairs
+
+generateLessonNote, generateQuestions, broken strings and regex repaired.
 
 ---
 
 ### 2026-08-20 — Security audit (Claude session)
 
-- Structural HTML fix: removed premature `</body></html>` at line 1329 (app.js loaded twice)
-- XSS: `esc(name/userRole/classInfo)` applied to `bannerEl.innerHTML` line 2537
-- Cache bumped to `20260820-security` (since superseded by Aug 23/24 commits)
+- Structural HTML fix: premature </body></html> at line 1329 removed (app.js was loading twice)
+- XSS: esc(name/userRole/classInfo) applied to bannerEl.innerHTML
 
 ---
 
 ## Firestore Rules — CORRECTLY PUBLISHED ✅
 
 Published Aug 19, 2026 at 7:10 AM. Correct. No changes needed.
-See bloom-portal/PROJECT_STATE.md Section 5 for full collection access map.
 
 ---
 
@@ -79,5 +83,5 @@ See bloom-portal/PROJECT_STATE.md Section 5 for full collection access map.
 - OCR: Groq Vision `qwen/qwen3.6-27b` primary → HuggingFace → OCR.space last resort
 - Aug 22/23/24 commits went directly to production — not sandbox-first
 - school-bloom-v2 sandbox is behind production and needs backport
-- node --check excluded for this file (pre-existing browser template literal at ~line 10030)
+- node --check excluded (pre-existing browser template literal at ~line 10030)
 - Full project state: bloom-portal/PROJECT_STATE.md
