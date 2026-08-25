@@ -1117,20 +1117,14 @@ const SQ = {
   ping() {
     const el = $('sync');
     if (!el || this._probing) return;
-    // navigator.onLine is unreliable on Nigerian 4G networks — it can return
-    // false even with active data. Probe Firestore directly with the API key.
-    // Any HTTP response (even 400/401) proves the network is reachable.
+    // Always probe the network — never trust navigator.onLine alone.
+    // generate_204 with mode:no-cors resolves with opaque response if reachable.
     this._probing = true;
     el.className   = 'sdot sd-sync';
     el.textContent = '● Connecting...';
-    // navigator.onLine===false is reliable (device has no radio connection).
-    // navigator.onLine===true is NOT reliable on Nigerian 4G — probe to confirm.
-    if (!navigator.onLine) {
-      this._probing = false;
-      el.className   = 'sdot sd-off';
-      el.textContent = '● Offline';
-      return;
-    }
+    // Do NOT short-circuit on !navigator.onLine — it is unreliable on
+    // many Nigerian 4G networks and returns false even with active data.
+    // Always run the actual network probe. Only the probe result matters.
     // Probe with generate_204 — standard Android/Chrome connectivity check.
     // Lighter and faster than Firestore REST. mode:no-cors avoids CORS errors;
     // fetch still resolves in .then() (opaque response) proving network reachable.
@@ -1977,7 +1971,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260823-d';
+  if (vEl) vEl.textContent = 'v20260823-e';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
