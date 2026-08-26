@@ -1953,7 +1953,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260826-online-fix';
+  if (vEl) vEl.textContent = 'v20260826-lessons-fix';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -2258,6 +2258,9 @@ function go(tab) {
     scorecard: renderScorecard,
     ai: () => { renderMorningAlertStatus(); if(typeof renderAITools==='function') renderAITools(); },
     aitools: () => { if(typeof renderAITools==='function') renderAITools(); },
+    // ── AI content tools ──
+    lessons:   renderLessons,
+    questions: renderQuestions,
     // ── New sub-pages ──
     profile:    renderProfilePage,
     scores:     () => { initScoresPage(); },
@@ -10182,10 +10185,17 @@ function updateQSubjects(){
 function renderLessons(){
   const sec = document.getElementById('sec-lessons');
   if(!sec) return;
-  // Always repopulate dropdowns (they reset when section is hidden/reshown)
+  // Always repopulate dropdowns on every visit — they reset when section is hidden
   updateLessonSubjects();
-  if(sec.dataset.ready) return;   // heavier init only once
+  if(sec.dataset.ready) return;  // heavier one-time init below
   sec.dataset.ready = '1';
+  // Pre-select current term from school config
+  const termSel = document.getElementById('ln-term');
+  if(termSel && SD && SD.config && SD.config.currentTerm){
+    const t = (SD.config.currentTerm || '').replace(/term/i,'').trim();
+    const map = {'1':'1st','2':'2nd','3':'3rd','1st':'1st','2nd':'2nd','3rd':'3rd'};
+    if(map[t]) termSel.value = map[t];
+  }
 }
 function renderQuestions(){
   const sec = document.getElementById('sec-questions');
