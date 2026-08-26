@@ -1117,11 +1117,25 @@ const SQ = {
   ping() {
     const el = $('sync');
     if (!el) return;
-    const net   = navigator.onLine;
-    const ready = net && !!db;
-    el.className   = 'sdot ' + (ready ? (this.q.length ? 'sd-sync' : 'sd-on') : 'sd-off');
-    el.textContent = ready ? (this.q.length ? '● Syncing' : '● Online') : '● Offline';
-    if (ready && this.q.length && !this._syncing) this.flush();
+    // Fast path: no radio at all — show offline immediately
+    if (!navigator.onLine || !db) {
+      el.className   = 'sdot sd-off';
+      el.textContent = '● Offline';
+      return;
+    }
+    // Optimistic: show online/syncing right away (no blocking wait)
+    el.className   = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
+    el.textContent = this.q.length ? '● Syncing' : '● Online';
+    if (this.q.length && !this._syncing) this.flush();
+    // Background probe: corrects the dot silently if internet is actually gone
+    // (navigator.onLine is unreliable on Android captive portals / dead WiFi)
+    fetch('https://connectivitycheck.gstatic.com/generate_204', {
+      method: 'HEAD', mode: 'no-cors', cache: 'no-store',
+      signal: AbortSignal.timeout(4000)
+    }).catch(() => {
+      const e2 = $('sync');
+      if (e2) { e2.className = 'sdot sd-off'; e2.textContent = '● Offline'; }
+    });
   },
   async flush() {
     if (!db || !this.q.length || this._syncing) return;
