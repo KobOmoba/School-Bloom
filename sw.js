@@ -5,7 +5,7 @@
 //  assets (icons/manifest/CDN), Network-First for Firestore
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME   = 'edubloom-School-Bloom-20260826-doctype-https-fix';
+const CACHE_NAME   = 'edubloom-School-Bloom-20260826-online-fix';
 const SHELL_ASSETS = [
   // Same-origin files only — CDN URLs intentionally excluded.
   // cache.addAll() is all-or-nothing: one CDN timeout blocks the entire
@@ -28,7 +28,7 @@ const NETWORK_FIRST = ['index.html', 'app.js', 'style.css'];
 
 // ── INSTALL — cache app shell ────────────────────────────────────────────────
 self.addEventListener('install', event => {
-  console.log('[SW] Installing Edu-BLOOM v1.2.0...');
+  console.log('[SW] Installing Edu-BLOOM v1.3.0...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(SHELL_ASSETS))
@@ -39,7 +39,7 @@ self.addEventListener('install', event => {
 
 // ── ACTIVATE — delete old caches ─────────────────────────────────────────────
 self.addEventListener('activate', event => {
-  console.log('[SW] Activating Edu-BLOOM v1.2.0...');
+  console.log('[SW] Activating Edu-BLOOM v1.3.0...');
   event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(
@@ -167,4 +167,4 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-console.log('[SW] Edu-BLOOM Service Worker v1.2.0 loaded ✅');
+console.log('[SW] Edu-BLOOM Service Worker v1.3.0 loaded ✅');
