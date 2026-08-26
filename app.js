@@ -1953,7 +1953,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260826-lessons-fix';
+  if (vEl) vEl.textContent = 'v20260826-basic-fix';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -10124,7 +10124,7 @@ function triggerNoReplyCheckNow() {
 const CURRICULUM = {
   primary: {
     label:'Primary',
-    classes:['Primary 1','Primary 2','Primary 3','Primary 4','Primary 5','Primary 6'],
+    classes:['Basic 1','Basic 2','Basic 3','Basic 4','Basic 5','Basic 6'],
     subjects:['English Language','Mathematics','Basic Science','Social Studies',
       'Cultural and Creative Arts (CCA)','Civic Education',
       'Physical and Health Education (PHE)','Agricultural Science',
