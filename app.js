@@ -1117,25 +1117,14 @@ const SQ = {
   ping() {
     const el = $('sync');
     if (!el) return;
-    // Fast path: no radio at all — show offline immediately
-    if (!navigator.onLine || !db) {
-      el.className   = 'sdot sd-off';
-      el.textContent = '● Offline';
-      return;
-    }
-    // Optimistic: show online/syncing right away (no blocking wait)
-    el.className   = 'sdot ' + (this.q.length ? 'sd-sync' : 'sd-on');
-    el.textContent = this.q.length ? '● Syncing' : '● Online';
-    if (this.q.length && !this._syncing) this.flush();
-    // Background probe: corrects the dot silently if internet is actually gone
-    // (navigator.onLine is unreliable on Android captive portals / dead WiFi)
-    fetch('https://connectivitycheck.gstatic.com/generate_204', {
-      method: 'HEAD', mode: 'no-cors', cache: 'no-store',
-      signal: AbortSignal.timeout(4000)
-    }).catch(() => {
-      const e2 = $('sync');
-      if (e2) { e2.className = 'sdot sd-off'; e2.textContent = '● Offline'; }
-    });
+    // navigator.onLine + !!db is the correct signal for Nigerian 4G.
+    // External probes (gstatic, connectivitycheck) are frequently blocked or
+    // throttled by Nigerian ISPs causing false ● Offline on working connections.
+    // Firestore's own retry/backoff is the real connectivity authority.
+    const ready = navigator.onLine && !!db;
+    el.className   = 'sdot ' + (ready ? (this.q.length ? 'sd-sync' : 'sd-on') : 'sd-off');
+    el.textContent = ready ? (this.q.length ? '● Syncing' : '● Online') : '● Offline';
+    if (ready && this.q.length && !this._syncing) this.flush();
   },
   async flush() {
     if (!db || !this.q.length || this._syncing) return;
@@ -1176,7 +1165,8 @@ const SQ = {
 window.addEventListener('online',  () => { SQ._probing = false; SQ.ping(); });
 window.addEventListener('offline', () => { SQ._probing = false; SQ.ping(); });
 setInterval(() => { SQ._probing = false; SQ.ping(); }, 30000);
-window.addEventListener('offline', () => SQ.ping());
+// Initial ping shortly after load so the dot updates without waiting 30s
+document.addEventListener('DOMContentLoaded', () => setTimeout(() => SQ.ping(), 800));
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -1963,7 +1953,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260823-e';
+  if (vEl) vEl.textContent = 'v20260826-online-fix';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
