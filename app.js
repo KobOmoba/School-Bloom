@@ -1323,8 +1323,8 @@ function defaultOpps() {
 const ROLE_TABS = {
   'Principal':       null,
   'Proprietor':      null,   // Same full access as Principal
-  'Class Teacher':   new Set(['home','students','sports','arts','music','health','comms','security','support','lessons','questions']),
-  'Subject Teacher': new Set(['home','students','sports','arts','music','health','comms','security','support','scorecard','lessons','questions']),
+  'Class Teacher':   new Set(['home','students','sports','arts','music','health','comms','security','support','lessons','questions','booklist']),
+  'Subject Teacher': new Set(['home','students','sports','arts','music','health','comms','security','support','scorecard','lessons','questions','booklist']),
   'Bursar':          new Set(['home','revenue','students','expenses','finance','comms','analytics','support']),
 };
 const ROLE_DEFAULT_TAB = {
@@ -1953,7 +1953,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260826-basic-fix';
+  if (vEl) vEl.textContent = 'v20260826-booklist';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -2261,6 +2261,7 @@ function go(tab) {
     // ── AI content tools ──
     lessons:   renderLessons,
     questions: renderQuestions,
+    booklist:  renderBookList,
     // ── New sub-pages ──
     profile:    renderProfilePage,
     scores:     () => { initScoresPage(); },
@@ -10396,4 +10397,328 @@ function copyQuestions(){
   navigator.clipboard.writeText(raw).then(function(){ alert('\u2705 Questions and answer key copied!'); });
 }
 // ── End Teaching Tools ─────────────────────────────────────────────────────
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 📚 BOOK LIST & UNIFORM STORE
+// Firestore: admin_booklist/{schoolId}_{class}_{term}_{year}
+//            admin_uniforms/{schoolId}
+// ══════════════════════════════════════════════════════════════════════════════
+
+const _BL = { books:[], uniforms:[], tab:'books' };
+
+function _blKey(cls, term, year) {
+  return ((SD?.config?.schoolId||schoolId||'sch') + '_' + cls + '_' + term + '_' + (year||'').replace('/','_'))
+    .replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,100);
+}
+
+function _buildAllClassOpts(sel) {
+  let html = '<option value="">— Select class —</option>';
+  Object.keys(CURRICULUM).forEach(lvl => {
+    const g = CURRICULUM[lvl];
+    html += `<optgroup label="${esc(g.label)}">`;
+    g.classes.forEach(c => { html += `<option value="${esc(c)}"${sel===c?' selected':''}>${esc(c)}</option>`; });
+    html += '</optgroup>';
+  });
+  return html;
+}
+
+function _blCurrentYear() {
+  const y = new Date().getFullYear();
+  return `${y}/${y+1}`;
+}
+
+function renderBookList() {
+  const sec = document.getElementById('sec-booklist');
+  if (!sec) return;
+  _BL.books = []; _BL.uniforms = []; _BL.tab = 'books';
+
+  const configTerm = (SD?.config?.currentTerm||'').replace(/term/i,'').trim();
+  const termMap    = {'1':'1st','2':'2nd','3':'3rd','1st':'1st','2nd':'2nd','3rd':'3rd'};
+  const dt         = termMap[configTerm] || '1st';
+  const yr         = _blCurrentYear();
+
+  sec.innerHTML = `
+<h2 style="font-size:1.15rem;font-weight:800;margin:0 0 2px">📚 Books &amp; Uniforms</h2>
+<p style="font-size:0.78rem;color:var(--sub);margin:0 0 14px">Create book lists per class and set uniform prices — share with parents via WhatsApp</p>
+
+<div style="display:flex;gap:8px;margin-bottom:16px">
+  <button id="bl-tbtn-books"    onclick="blTab('books')"    style="flex:1;padding:9px;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#4f46e5;color:#fff;border:none">📚 Books</button>
+  <button id="bl-tbtn-uniforms" onclick="blTab('uniforms')" style="flex:1;padding:9px;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:var(--s2,#f3f4f6);color:var(--sub);border:1px solid var(--border)">👕 Uniforms</button>
+</div>
+
+<!-- ── BOOKS ── -->
+<div id="bl-p-books">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <select id="bl-cls"  onchange="blLoadBooks()" style="flex:2;min-width:120px;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:0.83rem">${_buildAllClassOpts()}</select>
+    <select id="bl-term" onchange="blLoadBooks()" style="flex:1;min-width:90px;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:0.83rem">
+      <option value="1st" ${dt==='1st'?'selected':''}>1st Term</option>
+      <option value="2nd" ${dt==='2nd'?'selected':''}>2nd Term</option>
+      <option value="3rd" ${dt==='3rd'?'selected':''}>3rd Term</option>
+    </select>
+    <select id="bl-yr" style="flex:1;min-width:100px;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:0.83rem">
+      <option value="${esc(yr)}" selected>${esc(yr)}</option>
+      <option value="${esc((parseInt(yr)-1)+'/'+(parseInt(yr)))}">Previous year</option>
+    </select>
+  </div>
+
+  <div style="margin-bottom:12px">
+    <label style="font-size:0.74rem;font-weight:700;color:var(--sub);display:block;margin-bottom:5px;letter-spacing:.06em;text-transform:uppercase">Purchase Policy</label>
+    <select id="bl-policy" style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:0.83rem">
+      <option value="optional">📖 Optional — parents may buy from school or any bookshop</option>
+      <option value="mandatory">🏫 Mandatory — all books must be purchased from school only</option>
+      <option value="listonly">📋 List only — school does not sell books</option>
+    </select>
+  </div>
+
+  <div style="font-size:0.74rem;font-weight:700;color:var(--sub);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Book List</div>
+  <div id="bl-book-rows"></div>
+  <button onclick="blAddBook()" style="width:100%;padding:10px;margin:4px 0 14px;background:transparent;border:1.5px dashed var(--border);border-radius:8px;color:var(--sub);font-size:0.83rem;cursor:pointer">+ Add Book</button>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button onclick="blSaveBooks()" style="flex:1;padding:11px;background:#4f46e5;color:#fff;border:none;border-radius:9px;font-weight:700;font-size:0.88rem;cursor:pointer">💾 Save List</button>
+    <button onclick="blShareBooks()" style="flex:1;padding:11px;background:#25D366;color:#fff;border:none;border-radius:9px;font-weight:700;font-size:0.88rem;cursor:pointer">📲 Send to Parents</button>
+  </div>
+  <p id="bl-books-msg" style="font-size:0.77rem;color:var(--sub);text-align:center;margin:8px 0 0;min-height:18px"></p>
+</div>
+
+<!-- ── UNIFORMS ── -->
+<div id="bl-p-uniforms" style="display:none">
+  <div style="margin-bottom:12px">
+    <label style="font-size:0.74rem;font-weight:700;color:var(--sub);display:block;margin-bottom:5px;letter-spacing:.06em;text-transform:uppercase">Uniform Purchase Policy</label>
+    <select id="bl-uni-policy" style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:0.83rem">
+      <option value="mandatory">🏫 Mandatory — all uniforms must be purchased from school</option>
+      <option value="optional">👗 Optional — parents may buy from school or any vendor</option>
+      <option value="listonly">📋 List only — prices for reference, school does not sell</option>
+    </select>
+  </div>
+
+  <div style="font-size:0.74rem;font-weight:700;color:var(--sub);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Uniform Items</div>
+  <div id="bl-uni-rows"></div>
+  <button onclick="blAddUniform()" style="width:100%;padding:10px;margin:4px 0 14px;background:transparent;border:1.5px dashed var(--border);border-radius:8px;color:var(--sub);font-size:0.83rem;cursor:pointer">+ Add Uniform Item</button>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button onclick="blSaveUniforms()" style="flex:1;padding:11px;background:#4f46e5;color:#fff;border:none;border-radius:9px;font-weight:700;font-size:0.88rem;cursor:pointer">💾 Save List</button>
+    <button onclick="blShareUniforms()" style="flex:1;padding:11px;background:#25D366;color:#fff;border:none;border-radius:9px;font-weight:700;font-size:0.88rem;cursor:pointer">📲 Send to Parents</button>
+  </div>
+  <p id="bl-uni-msg" style="font-size:0.77rem;color:var(--sub);text-align:center;margin:8px 0 0;min-height:18px"></p>
+</div>`;
+
+  blLoadBooks();
+  _blLoadUniforms();
+}
+
+function blTab(t) {
+  _BL.tab = t;
+  const isBk = t === 'books';
+  document.getElementById('bl-p-books').style.display    = isBk ? '' : 'none';
+  document.getElementById('bl-p-uniforms').style.display = isBk ? 'none' : '';
+  const btnBk  = document.getElementById('bl-tbtn-books');
+  const btnUni = document.getElementById('bl-tbtn-uniforms');
+  if (btnBk)  { btnBk.style.background  = isBk ? '#4f46e5' : 'var(--s2,#f3f4f6)'; btnBk.style.color  = isBk ? '#fff' : 'var(--sub)'; btnBk.style.border  = isBk ? 'none' : '1px solid var(--border)'; }
+  if (btnUni) { btnUni.style.background = isBk ? 'var(--s2,#f3f4f6)' : '#4f46e5'; btnUni.style.color = isBk ? 'var(--sub)' : '#fff'; btnUni.style.border = isBk ? '1px solid var(--border)' : 'none'; }
+}
+
+/* ── Book rows ─────────────────────────────────────────────────────────────── */
+function _blBookRow(b, i) {
+  return `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;align-items:center">
+    <input placeholder="Subject" value="${esc(b.subject||'')}" oninput="_BL.books[${i}].subject=this.value"
+      style="flex:1;min-width:90px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <input placeholder="Book title *" value="${esc(b.title||'')}" oninput="_BL.books[${i}].title=this.value"
+      style="flex:2;min-width:120px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <input placeholder="Publisher" value="${esc(b.publisher||'')}" oninput="_BL.books[${i}].publisher=this.value"
+      style="flex:1;min-width:80px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <input type="number" placeholder="₦ Price" value="${b.price||''}" oninput="_BL.books[${i}].price=+this.value"
+      style="width:78px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <button onclick="blRmBook(${i})" style="padding:7px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px;color:#dc2626;cursor:pointer;font-size:0.8rem">✕</button>
+  </div>`;
+}
+
+function _blRenderBooks() {
+  const c = document.getElementById('bl-book-rows');
+  if (!c) return;
+  c.innerHTML = _BL.books.length
+    ? _BL.books.map(_blBookRow).join('')
+    : '<p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:10px 0">No books yet — tap "+ Add Book"</p>';
+}
+
+function blAddBook()   { _BL.books.push({subject:'',title:'',publisher:'',price:0}); _blRenderBooks(); }
+function blRmBook(i)   { _BL.books.splice(i,1); _blRenderBooks(); }
+
+/* ── Uniform rows ──────────────────────────────────────────────────────────── */
+function _blUniRow(u, i) {
+  return `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;align-items:center">
+    <input placeholder="Item (e.g. White Shirt — Boys)" value="${esc(u.name||'')}" oninput="_BL.uniforms[${i}].name=this.value"
+      style="flex:2;min-width:130px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <input placeholder="Sizes (e.g. S, M, L, XL)" value="${esc(u.sizes||'')}" oninput="_BL.uniforms[${i}].sizes=this.value"
+      style="flex:1;min-width:90px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <input type="number" placeholder="₦ Price" value="${u.price||''}" oninput="_BL.uniforms[${i}].price=+this.value"
+      style="width:78px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--s2);color:var(--text);font-size:0.81rem">
+    <button onclick="blRmUniform(${i})" style="padding:7px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px;color:#dc2626;cursor:pointer;font-size:0.8rem">✕</button>
+  </div>`;
+}
+
+function _blRenderUniforms() {
+  const c = document.getElementById('bl-uni-rows');
+  if (!c) return;
+  c.innerHTML = _BL.uniforms.length
+    ? _BL.uniforms.map(_blUniRow).join('')
+    : '<p style="color:var(--sub);font-size:0.8rem;text-align:center;padding:10px 0">No items yet — tap "+ Add Uniform Item"</p>';
+}
+
+function blAddUniform()   { _BL.uniforms.push({name:'',sizes:'',price:0}); _blRenderUniforms(); }
+function blRmUniform(i)   { _BL.uniforms.splice(i,1); _blRenderUniforms(); }
+
+/* ── Firestore load ─────────────────────────────────────────────────────────── */
+async function blLoadBooks() {
+  const cls  = (document.getElementById('bl-cls')  ||{}).value;
+  const term = (document.getElementById('bl-term') ||{}).value || '1st';
+  const yr   = (document.getElementById('bl-yr')   ||{}).value || _blCurrentYear();
+  if (!cls || !db) { _blRenderBooks(); return; }
+  try {
+    const snap = await db.collection('admin_booklist').doc(_blKey(cls,term,yr)).get();
+    if (snap.exists) {
+      const d = snap.data();
+      _BL.books = d.books || [];
+      const ps = document.getElementById('bl-policy');
+      if (ps && d.policy) ps.value = d.policy;
+    } else { _BL.books = []; }
+  } catch(e) { _BL.books = []; }
+  _blRenderBooks();
+}
+
+async function _blLoadUniforms() {
+  if (!db) { _blRenderUniforms(); return; }
+  const sid = SD?.config?.schoolId || schoolId || 'sch';
+  try {
+    const snap = await db.collection('admin_uniforms').doc(sid).get();
+    if (snap.exists) {
+      const d = snap.data();
+      _BL.uniforms = d.items || [];
+      const ps = document.getElementById('bl-uni-policy');
+      if (ps && d.policy) ps.value = d.policy;
+    } else { _BL.uniforms = []; }
+  } catch(e) { _BL.uniforms = []; }
+  _blRenderUniforms();
+}
+
+/* ── Firestore save ─────────────────────────────────────────────────────────── */
+async function blSaveBooks() {
+  const msg    = document.getElementById('bl-books-msg');
+  const cls    = (document.getElementById('bl-cls')    ||{}).value;
+  const term   = (document.getElementById('bl-term')   ||{}).value || '1st';
+  const yr     = (document.getElementById('bl-yr')     ||{}).value || _blCurrentYear();
+  const policy = (document.getElementById('bl-policy') ||{}).value || 'optional';
+  if (!cls)  { if(msg) msg.textContent='⚠️ Select a class first'; return; }
+  if (!db)   { if(msg) msg.textContent='⚠️ Not connected'; return; }
+  const clean = _BL.books.filter(b => (b.title||'').trim());
+  if (!clean.length) { if(msg) msg.textContent='⚠️ Add at least one book with a title'; return; }
+  if(msg) msg.textContent = '💾 Saving…';
+  try {
+    await db.collection('admin_booklist').doc(_blKey(cls,term,yr)).set({
+      class:cls, term, year:yr, policy,
+      books: clean.map(b=>({subject:(b.subject||'').trim(),title:(b.title||'').trim(),publisher:(b.publisher||'').trim(),price:+b.price||0})),
+      schoolId: SD?.config?.schoolId||schoolId||'sch',
+      updatedAt: new Date().toISOString()
+    });
+    if(msg) msg.textContent = `✅ ${clean.length} book${clean.length>1?'s':''} saved for ${cls} · ${term} Term ${yr}`;
+    setTimeout(()=>{ if(msg) msg.textContent=''; }, 4000);
+    SQ.ping();
+  } catch(e) { if(msg) msg.textContent='❌ '+e.message.slice(0,60); }
+}
+
+async function blSaveUniforms() {
+  const msg    = document.getElementById('bl-uni-msg');
+  const policy = (document.getElementById('bl-uni-policy')||{}).value || 'mandatory';
+  if (!db) { if(msg) msg.textContent='⚠️ Not connected'; return; }
+  const clean  = _BL.uniforms.filter(u => (u.name||'').trim());
+  if (!clean.length) { if(msg) msg.textContent='⚠️ Add at least one item'; return; }
+  if(msg) msg.textContent = '💾 Saving…';
+  try {
+    await db.collection('admin_uniforms').doc(SD?.config?.schoolId||schoolId||'sch').set({
+      policy,
+      items: clean.map(u=>({name:(u.name||'').trim(),sizes:(u.sizes||'').trim(),price:+u.price||0})),
+      schoolId: SD?.config?.schoolId||schoolId||'sch',
+      updatedAt: new Date().toISOString()
+    });
+    if(msg) msg.textContent = `✅ ${clean.length} uniform item${clean.length>1?'s':''} saved`;
+    setTimeout(()=>{ if(msg) msg.textContent=''; }, 4000);
+    SQ.ping();
+  } catch(e) { if(msg) msg.textContent='❌ '+e.message.slice(0,60); }
+}
+
+/* ── WhatsApp share ─────────────────────────────────────────────────────────── */
+function blShareBooks() {
+  const cls    = (document.getElementById('bl-cls')    ||{}).value || '';
+  const term   = (document.getElementById('bl-term')   ||{}).value || '1st';
+  const yr     = (document.getElementById('bl-yr')     ||{}).value || _blCurrentYear();
+  const policy = (document.getElementById('bl-policy') ||{}).value || 'optional';
+  const books  = _BL.books.filter(b=>(b.title||'').trim());
+  if (!books.length) { alert('No books to share — add and save a book list first.'); return; }
+
+  const school = ((SD?.config?.name||SD?.schoolName||'Our School')).toUpperCase();
+  const policyLine = {
+    mandatory: '⚠️ *All books MUST be purchased from the school. Outside purchase is not allowed.*',
+    optional:  '✅ *Books may be purchased at school or from any bookshop.*',
+    listonly:  'ℹ️ This is a reference list only. School does not sell books.'
+  }[policy] || '';
+
+  let total = 0;
+  const lines = books.map(b => {
+    const pr = b.price ? `— ₦${Number(b.price).toLocaleString('en-NG')}` : '';
+    if (b.price) total += +b.price;
+    const pub  = b.publisher ? ` (${b.publisher})` : '';
+    const subj = b.subject   ? `${b.subject}: ` : '';
+    return `• ${subj}*${b.title}*${pub} ${pr}`;
+  });
+
+  const msg = [
+    `📚 *BOOK LIST — ${cls.toUpperCase()} | ${term.toUpperCase()} TERM ${yr}*`,
+    `🏫 ${school}`,
+    '',
+    ...lines,
+    total ? `\n💰 *Total: ₦${total.toLocaleString('en-NG')}*` : '',
+    '',
+    policyLine,
+    '',
+    '_Edu-BLOOM School Management System_'
+  ].filter(x=>x!==undefined).join('\n');
+
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+
+function blShareUniforms() {
+  const policy   = (document.getElementById('bl-uni-policy')||{}).value || 'mandatory';
+  const uniforms = _BL.uniforms.filter(u=>(u.name||'').trim());
+  if (!uniforms.length) { alert('No uniform items to share — add and save the list first.'); return; }
+
+  const school = ((SD?.config?.name||SD?.schoolName||'Our School')).toUpperCase();
+  const policyLine = {
+    mandatory: '⚠️ *All uniforms MUST be purchased from the school.*',
+    optional:  '✅ *Uniforms may be purchased at school or from any vendor.*',
+    listonly:  'ℹ️ Prices are for reference. School does not sell uniforms.'
+  }[policy] || '';
+
+  let total = 0;
+  const lines = uniforms.map(u => {
+    const pr   = u.price ? `₦${Number(u.price).toLocaleString('en-NG')}` : 'Price TBD';
+    if (u.price) total += +u.price;
+    const szs  = u.sizes ? ` | Sizes: ${u.sizes}` : '';
+    return `• *${u.name}*${szs} — ${pr}`;
+  });
+
+  const msg = [
+    `👕 *SCHOOL UNIFORM PRICE LIST*`,
+    `🏫 ${school}`,
+    '',
+    ...lines,
+    total ? `\n💰 *Full set total: ₦${total.toLocaleString('en-NG')}*` : '',
+    '',
+    policyLine,
+    '',
+    '_Edu-BLOOM School Management System_'
+  ].filter(x=>x!==undefined).join('\n');
+
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+// ── End Book List & Uniform Store ────────────────────────────────────────────
 
