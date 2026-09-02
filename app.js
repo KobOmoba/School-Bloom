@@ -1953,7 +1953,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260826-booklist';
+  if (vEl) vEl.textContent = 'v20260826-booklist-ocr';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -10470,7 +10470,10 @@ function renderBookList() {
     </select>
   </div>
 
-  <div style="font-size:0.74rem;font-weight:700;color:var(--sub);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Book List</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <span style="font-size:0.74rem;font-weight:700;color:var(--sub);letter-spacing:.06em;text-transform:uppercase">Book List</span>
+    <button id="bl-scan-btn" onclick="blScanBookList()" style="display:flex;align-items:center;gap:5px;padding:7px 13px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:0.8rem;font-weight:700;cursor:pointer">📷 Scan List</button>
+  </div>
   <div id="bl-book-rows"></div>
   <button onclick="blAddBook()" style="width:100%;padding:10px;margin:4px 0 14px;background:transparent;border:1.5px dashed var(--border);border-radius:8px;color:var(--sub);font-size:0.83rem;cursor:pointer">+ Add Book</button>
 
@@ -10720,5 +10723,191 @@ function blShareUniforms() {
 
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 📷 BOOK LIST OCR — scan printed/handwritten book lists via Groq Vision
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _blOCRBooks = [];   // staging area for scanned books pre-confirmation
+
+function blScanBookList() {
+  // Re-render the file input fresh each time (avoids same-file-reselect issue)
+  let inp = document.getElementById('bl-ocr-input');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type    = 'file';
+    inp.id      = 'bl-ocr-input';
+    inp.accept  = 'image/*';
+    inp.style   = 'display:none';
+    inp.onchange = _blHandleOCRFile;
+    document.body.appendChild(inp);
+  } else {
+    inp.value = ''; // reset so same image can be retried
+  }
+  inp.click();
+}
+
+function _blHandleOCRFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    const dataUrl = ev.target.result;
+    await _blRunVision(dataUrl.split(',')[1], file.type || 'image/jpeg');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _blRunVision(b64, mime) {
+  const scanBtn = document.getElementById('bl-scan-btn');
+  const msg     = document.getElementById('bl-books-msg');
+  const origTxt = scanBtn ? scanBtn.innerHTML : '';
+
+  if (scanBtn) { scanBtn.innerHTML = '⏳ Scanning…'; scanBtn.disabled = true; }
+  if (msg)     msg.textContent = '📷 Reading book list — this takes a few seconds…';
+
+  const prompt = `This image is a Nigerian school book list, booklist circular, or recommended textbook notice.
+
+Extract EVERY book or textbook listed. For each entry return:
+- "subject": the school subject name (e.g. "Mathematics", "English Language", "Basic Science", "Civic Education"). If subject is not labelled, infer from the title.
+- "title": the full textbook title exactly as written in the image
+- "publisher": publisher name or author if visible, otherwise empty string ""
+- "price": numeric Naira price if shown (digits only), otherwise 0
+
+Rules:
+• Include ALL books — do not skip any
+• If a single row lists multiple books (e.g. "Maths: Book A, Book B"), create one entry per book
+• Do NOT include stationery, school fees, or non-book items
+• Output ONLY a raw JSON array — no markdown fences, no explanation, no text outside the array
+
+Example output:
+[{"subject":"Mathematics","title":"New General Mathematics for Primary Schools","publisher":"Longman","price":3500},{"subject":"English Language","title":"Oral English for Schools","publisher":"Tonad","price":2800}]
+
+If no books are found in the image, output: []`;
+
+  try {
+    const apiKey = getGroqKey();
+    if (!apiKey) throw new Error('Groq API key not loaded yet — wait a moment and try again');
+
+    const raw = await _callGroqGenericVision(apiKey, b64, mime, prompt, 2000);
+    // raw is already the text content from the function
+    let parsed = [];
+    try {
+      const clean = (raw||'').replace(/```json|```/gi,'').trim();
+      // Find the JSON array in the response (model may add preamble despite instructions)
+      const match = clean.match(/\[[\s\S]*\]/);
+      parsed = match ? JSON.parse(match[0]) : JSON.parse(clean);
+      if (!Array.isArray(parsed)) parsed = [];
+    } catch(pe) {
+      throw new Error('AI response could not be parsed — try a clearer, well-lit photo of the list');
+    }
+
+    const valid = parsed.filter(b => (b.title||'').trim());
+    if (!valid.length) throw new Error('No textbooks detected — try a closer photo with better lighting');
+
+    if (msg) msg.textContent = `✅ ${valid.length} book${valid.length>1?'s':''} found — review and confirm below`;
+    _blShowOCRPreview(valid);
+
+  } catch(err) {
+    if (msg) { msg.textContent = '❌ ' + (err.message||'Scan failed').slice(0,100); }
+    setTimeout(() => { if(msg && msg.textContent.startsWith('❌')) msg.textContent=''; }, 6000);
+  } finally {
+    if (scanBtn) { scanBtn.innerHTML = origTxt; scanBtn.disabled = false; }
+  }
+}
+
+function _blShowOCRPreview(books) {
+  _blOCRBooks = books.map(b => ({...b}));
+
+  const existing = document.getElementById('bl-ocr-preview');
+  if (existing) existing.remove();
+
+  const panel = document.getElementById('bl-p-books');
+  if (!panel) return;
+
+  const rows = () => _blOCRBooks.map((b,i) => `
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+      <input value="${esc(b.subject||'')}"   placeholder="Subject"     oninput="_blOCRBooks[${i}].subject=this.value"
+        style="flex:1;min-width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <input value="${esc(b.title||'')}"     placeholder="Book title *" oninput="_blOCRBooks[${i}].title=this.value"
+        style="flex:2;min-width:110px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <input value="${esc(b.publisher||'')}" placeholder="Publisher"   oninput="_blOCRBooks[${i}].publisher=this.value"
+        style="flex:1;min-width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <input type="number" value="${b.price||0}" placeholder="₦"       oninput="_blOCRBooks[${i}].price=+this.value"
+        style="width:68px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <button onclick="_blOCRBooks.splice(${i},1);_blRefreshOCRRows()"
+        style="padding:6px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#dc2626;cursor:pointer;font-size:0.78rem;flex-shrink:0">✕</button>
+    </div>`).join('');
+
+  const preview = document.createElement('div');
+  preview.id = 'bl-ocr-preview';
+  preview.innerHTML = `
+    <div style="margin:14px 0;padding:12px 14px;background:rgba(79,70,229,0.06);border:1.5px solid rgba(79,70,229,0.28);border-radius:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:0.82rem;font-weight:800;color:#4f46e5">📋 Scanned Books — Review &amp; Edit Before Adding</span>
+        <button onclick="document.getElementById('bl-ocr-preview').remove();document.getElementById('bl-books-msg').textContent=''"
+          style="background:none;border:none;color:var(--sub);cursor:pointer;font-size:1rem;padding:0 4px">✕</button>
+      </div>
+      <div id="bl-ocr-rows">${rows()}</div>
+      <button onclick="blAddOCRBook()"
+        style="width:100%;padding:7px;margin:4px 0 10px;background:transparent;border:1px dashed rgba(79,70,229,0.4);border-radius:7px;color:#4f46e5;font-size:0.79rem;cursor:pointer">+ Add another row</button>
+      <div style="display:flex;gap:8px">
+        <button onclick="_blConfirmOCR()"
+          style="flex:1;padding:10px;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:0.87rem;cursor:pointer">
+          ✅ Add ${books.length} Book${books.length!==1?'s':''} to List
+        </button>
+        <button onclick="document.getElementById('bl-ocr-preview').remove();document.getElementById('bl-books-msg').textContent=''"
+          style="padding:10px 14px;background:var(--s2);color:var(--sub);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:0.87rem">
+          Discard
+        </button>
+      </div>
+    </div>`;
+
+  // Insert before the "+ Add Book" button
+  const addBtn = panel.querySelector('button[onclick="blAddBook()"]');
+  if (addBtn) addBtn.parentNode.insertBefore(preview, addBtn);
+  else panel.appendChild(preview);
+}
+
+function _blRefreshOCRRows() {
+  const c = document.getElementById('bl-ocr-rows');
+  if (!c) return;
+  const rows = _blOCRBooks.map((b,i) => `
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+      <input value="${esc(b.subject||'')}"   placeholder="Subject"     oninput="_blOCRBooks[${i}].subject=this.value"
+        style="flex:1;min-width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <input value="${esc(b.title||'')}"     placeholder="Book title *" oninput="_blOCRBooks[${i}].title=this.value"
+        style="flex:2;min-width:110px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <input value="${esc(b.publisher||'')}" placeholder="Publisher"   oninput="_blOCRBooks[${i}].publisher=this.value"
+        style="flex:1;min-width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <input type="number" value="${b.price||0}" placeholder="₦"       oninput="_blOCRBooks[${i}].price=+this.value"
+        style="width:68px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.79rem">
+      <button onclick="_blOCRBooks.splice(${i},1);_blRefreshOCRRows()"
+        style="padding:6px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#dc2626;cursor:pointer;font-size:0.78rem;flex-shrink:0">✕</button>
+    </div>`).join('');
+  c.innerHTML = rows || '<p style="font-size:0.79rem;color:var(--sub);text-align:center">All removed</p>';
+}
+
+function blAddOCRBook() {
+  _blOCRBooks.push({subject:'',title:'',publisher:'',price:0});
+  _blRefreshOCRRows();
+}
+
+function _blConfirmOCR() {
+  const valid = _blOCRBooks.filter(b => (b.title||'').trim());
+  if (!valid.length) return;
+  _BL.books = [..._BL.books, ...valid];
+  _blRenderBooks();
+  const p = document.getElementById('bl-ocr-preview');
+  if (p) p.remove();
+  const msg = document.getElementById('bl-books-msg');
+  if (msg) {
+    msg.textContent = `✅ ${valid.length} book${valid.length!==1?'s':''} added — review then tap Save`;
+    setTimeout(() => { if(msg) msg.textContent=''; }, 5000);
+  }
+  _blOCRBooks = [];
+}
+// ── End Book List OCR ─────────────────────────────────────────────────────────
+
 // ── End Book List & Uniform Store ────────────────────────────────────────────
 
