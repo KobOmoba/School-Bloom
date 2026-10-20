@@ -1100,14 +1100,54 @@ let SD = {
 let activeIdx = null, activeTab = 'fees', currentSport = 'football';
 
 // ── Sync Queue — Offline-First (v2 connectivity probe: generate_204) ─────
+// ══════════════════════════════════════════════════════════════════════
+// STORAGE LAYOUT (Oct 2026) — keeps every school well under Firestore's 1 MB-per-document limit
+//   schools/{id}                      → config, staff only (small)
+//   schools/{id}/data/{key}           → { v: <data> } one document per data area (students, scores…)
+//   schools/{id}/attendance/{YYYY-MM} → { days: { 'YYYY-MM-DD': {...} } } one document per month
+// Older schools still have everything in the main document; it is read as a fallback
+// and moved out automatically the first time each area is saved.
+// ══════════════════════════════════════════════════════════════════════
+const _FLAT_KEYS = new Set(['config', 'staff']);
+const _DOC_LIMIT = 950000; // bytes, leaves headroom under Firestore's 1,048,576
+function _schoolRef(sid) { return db.collection('schools').doc(sid); }
+function _monthOf(date) { return /^\d{4}-\d{2}/.test(date || '') ? String(date).slice(0, 7) : 'undated'; }
+function _attByMonth(att) {
+  const m = {};
+  Object.keys(att || {}).forEach(d => { const k = _monthOf(d); (m[k] = m[k] || {})[d] = att[d]; });
+  return m;
+}
+function _byteLen(obj) { try { return new Blob([JSON.stringify(obj)]).size; } catch (e) { return JSON.stringify(obj).length; } }
+
+// Reads a school from all three places and merges them into the old single-document shape.
+async function _readSchoolData(sid) {
+  const [main, dataSnap, attSnap] = await Promise.all([
+    _schoolRef(sid).get(),
+    _schoolRef(sid).collection('data').get().catch(() => null),
+    _schoolRef(sid).collection('attendance').get().catch(() => null)
+  ]);
+  if (!main.exists) return null;
+  const out = Object.assign({}, main.data());
+  if (dataSnap) dataSnap.docs.forEach(d => { out[d.id] = d.data().v; });
+  if (attSnap && !attSnap.empty) {
+    const att = Object.assign({}, out.attendance || {});
+    attSnap.docs.forEach(d => Object.assign(att, d.data().days || {}));
+    out.attendance = att;
+  }
+  return out;
+}
+
 const SQ = {
   q: JSON.parse(localStorage.getItem('p_sq') || '[]'),
   _syncing: false,
-  save() { localStorage.setItem('p_sq', JSON.stringify(this.q)); },
+  _warned: false,
+  save() { try { localStorage.setItem('p_sq', JSON.stringify(this.q)); } catch (e) { console.warn('queue save:', e); } },
   push(key, data) {
     SD[key] = data;
     if (window._demoMode) return; // Demo mode — no persistence, no Firestore writes
-    if (schoolId) localStorage.setItem(`p_${schoolId}_${key}`, JSON.stringify(data));
+    if (schoolId) { try { localStorage.setItem(`p_${schoolId}_${key}`, JSON.stringify(data)); } catch (e) { console.warn('local save:', key, e); } }
+    // Each save carries the full value, so only the newest one per area needs sending
+    this.q = this.q.filter(x => x.key !== key);
     this.q.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), key, data, tries: 0 });
     this.save();
     this.flush();
@@ -1116,25 +1156,59 @@ const SQ = {
     const el = $('sync');
     if (!el) return;
     // navigator.onLine + !!db is the correct signal for Nigerian 4G.
-    // External probes (gstatic, connectivitycheck) are frequently blocked or
-    // throttled by Nigerian ISPs causing false ● Offline on working connections.
-    // Firestore's own retry/backoff is the real connectivity authority.
     const ready = navigator.onLine && !!db;
+    const stuck = this.q.some(x => x.tries > 5);
     el.className   = 'sdot ' + (ready ? (this.q.length ? 'sd-sync' : 'sd-on') : 'sd-off');
-    el.textContent = ready ? (this.q.length ? '● Syncing' : '● Online') : '● Offline';
+    el.textContent = ready ? (stuck ? '● Not saving' : this.q.length ? '● Syncing' : '● Online') : '● Offline';
     if (ready && this.q.length && !this._syncing) this.flush();
   },
+  async _write(item) {
+    const ref = _schoolRef(schoolId);
+    const del = firebase.firestore.FieldValue.delete();
+    if (_FLAT_KEYS.has(item.key)) {
+      if (_byteLen(item.data) > _DOC_LIMIT) throw Object.assign(new Error('too large'), { code: 'too-large' });
+      await ref.set({ [item.key]: item.data }, { merge: true });
+      return;
+    }
+    if (item.key === 'attendance') {
+      const months = _attByMonth(item.data);
+      const hashKey = `p_${schoolId}__attSent`;
+      let sent = {}; try { sent = JSON.parse(localStorage.getItem(hashKey) || '{}'); } catch (e) {}
+      for (const m of Object.keys(months)) {
+        const json = JSON.stringify(months[m]);
+        if (sent[m] === json.length + ':' + json.slice(-40)) continue; // unchanged since last send
+        if (_byteLen(months[m]) > _DOC_LIMIT) throw Object.assign(new Error('too large'), { code: 'too-large' });
+        await ref.collection('attendance').doc(m).set({ days: months[m], updatedAt: new Date().toISOString() });
+        sent[m] = json.length + ':' + json.slice(-40);
+      }
+      localStorage.setItem(hashKey, JSON.stringify(sent));
+      await ref.update({ attendance: del }).catch(() => {}); // remove the old copy from the main document
+      return;
+    }
+    if (_byteLen(item.data) > _DOC_LIMIT) throw Object.assign(new Error('too large'), { code: 'too-large' });
+    await ref.collection('data').doc(item.key).set({ v: item.data, updatedAt: new Date().toISOString() });
+    await ref.update({ [item.key]: del }).catch(() => {}); // remove the old copy from the main document
+  },
   async flush() {
-    if (!db || !this.q.length || this._syncing) return;
+    if (!db || !this.q.length || this._syncing || !schoolId) return;
     this._syncing = true;
     const items = [...this.q];
     for (const item of items) {
       try {
-        await db.collection('schools').doc(schoolId).set({ [item.key]: item.data }, { merge: true });
+        await this._write(item);
         this.q = this.q.filter(x => x.id !== item.id);
       } catch (e) {
-        item.tries++;
-        if (item.tries > 5) this.q = this.q.filter(x => x.id !== item.id);
+        item.tries = (item.tries || 0) + 1;
+        item.lastError = e.code || e.message;
+        // Never drop data silently. Tell the user once; it stays safe on this phone and keeps retrying.
+        if (item.tries > 5 && !this._warned) {
+          this._warned = true;
+          const what = item.key === 'arts' ? 'gallery photos' : item.key;
+          const why = e.code === 'too-large' ? `The ${what} section is too big to save online — remove some photos or old entries.`
+            : e.code === 'permission-denied' ? 'Your login has expired — log out and log back in.'
+            : 'Check your internet connection.';
+          try { toast(`⚠️ Changes to ${what} are not saving online. ${why} Your data is safe on this phone.`); } catch (_) { alert(`⚠️ Changes to ${what} are not saving online. ${why}`); }
+        }
       }
     }
     this._syncing = false;
@@ -1143,14 +1217,13 @@ const SQ = {
   async silentPull() {
     if (window._demoMode || !db || !schoolId) return;
     try {
-      const doc = await db.collection('schools').doc(schoolId).get();
-      if (!doc.exists) return;
-      const d = doc.data();
+      const d = await _readSchoolData(schoolId);
+      if (!d) return;
       const pendingKeys = new Set(this.q.map(x => x.key));
       Object.keys(d).forEach(k => {
         if (!pendingKeys.has(k)) {
           SD[k] = d[k];
-          localStorage.setItem(`p_${schoolId}_${k}`, JSON.stringify(d[k]));
+          try { localStorage.setItem(`p_${schoolId}_${k}`, JSON.stringify(d[k])); } catch (e) {}
         }
       });
       if (typeof renderBanner === 'function') renderBanner();
@@ -1437,9 +1510,9 @@ function _creatorAuth() {
 
 // Loads the school from Firestore after a successful login.
 async function _loadSchoolFromNetwork(sid) {
-  const doc = await db.collection('schools').doc(sid).get();
-  if (!doc.exists) throw Object.assign(new Error('School record not found. WhatsApp AariNAT on 0814 507 3941.'), { code: 'not-found' });
-  loadSchoolIntoSD(sid, doc.data());
+  const data = await _readSchoolData(sid);
+  if (!data) throw Object.assign(new Error('School record not found. WhatsApp AariNAT on 0814 507 3941.'), { code: 'not-found' });
+  loadSchoolIntoSD(sid, data);
   await hydrateFromV2(sid).catch(() => {});
 }
 
