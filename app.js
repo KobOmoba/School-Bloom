@@ -34,12 +34,10 @@ try {
 }
 
 // ── Pricing Tiers ────────────────────────────────────────────────────────
+// Flat pricing (confirmed by Bayo, Oct 2026): ₦15,000/term at any school size.
+// One tier with no student cap, so the size-based upgrade lockout never fires.
 const TIERS = [
-  { name: 'Premium · 1–50',   max: 50,     price: 15000 },
-  { name: 'Premium · 51–100', max: 100,    price: 25000 },
-  { name: 'Premium · 101–200',max: 200,    price: 38000 },
-  { name: 'Premium · 201–350',max: 350,    price: 55000 },
-  { name: 'Premium · 351+',   max: 999999, price: 75000 }
+  { name: 'Premium', max: 999999, price: 15000 }
 ];
 function getTier(count) {
   return TIERS.find(t => count <= t.max) || TIERS[TIERS.length - 1];
@@ -1411,7 +1409,7 @@ async function doPrincipalLogin() {
     }
   }
   if (!principal) {
-    if (errEl) { errEl.textContent = 'Incorrect password. Check your agent WhatsApp. Default is bloom2026.'; errEl.style.display = 'block'; }
+    if (errEl) { errEl.textContent = 'Incorrect password. Check the WhatsApp message from AariNAT, or WhatsApp 0814 507 3941 to reset it.'; errEl.style.display = 'block'; }
     return;
   }
   currentStaff = principal; userRole = 'Principal';
@@ -2422,7 +2420,7 @@ function renderRevenue() {
       ? '<p style="text-align:center;color:var(--sub);padding:1rem;">All fees collected! 🎉</p>'
       : overdue.map(s => {
           const idx = SD.students.indexOf(s); const owe = (s.totalFee || 0) - (s.paid || 0);
-          return `<div class="stu-row"><div class="stu-av">${s.name.charAt(0).toUpperCase()}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><div style="display:flex;gap:4px;"><button class="btn-wa btn-sm" onclick="sendReminder(${idx})" title="WhatsApp bank transfer reminder">📲</button><button style="background:#7c3aed;color:#fff;border:none;border-radius:7px;padding:0.3rem 0.55rem;font-size:0.8rem;cursor:pointer;" onclick="sendPaymentLink(${idx})" title="Send payment link">💳</button></div></div>`;
+          return `<div class="stu-row"><div class="stu-av">${esc(s.name.charAt(0).toUpperCase())}</div><div style="flex:1;"><div class="stu-name">${esc(s.name)}</div><div class="stu-meta">${esc(s.class||'—')} · Owes: <strong style="color:var(--danger);">${fmt(owe)}</strong></div></div><div style="display:flex;gap:4px;"><button class="btn-wa btn-sm" onclick="sendReminder(${idx})" title="WhatsApp bank transfer reminder">📲</button><button style="background:#7c3aed;color:#fff;border:none;border-radius:7px;padding:0.3rem 0.55rem;font-size:0.8rem;cursor:pointer;" onclick="sendPaymentLink(${idx})" title="Send payment link">💳</button></div></div>`;
         }).join('');
   }
 }
@@ -6863,7 +6861,7 @@ function renderProfilePage() {
     else av.textContent = s.name.charAt(0).toUpperCase();
   }
   $('profile-name').textContent = s.name;
-  $('profile-meta').innerHTML = `${esc(s.class||'No class')} · ${s.phone||'No phone'} · ${s.gender||''} ${s.dob?'· DOB: '+s.dob:''}`.trim().replace(/·\s*·/g,'·');
+  $('profile-meta').innerHTML = `${esc(s.class||'No class')} · ${esc(s.phone||'No phone')} · ${esc(s.gender||'')} ${s.dob?'· DOB: '+esc(s.dob):''}`.trim().replace(/·\s*·/g,'·');
   switchProfileTab('fees', document.querySelector('.profile-tab[data-ptab="fees"]'));
 }
 
@@ -7240,7 +7238,7 @@ const HELP_TOPICS = [
     tags:['login','password','school id','forgot','open'],
     body:`<b>How to open the app:</b> Open your phone browser and type <b>school.edubloom.com.ng</b> in the address bar. Tap Go.<br><br>
 <b>Your School ID</b> was sent to you on WhatsApp when AariNAT activated your school. It looks like: <b>BLOOM-AB1CD2</b><br><br>
-<b>Your first-time password</b> is: <b>bloom2026</b> — you will be asked to change it on your first login.<br><br>
+<b>Your first-time password</b> was sent to you on WhatsApp with your School ID — you will be asked to change it on your first login.<br><br>
 <b>Forgot password?</b> WhatsApp AariNAT on 0814 507 3941 and they will reset it for you.`
   },
   {
