@@ -1395,82 +1395,151 @@ function slForgotPassword() {
   window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// SECURE LOGIN (Oct 2026)
+// Every school has a real Firebase login: <school id>@schools.edubloom.com.ng,
+// created by AariNAT's portal at approval. Firestore rules only let that login,
+// the school's staff (staff_directory) or AariNAT read/write the school's data.
+// ══════════════════════════════════════════════════════════════════════
+function _schoolAuthEmail(sid) { return String(sid || '').trim().toLowerCase() + '@schools.edubloom.com.ng'; }
+
+// Waits for Firebase to restore a saved login (works offline — it is stored on the phone).
+function _authReady() {
+  return new Promise(res => {
+    try {
+      if (!firebase.auth) return res(null);
+      const un = firebase.auth().onAuthStateChanged(u => { un(); res(u); });
+      setTimeout(() => res(firebase.auth().currentUser), 6000);
+    } catch (e) { res(null); }
+  });
+}
+
+// True when the saved Firebase login belongs to this school (owner or a staff login).
+async function _hasSchoolSession(sid) {
+  const u = await _authReady();
+  if (!u || u.isAnonymous) return false;
+  if ((u.email || '').toLowerCase() === _schoolAuthEmail(sid)) return true;
+  try {
+    const sess = JSON.parse(localStorage.getItem(`p_${sid}_staffSession`) || 'null');
+    if (sess && sess._v2Uid && sess._v2Uid === u.uid) return true;
+    if (sess && (sess.email || '').toLowerCase() === (u.email || '').toLowerCase()) return true;
+  } catch (e) {}
+  return false;
+}
+
+// A second Firebase instance used only to create staff logins, so the
+// Principal stays signed in while a new teacher's account is created.
+function _creatorAuth() {
+  const name = 'staff-creator';
+  const app = firebase.apps.find(a => a.name === name) || firebase.initializeApp(firebase.app().options, name);
+  return app.auth();
+}
+
+// Loads the school from Firestore after a successful login.
+async function _loadSchoolFromNetwork(sid) {
+  const doc = await db.collection('schools').doc(sid).get();
+  if (!doc.exists) throw Object.assign(new Error('School record not found. WhatsApp AariNAT on 0814 507 3941.'), { code: 'not-found' });
+  loadSchoolIntoSD(sid, doc.data());
+  await hydrateFromV2(sid).catch(() => {});
+}
+
+// Called when sign-in fails because the school's secure login does not exist yet.
+// Only allowed when THIS phone already holds the school's data and the password
+// matches the saved Principal password — so it cannot be used to claim a stranger's school.
+async function _claimSchoolLogin(sid, pwd) {
+  const cached = localStorage.getItem(`p_${sid}_staff`);
+  if (!cached) return false;
+  let staff = []; try { staff = JSON.parse(cached) || []; } catch (e) {}
+  const pr = staff.filter(x => _normRole(x.role || '') === 'Principal');
+  let ok = false;
+  for (const x of pr) { if (await _verifyPassword(pwd, x.password || '')) { ok = true; break; } }
+  if (!ok) return false;
+  if (pwd.length < 6) return false; // Firebase minimum
+  try { await firebase.auth().createUserWithEmailAndPassword(_schoolAuthEmail(sid), pwd); return true; }
+  catch (e) { console.warn('claim school login:', e.code); return false; }
+}
+
+function _loginErrMsg(e) {
+  const c = e?.code || '';
+  if (c === 'auth/network-request-failed') return 'No connection to the login service. Check your data and try again.';
+  if (c === 'auth/too-many-requests') return 'Too many attempts. Wait a few minutes and try again.';
+  if (c === 'not-found') return e.message;
+  return '';
+}
+
 async function doPrincipalLogin() {
   const pwd = ($('sl-p-pwd')?.value || '').trim();
   const errEl = $('sl-p-err');
+  const btn = $('sl-p-btn');
+  const showErr = m => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
   if (errEl) errEl.style.display = 'none';
-  if (!pwd) { if (errEl) { errEl.textContent = 'Enter your school password.'; errEl.style.display = 'block'; } return; }
-  // Check principal login with hashed password support (async)
-  let principal = null;
-  for (const s of (SD.staff || [])) {
-    if (await _verifyPassword(pwd, s.password || '')) {
-      principal = s;
-      break;
+  if (!pwd) return showErr('Enter your school password.');
+  if (!schoolId) return showErr('Go back and enter your School ID first.');
+  if (btn) { btn.disabled = true; btn.dataset.t = btn.textContent; btn.textContent = 'Checking...'; }
+  try {
+    try {
+      await firebase.auth().signInWithEmailAndPassword(_schoolAuthEmail(schoolId), pwd);
+    } catch (e) {
+      const c = e?.code || '';
+      const missing = c === 'auth/user-not-found' || c === 'auth/invalid-credential' || c === 'auth/invalid-login-credentials';
+      if (missing && await _claimSchoolLogin(schoolId, pwd)) {
+        console.log('✅ Secure login created for', schoolId);
+      } else {
+        return showErr(_loginErrMsg(e) || 'School ID or password is incorrect. Forgot it? Tap "Forgot password" to WhatsApp AariNAT.');
+      }
     }
+    await _loadSchoolFromNetwork(schoolId);
+    // Only a Principal record can sign in through this tab
+    const principal = (SD.staff || []).find(x => _normRole(x.role || '') === 'Principal')
+      || { name: 'Principal', email: SD.config?.principalEmail || '', role: 'Principal' };
+    currentStaff = principal; userRole = 'Principal';
+    localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, principal, { role: 'Principal', schoolId, _v2Uid: firebase.auth().currentUser?.uid || '' })));
+    _saveAuth(schoolId, principal.email || '');
+    const div = $('staff-login'); if (div) div.style.display = 'none';
+    startApp();
+    setTimeout(() => SQ.flush && SQ.flush(), 1000);
+  } catch (e) {
+    console.error('Principal login:', e);
+    showErr(_loginErrMsg(e) || ('Could not open your school: ' + (e?.message || 'unknown error')));
+    try { await firebase.auth().signOut(); } catch (_) {}
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.t || 'Login'; }
   }
-  if (!principal) {
-    if (errEl) { errEl.textContent = 'Incorrect password. Check the WhatsApp message from AariNAT, or WhatsApp 0814 507 3941 to reset it.'; errEl.style.display = 'block'; }
-    return;
-  }
-  currentStaff = principal; userRole = 'Principal';
-  localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, principal, { role: 'Principal', schoolId })));
-  _saveAuth(schoolId, principal.email || '');
-  // Silently attempt Firebase Auth so subcollection security rules work for Principal.
-  // Fails gracefully if Principal doesn't have a Firebase Auth account yet —
-  // the flat parent document (public read) still loads the school data.
-  if (principal.email) {
-    const pPlain = $('p-pwd')?.value || '';
-    firebase.auth().signInWithEmailAndPassword(principal.email, pPlain).catch(() => {});
-  }
-  const div = $('staff-login'); if (div) div.style.display = 'none';
-  startApp();
 }
 
 async function doStaffLogin() {
   const email = ($('sl-email')?.value || '').trim().toLowerCase();
   const pwd = $('sl-pwd')?.value || '';
   const errEl = $('sl-s-err');
+  const showErr = m => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
   if (errEl) errEl.style.display = 'none';
-  if (!email || !pwd) { if (errEl) { errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; } return; }
-
-  // Try real Firebase Auth first (own project, matches the pattern used for admin login).
+  if (!email || !pwd) return showErr('Enter your email and password.');
+  if (!schoolId) return showErr('Go back and enter your School ID first.');
   try {
-    const v2Staff = await staffLoginV2(schoolId, email, pwd);
-    const staffRecord = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email) || {
+    const v2Staff = await staffLoginV2(schoolId, email, pwd);   // real Firebase login + staff_directory check
+    await _loadSchoolFromNetwork(schoolId);
+    const staffRecord = (SD.staff || []).find(x => (x.email || '').trim().toLowerCase() === email) || {
       name: v2Staff.name, email, role: v2Staff.role, assignedClass: v2Staff.assignedClass, assignedSubjects: v2Staff.assignedSubjects
     };
     staffRecord._v2Uid = v2Staff.uid;
-    currentStaff = staffRecord; userRole = _normRole(v2Staff.role || staffRecord.role || 'Class Teacher');
-    localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, currentStaff, { schoolId })));
+    // Role always comes from staff_directory (only the Principal can write it), never from the flat list
+    currentStaff = Object.assign({}, staffRecord, { role: v2Staff.role || staffRecord.role, assignedClass: v2Staff.assignedClass ?? staffRecord.assignedClass, assignedSubjects: v2Staff.assignedSubjects || staffRecord.assignedSubjects });
+    userRole = _normRole(currentStaff.role || 'Class Teacher');
+    if (userRole === 'Principal') userRole = 'Class Teacher'; // Principal must use the Principal tab
+    localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, currentStaff, { role: userRole, schoolId })));
     _saveAuth(schoolId, email);
     const div = $('staff-login'); if (div) div.style.display = 'none';
     startApp();
-    return;
-  } catch (authErr) {
-    // No real account yet, or wrong password for it — fall through to the legacy check below.
-  }
-
-  // Legacy fallback: hashed password stored on the staff record.
-  let staff = null;
-  for (const s of (SD.staff || [])) {
-    if ((s.email || '').trim().toLowerCase() === email && await _verifyPassword(pwd, s.password || '')) {
-      staff = s;
-      break;
+  } catch (e) {
+    console.warn('Staff login:', e?.code || e?.message);
+    try { await firebase.auth().signOut(); } catch (_) {}
+    const c = e?.code || '';
+    if (c === 'auth/user-not-found' || c === 'auth/invalid-credential' || c === 'auth/invalid-login-credentials' || c === 'auth/wrong-password') {
+      return showErr('❌ Email or password is wrong. If you were added before October 2026, ask your Principal to remove you from Staff and add you again.');
     }
+    if (/no staff record/i.test(e?.message || '')) return showErr('❌ You are not on this school\'s staff list. Ask your Principal to add you.');
+    showErr(_loginErrMsg(e) || ('❌ Login failed: ' + (e?.message || 'unknown error')));
   }
-  if (!staff) {
-    const emailFound = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email);
-    const msg = emailFound
-      ? '❌ Wrong password. Ask your Principal to reset it, or tap Forgot Password below.'
-      : '❌ Email not found in staff list. Ask your Principal to check your staff record.';
-    if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
-    return;
-  }
-  currentStaff = staff; userRole = _normRole(staff.role || 'Class Teacher');
-  localStorage.setItem('p_' + schoolId + '_staffSession', JSON.stringify(Object.assign({}, staff, { schoolId })));
-  _saveAuth(schoolId, email);
-  const div = $('staff-login'); if (div) div.style.display = 'none';
-  startApp();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1553,7 +1622,9 @@ async function loadStudentScoresV2(schoolId, studentId) {
 
 // ── Staff (real Firebase Auth accounts, keyed by their real uid) ──────────
 async function createStaffAccountV2(schoolId, email, password, staffData) {
-  const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+  const ca = _creatorAuth();
+  const cred = await ca.createUserWithEmailAndPassword(email, password);
+  try { await ca.signOut(); } catch (e) {}
   await _staffDirColV2(schoolId).doc(cred.user.uid).set({
     name: staffData.name || '', email, role: staffData.role,
     assignedClass: staffData.assignedClass || null,       // Class Teacher only
@@ -1566,20 +1637,7 @@ async function staffLoginV2(schoolId, email, password) {
   const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
   const uid  = cred.user.uid;
   const doc  = await _staffDirColV2(schoolId).doc(uid).get();
-
   if (!doc.exists) {
-    // staff_directory write may have failed during addStaff — auto-heal from SD.staff
-    const rec = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === email.toLowerCase());
-    if (rec) {
-      const entry = {
-        email, name: rec.name, role: rec.role,
-        assignedClass: rec.assignedClass || null,
-        assignedSubjects: rec.assignedSubjects || [],
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      try { await _staffDirColV2(schoolId).doc(uid).set(entry); } catch(e) { /* non-fatal */ }
-      return { uid, ...entry };
-    }
     await firebase.auth().signOut();
     throw new Error('Firebase Auth OK but no staff record at this school. Ask your Principal to re-add your account.');
   }
@@ -1654,6 +1712,10 @@ async function sendStaffPasswordReset(email) {
 }
 async function claimStaffAccountV2(schoolId, email, newPassword) {
   const normEmail = (email || '').trim().toLowerCase();
+  const u = firebase.auth().currentUser;
+  if (!u || (u.email || '').toLowerCase() !== _schoolAuthEmail(schoolId)) {
+    throw new Error('Only the Principal can set up a staff login. Ask your Principal to do this from their phone.');
+  }
   const staffRecord = (SD.staff || []).find(s => (s.email || '').trim().toLowerCase() === normEmail);
   if (!staffRecord) throw new Error('No staff record found with that email at this school.');
   if (newPassword.length < 6) throw new Error('Password needs at least 6 characters (Firebase Auth requirement).');
@@ -1819,98 +1881,40 @@ async function doLogin() {
   if (!sid) { err.textContent = 'Enter your School ID (e.g. BLOOM-ABK0042).'; err.style.display = 'block'; return; }
   if (!sid.startsWith('BLOOM-')) { err.textContent = 'School ID must start with BLOOM- (e.g. BLOOM-ABK0042).'; err.style.display = 'block'; return; }
   btn.textContent = 'Checking...'; btn.disabled = true;
-
-  // STEP 1: localStorage cache first — instant, offline-friendly
-  const lc = localStorage.getItem(`p_${sid}_config`);
-  const ls = localStorage.getItem(`p_${sid}_staff`);
-  if (lc && ls) {
-    try {
-      const staff = JSON.parse(ls);
-      const config = JSON.parse(lc);
-      console.log('✅ Login from localStorage cache (offline-first)');
-      schoolId = sid;
-      _saveAuth(sid, '');
-      loadSchoolIntoSD(sid, {
-        config, staff,
-        students: loadLocal('students', []), expenses: loadLocal('expenses', []),
-        attendance: loadLocal('attendance', {}), sports: loadLocal('sports', { teams:{}, custom:[] }),
-        arts: loadLocal('arts', { gallery:[] }), music: loadLocal('music', { practiceLogs:[], instruments:[] }),
-        health: loadLocal('health', []), alumni: loadLocal('alumni', []),
-        socialPages: loadLocal('socialPages', []), commsLog: loadLocal('commsLog', []),
-        scores: loadLocal('scores', {}), affective: loadLocal('affective', {}),
-        opportunities: loadLocal('opportunities', defaultOpps())
-      });
-      await hydrateFromV2(sid).catch(() => {});
-      const cachedSession = localStorage.getItem(`p_${sid}_staffSession`);
-      if (cachedSession) {
-        try {
-          const sess = JSON.parse(cachedSession);
-          currentStaff = sess; userRole = sess.role || 'Principal';
-          startApp(); btn.textContent = '▶ Enter Portal'; btn.disabled = false; return;
-        } catch (e) {}
-      }
-      if (SD.staff && SD.staff.length > 0) {
-        btn.textContent = '▶ Enter Portal'; btn.disabled = false;
-        showStaffLoginStep(); return;
-      }
-      userRole = 'Principal'; currentStaff = null;
-      startApp();
-      setTimeout(() => SQ.silentPull(), 1500);
-      btn.textContent = '▶ Enter Portal'; btn.disabled = false;
-      return;
-    } catch (e) { console.warn('localStorage parse error:', e); }
-  }
-
-  // STEP 2: network login
-  btn.textContent = 'Connecting...';
   try {
-    let school = null;
-    if (db) {
-      try {
-        const doc = await db.collection('schools').doc(sid).get();
-        if (doc.exists) { school = doc.data(); console.log('✅ Found in Firestore schools'); }
-      } catch (e) { console.warn('Firestore read failed:', e.message); }
-    }
-    if (!school && db) {
-      try {
-        const snap = await db.collection('admin_approved_schools').where('schoolId', '==', sid).get();
-        if (!snap.empty) {
-          const rec = snap.docs[0].data();
-          console.log('✅ Found in admin_approved_schools — bootstrapping school doc');
-          school = {
-            config: { plan:'basic', fee:50000, schoolName: rec.schoolName||'', principalEmail: rec.principalEmail||'', whatsapp: rec.principalPhone||'', createdAt: new Date().toISOString() },
-            staff: [{ name:'Principal', email:(rec.principalEmail||sid.toLowerCase()+'@bloom.edu.ng').toLowerCase(), password: rec.password||'', role:'Principal', phone: rec.principalPhone||'' }],
-            students: [], expenses: [], attendance: {}, sports: { teams:{}, custom:[] }, arts: { gallery:[] },
-            music: { practiceLogs:[], instruments:[] }, health: [], alumni: [], socialPages: [], commsLog: [], opportunities: [], scores: {}, affective: {}
-          };
-          try { await db.collection('schools').doc(sid).set(school, { merge: true }); } catch (e2) {}
-        }
-      } catch (e) { console.warn('admin_approved_schools check failed:', e.message); }
-    }
-    if (!school) {
-      err.textContent = `School ID "${sid}" not found. Double-check the ID sent by your AariNAT agent (format: BLOOM-XXXXXX).`;
-      err.style.display = 'block'; btn.textContent = '▶ Enter Portal'; btn.disabled = false; return;
-    }
     schoolId = sid;
-    _saveAuth(sid, '');
-    loadSchoolIntoSD(sid, school);
-    await hydrateFromV2(sid).catch(() => {});
-    const fsSession = localStorage.getItem(`p_${sid}_staffSession`);
-    if (fsSession) {
-      try { const sess = JSON.parse(fsSession); currentStaff = sess; userRole = _normRole(sess.role || 'Principal'); startApp(); btn.textContent = '▶ Enter Portal'; btn.disabled = false; return; } catch (e) {}
+    const lc = localStorage.getItem(`p_${sid}_config`);
+    const ls = localStorage.getItem(`p_${sid}_staff`);
+    // Fast path: this phone is already signed in to this school (works offline)
+    if (lc && ls && await _hasSchoolSession(sid)) {
+      try {
+        loadSchoolIntoSD(sid, {
+          config: JSON.parse(lc), staff: JSON.parse(ls),
+          students: loadLocal('students', []), expenses: loadLocal('expenses', []),
+          attendance: loadLocal('attendance', {}), sports: loadLocal('sports', { teams:{}, custom:[] }),
+          arts: loadLocal('arts', { gallery:[] }), music: loadLocal('music', { practiceLogs:[], instruments:[] }),
+          health: loadLocal('health', []), alumni: loadLocal('alumni', []),
+          socialPages: loadLocal('socialPages', []), commsLog: loadLocal('commsLog', []),
+          scores: loadLocal('scores', {}), affective: loadLocal('affective', {}),
+          opportunities: loadLocal('opportunities', defaultOpps())
+        });
+        const sess = JSON.parse(localStorage.getItem(`p_${sid}_staffSession`) || 'null');
+        if (sess) {
+          currentStaff = sess; userRole = _normRole(sess.role || 'Principal');
+          _saveAuth(sid, sess.email || '');
+          hydrateFromV2(sid).catch(() => {});
+          startApp(); setTimeout(() => SQ.silentPull(), 1500);
+          return;
+        }
+      } catch (e) { console.warn('cache load:', e); }
     }
-    if (SD.staff && SD.staff.length > 0) {
-      btn.textContent = '▶ Enter Portal'; btn.disabled = false;
-      showStaffLoginStep(); return;
-    }
-    userRole = 'Principal'; currentStaff = null;
-    startApp();
-  } catch (e) {
-    console.error('Login network error:', e);
-    err.textContent = 'Connection error: ' + (e?.message || 'Check your internet and try again.');
-    err.style.display = 'block';
+    // Otherwise a password is always required. School data is only read after login.
+    if (!lc) { SD.config = Object.assign({}, SD.config || {}, { schoolName: sid }); }
+    else { try { SD.config = JSON.parse(lc); } catch (e) {} }
+    showStaffLoginStep();
+  } finally {
+    btn.textContent = '▶ Enter Portal'; btn.disabled = false;
   }
-  btn.textContent = '▶ Enter Portal'; btn.disabled = false;
 }
 
 function _saveAuth(sid, email) {
@@ -1926,7 +1930,7 @@ function logout() {
   sessionStorage.removeItem('p_auth');
   if (schoolId) localStorage.removeItem(`p_${schoolId}_staffSession`);
   currentStaff = null; userRole = null;
-  location.reload();
+  try { firebase.auth().signOut().finally(() => location.reload()); } catch (e) { location.reload(); }
 }
 
 // ── App Startup ───────────────────────────────────────────────────────
@@ -1951,7 +1955,7 @@ function startApp() {
   if (typeof renderBirthdays === 'function') renderBirthdays();
   // Visible build version — confirms which code is running without needing DevTools
   const vEl = document.getElementById('build-version');
-  if (vEl) vEl.textContent = 'v20260826-booklist-ocr';
+  if (vEl) vEl.textContent = 'v20261020-secure-login';
 
   const bannerSub = $('banner-sub');
   if (bannerSub) {
@@ -4876,10 +4880,13 @@ async function addStaff() {
     try {
       const uid = await createStaffAccountV2(schoolId, email, pwd, { name, role, assignedClass: assignedClass||null, assignedSubjects });
       SD.staff[SD.staff.length-1]._v2Uid = uid;
-      // createUserWithEmailAndPassword signs in as the new staff member — sign back out
-      // so the Principal's session is not replaced by the newly created account.
-      try { await firebase.auth().signOut(); } catch(e) {}
-    } catch (e) { console.warn('addStaff Firebase Auth failed — legacy login still works:', e.message); }
+    } catch (e) {
+      console.warn('addStaff login creation failed:', e.code || e.message);
+      SD.staff.pop();
+      if (e.code === 'auth/email-already-in-use') return alert('That email already has an Edu-BLOOM login (maybe at another school). Use a different email for this staff member.');
+      if (e.code === 'auth/invalid-email') return alert('That email address is not valid.');
+      return alert('Could not create the login: ' + (e.message || e.code) + '\n\nCheck your internet and try again.');
+    }
   }
   await SQ.push('staff', SD.staff);
   closeM('add-staff-modal');
@@ -7866,6 +7873,16 @@ async function saveSettings() {
   const pwd = $('set-pwd')?.value.trim();
   if (pwd) {
     const pr = (SD.staff||[]).find(s=>s.role==='Principal');
+    if (pwd.length < 6) return alert('Password must be at least 6 characters.');
+    const u = firebase.auth().currentUser;
+    if (!u || (u.email || '').toLowerCase() !== _schoolAuthEmail(schoolId)) {
+      return alert('Only the Principal login can change the school password. Log out and log in with the Principal tab, then try again.');
+    }
+    try { await u.updatePassword(pwd); }
+    catch (e) {
+      if (e.code === 'auth/requires-recent-login') return alert('For safety, log out and log back in, then change the password again.');
+      return alert('Password not changed: ' + (e.message || e.code));
+    }
     if (pr) pr.password = await _hashPassword(pwd);
     if ($('set-pwd')) $('set-pwd').value='';
   }
@@ -8762,7 +8779,7 @@ async function _confirmFeeImport(matched) {
 
 
 
-(function autoLogin() {
+(async function autoLogin() {
   const raw = localStorage.getItem('p_auth') || sessionStorage.getItem('p_auth');
   if (!raw) return;
   try {
@@ -8771,8 +8788,14 @@ async function _confirmFeeImport(matched) {
     const lc = localStorage.getItem(`p_${auth.schoolId}_config`);
     const ls = localStorage.getItem(`p_${auth.schoolId}_staff`);
     if (!lc) return;
-    schoolId  = auth.schoolId;
-    userRole  = auth.role || 'Principal';
+    schoolId = auth.schoolId;
+    const signedIn = await _hasSchoolSession(auth.schoolId);
+    const cachedSession = localStorage.getItem(`p_${auth.schoolId}_staffSession`);
+    if (!signedIn || !cachedSession) {
+      try { SD.config = JSON.parse(lc); } catch (e) {}
+      showStaffLoginStep();
+      return;
+    }
     loadSchoolIntoSD(auth.schoolId, {
       config:       JSON.parse(lc),
       staff:        ls ? JSON.parse(ls) : [],
@@ -8790,25 +8813,10 @@ async function _confirmFeeImport(matched) {
       commsLog:     loadLocal('commsLog', []),
       opportunities:loadLocal('opportunities', defaultOpps())
     });
-    hydrateFromV2(auth.schoolId).catch(() => {}); // non-blocking — offline-first startup shouldn't wait on this
-    // Restore staff session if cached — otherwise show role selector
-    const cachedSession = localStorage.getItem(`p_${auth.schoolId}_staffSession`);
-    if (cachedSession) {
-      try {
-        const sess = JSON.parse(cachedSession);
-        currentStaff = sess; userRole = sess.role || 'Principal';
-        startApp();
-        setTimeout(() => SQ.silentPull(), 2000);
-        return;
-      } catch(e) {}
-    }
-    // No cached session — show staff login screen
-    if (SD.staff && SD.staff.length > 0) {
-      showStaffLoginStep();
-    } else {
-      userRole = 'Principal'; currentStaff = null;
-      startApp();
-    }
+    hydrateFromV2(auth.schoolId).catch(() => {});
+    const sess = JSON.parse(cachedSession);
+    currentStaff = sess; userRole = _normRole(sess.role || 'Principal');
+    startApp();
     setTimeout(() => SQ.silentPull(), 2000);
   } catch(e) { console.warn('Auto-login failed:', e); }
 })();
