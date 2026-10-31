@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // EDUCATIONAL BLOOM — app.js (MERGED: v1 base + v2 extras)
 // Term-based scoring (CA1/CA2/CA3/Exam) is the canonical data model.
-// OCR uses Groq Vision (qwen/qwen3.6-27b) — sole engine, no fallback chain.
+// OCR uses Groq Vision (qwen/qwen3.8-27b) — sole engine, no fallback chain.
 // AI Tools (report card remarks, insights) now use Groq (see index.html inline scripts).
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -262,7 +262,7 @@ const AARINAT_OCR_URL = 'https://aarinat-ocr.aarinat-company-limited.workers.dev
 const GROQ_KEY_STORAGE = 'groq_api_key';
 let _lastOcrError = '';
 function getGroqKey() { return window.GROQ_API_KEY || localStorage.getItem(GROQ_KEY_STORAGE) || ''; }
-const GROQ_OCR_MODEL = 'qwen/qwen3.6-27b'; // llama-4-scout deprecated June 17 2026
+const GROQ_OCR_MODEL = 'qwen/qwen3.8-27b'; // llama-4-scout deprecated June 17 2026
 let _groqRateLimitedThisSession = false; // once Groq hits an org-wide rate limit, skip it for remaining pages this scan
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -667,7 +667,7 @@ const GroqRotator = (() => {
     throw new Error('All Groq API keys are currently rate-limited. Please wait a moment and try again.');
   }
 
-  const _model = () => (typeof GROQ_OCR_MODEL !== 'undefined' ? GROQ_OCR_MODEL : 'qwen/qwen3.6-27b');
+  const _model = () => (typeof GROQ_OCR_MODEL !== 'undefined' ? GROQ_OCR_MODEL : 'qwen/qwen3.8-27b');
 
   return {
     // Force a fresh key reload from Firestore
@@ -854,8 +854,8 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
       ocrOverlayThumb(imgData);
       ocrOverlayPages(pageNum, total);
 
-      const groqKey = getGroqKey();
-      const canTryGroq = !!groqKey && !skipGroq;
+      let groqKey = getGroqKey();
+      let canTryGroq = !!groqKey && !skipGroq;
 
       ocrOverlayStep('load', canTryGroq
         ? 'Image loaded — sending to Groq Vision...'
@@ -864,6 +864,8 @@ async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
       // Retry loading keys once if the proxy hadn't finished/succeeded yet (e.g. slow network on first login)
       if (!groqKey && typeof _fetchGroqKeyFromFirestore === 'function') {
         await _fetchGroqKeyFromFirestore().catch(() => {});
+        groqKey = getGroqKey();
+        canTryGroq = !!groqKey && !skipGroq;
       }
 
       if (canTryGroq) {
@@ -8152,7 +8154,7 @@ function _resizeFeeImage(file, maxPx) {
 // ═══════════════════════════════════════════════════════════════════════
 // PREMIUM OCR ENTRY POINTS — Expense/Payment/Student/Staff
 // Reuses _getFeeGroqKey() and _resizeFeeImage() above. All four features
-// share one generic Groq call (same qwen/qwen3.6-27b model + reading
+// share one generic Groq call (same qwen/qwen3.8-27b model + reading
 // discipline as the fee register scanner) instead of duplicating logic.
 // Gated behind SD.config.plan === 'premium', same mechanism as BloomCollect.
 // ═══════════════════════════════════════════════════════════════════════
@@ -8241,7 +8243,7 @@ async function _callGroqGenericVision(apiKey, base64, mimeType, userPrompt, maxT
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
     body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
+      model: 'qwen/qwen3.8-27b',
       max_tokens: maxTokens || 4096,
       temperature: 0,
       reasoning_format: 'hidden',
@@ -8646,7 +8648,7 @@ async function _callGroqFeeVision(apiKey, base64, mimeType) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
     body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
+      model: 'qwen/qwen3.8-27b',
       max_tokens: 4096,
       temperature: 0.1,
       reasoning_format: 'hidden',
@@ -10989,4 +10991,112 @@ function _blConfirmOCR() {
 // ── End Book List OCR ─────────────────────────────────────────────────────────
 
 // ── End Book List & Uniform Store ────────────────────────────────────────────
+
+// ── Payment Receipt Review (Bursar / Principal / Proprietor only) ─────────
+let _pendingReceipts = [];
+let _receiptListener = null;
+
+function _startReceiptListener() {
+  if (!db || !schoolId || !canSeeFees()) return;
+  if (_receiptListener) return; // already listening
+  _receiptListener = db.collection('schools').doc(schoolId)
+    .collection('payment_receipts')
+    .where('status','==','pending')
+    .onSnapshot(snap => {
+      _pendingReceipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _updateReceiptBadge();
+      // Re-render revenue if it's currently visible
+      const rev = document.getElementById('sec-revenue');
+      if (rev && rev.classList.contains('on')) _renderReceiptSection();
+    }, () => {});
+}
+
+function _updateReceiptBadge() {
+  const n = _pendingReceipts.length;
+  const badge = document.getElementById('receipt-badge');
+  if (badge) {
+    badge.textContent = n > 0 ? String(n) : '';
+    badge.style.display = n > 0 ? 'inline-flex' : 'none';
+  }
+}
+
+function _renderReceiptSection() {
+  const el = document.getElementById('receipt-review-section');
+  if (!el || !canSeeFees()) return;
+
+  if (!_pendingReceipts.length) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const cards = _pendingReceipts.map(r => {
+    const date = r.submittedAt?.toDate
+      ? r.submittedAt.toDate().toLocaleDateString('en-NG', {day:'numeric',month:'short',year:'numeric'})
+      : 'Just now';
+    const thumb = r.receiptImage
+      ? `<img src="data:image/jpeg;base64,${r.receiptImage}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin:0.5rem 0;cursor:pointer;" onclick="showReceiptFull('${r.id}')">`
+      : '<div style="padding:1rem;text-align:center;color:var(--sub);font-size:0.8rem;">No image attached</div>';
+    return `
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:0.65rem;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;">
+          <div>
+            <div style="font-weight:700;font-size:0.9rem;">${esc(r.studentName||'—')}</div>
+            <div style="font-size:0.76rem;color:var(--sub);">${esc(r.term||'')} · ₦${Number(r.amount||0).toLocaleString()}</div>
+            <div style="font-size:0.74rem;color:var(--sub);">From: ${esc(r.parentName||'Parent')} · ${date}</div>
+          </div>
+          <span style="background:rgba(245,158,11,0.15);color:#fcd34d;border-radius:6px;padding:2px 8px;font-size:0.68rem;font-weight:800;">PENDING</span>
+        </div>
+        ${thumb}
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+          <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:0.55rem;font-size:0.78rem;color:#93c5fd;margin-bottom:0.35rem;">
+            📊 Fee will update automatically when the bank statement CSV is uploaded and this payment is matched.
+          </div>
+          <button onclick="rejectReceipt('${r.id}')" style="width:100%;background:#7f1d1d;color:#fca5a5;border:1px solid #b91c1c;border-radius:8px;padding:0.5rem;font-weight:700;font-size:0.82rem;cursor:pointer;">❌ Reject (Wrong / Duplicate / Fake)</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="font-size:0.7rem;font-weight:800;color:var(--warn);letter-spacing:.1em;text-transform:uppercase;margin-bottom:0.65rem;">
+      📬 Payment Receipts Awaiting Review (${_pendingReceipts.length})
+    </div>
+    ${cards}
+    <div style="height:1px;background:var(--border);margin:1rem 0;"></div>`;
+}
+
+async function approveReceipt() {
+  // REMOVED — bank statement is the only authority for marking fees as paid.
+  // Receipts are verified automatically when the CSV bank statement is uploaded.
+  alert('Receipts cannot be manually approved.\nUpload the bank statement CSV to verify and match this payment automatically.');
+}
+
+async function rejectReceipt(receiptId) {
+  const r = _pendingReceipts.find(x => x.id === receiptId);
+  if (!r) return;
+  const reason = prompt(`Reject this receipt from ${r.parentName} for ${r.studentName}?\n\nOptional: enter a reason to note (not sent to parent automatically):`, '');
+  if (reason === null) return; // cancelled
+
+  try {
+    await db.collection('schools').doc(schoolId)
+      .collection('payment_receipts').doc(receiptId)
+      .update({
+        status: 'rejected',
+        rejectedAt: new Date(),
+        rejectedBy: currentStaff?.name || userRole,
+        rejectionReason: reason || ''
+      });
+    await _logAudit('receipt_rejected', r.studentName, r.amount||0, 'Receipt',
+      `Rejected by ${currentStaff?.name||userRole}. Reason: ${reason||'None given'}`);
+    toast(`🗑️ Receipt rejected.`);
+  } catch(e) { alert('Error rejecting: ' + e.message); }
+}
+
+function showReceiptFull(receiptId) {
+  const r = _pendingReceipts.find(x => x.id === receiptId);
+  if (!r || !r.receiptImage) return;
+  const win = window.open('', '_blank');
+  win.document.write(`<html><body style="background:#000;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+    <img src="data:image/jpeg;base64,${r.receiptImage}" style="max-width:100%;max-height:100vh;object-fit:contain;">
+  </body></html>`);
+}
 
