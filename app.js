@@ -1184,6 +1184,42 @@ async function _readSchoolData(sid) {
   return out;
 }
 
+// ── Class Teacher save guard ─────────────────────────────────────────────
+// A Class Teacher's SD.students holds only their class (see hydrateFromV2). Saving
+// that list as-is would wipe every other class. So their saves are merged into the
+// latest school copy: other classes are kept untouched and nobody is ever removed.
+function _classScope() {
+  return (userRole === 'Class Teacher' && currentStaff?.assignedClass) ? currentStaff.assignedClass : null;
+}
+const _sameStudent = (a, b) => a && b && (a._v2Id && b._v2Id ? a._v2Id === b._v2Id
+  : (a.name || '') === (b.name || '') && (a.class || '') === (b.class || ''));
+function _mergeStudents(server, local, cls) {
+  const out = (server || []).slice(); // keep every position so index-keyed scores stay valid
+  (local || []).filter(s => (s.class || '') === cls).forEach(s => {
+    const j = out.findIndex(x => (x.class || '') === cls && _sameStudent(x, s));
+    if (j >= 0) out[j] = s; else out.push(s);
+  });
+  return out;
+}
+async function _mergeClassScoped(item) {
+  const d = await _readSchoolData(schoolId); // throws if offline → item stays queued, nothing overwritten
+  if (!d) throw new Error('school not found');
+  if (item.key === 'students') return _mergeStudents(d.students, item.data, item.cls);
+  // scores: keys are student id or list position, so map local positions to school positions
+  const all = d.students || [], list = item.list || [], out = JSON.parse(JSON.stringify(d.scores || {}));
+  Object.keys(item.data || {}).forEach(term => {
+    Object.keys(item.data[term] || {}).forEach(k => {
+      const st = list.find(x => x.id === k) || list[k];
+      if (!st || (st.class || '') !== item.cls) return;
+      const j = all.findIndex(x => (x.class || '') === item.cls && _sameStudent(x, st));
+      if (j < 0) return; // student not saved at school level yet; retried on the next save
+      if (!out[term]) out[term] = {};
+      out[term][st.id || j] = item.data[term][k];
+    });
+  });
+  return out;
+}
+
 const SQ = {
   q: JSON.parse(localStorage.getItem('p_sq') || '[]'),
   _syncing: false,
@@ -1195,7 +1231,12 @@ const SQ = {
     if (schoolId) { try { localStorage.setItem(`p_${schoolId}_${key}`, JSON.stringify(data)); } catch (e) { console.warn('local save:', key, e); } }
     // Each save carries the full value, so only the newest one per area needs sending
     this.q = this.q.filter(x => x.key !== key);
-    this.q.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), key, data, tries: 0 });
+    const item = { id: Date.now().toString(36) + Math.random().toString(36).slice(2), key, data, tries: 0 };
+    // A Class Teacher only holds their own class; remember which class and list so the
+    // write can be merged into the full school copy instead of replacing it.
+    const cls = _classScope();
+    if (cls && (key === 'students' || key === 'scores')) { item.cls = cls; if (key === 'scores') item.list = SD.students || []; }
+    this.q.push(item);
     this.save();
     this.flush();
   },
@@ -1211,6 +1252,7 @@ const SQ = {
   },
   async _write(item) {
     const ref = _schoolRef(schoolId);
+    if (item.cls) item = { ...item, data: await _mergeClassScoped(item) };
     const del = firebase.firestore.FieldValue.delete();
     if (_FLAT_KEYS.has(item.key)) {
       if (_byteLen(item.data) > _DOC_LIMIT) throw Object.assign(new Error('too large'), { code: 'too-large' });
