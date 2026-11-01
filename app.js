@@ -877,7 +877,7 @@ function _dedupeNames(names) {
   names.forEach(n => {
     const k = n.toUpperCase().replace(/[^A-Z ]/g, '').replace(/\s+/g, ' ').trim();
     const w = k.split(' ');
-    const dup = out.some(o => o.k === k || (k.length > 5 && o.k.split(' ').some(x => x.length > 2 && w.includes(x)) && _lev(o.k, k) <= 2));
+    const dup = out.some(o => o.k === k || (k.length >= 10 && o.k.split(' ').some(x => x.length > 2 && w.includes(x)) && _lev(o.k, k) <= 1));
     if (!dup) out.push({ n, k });
   });
   return out.map(o => o.n);
