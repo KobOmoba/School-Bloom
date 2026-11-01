@@ -1281,8 +1281,8 @@ if ('serviceWorker' in navigator) {
     <label class="lbl">Subject</label><input class="inp" id="sc-subject" placeholder="e.g. Mathematics">
     <label class="lbl">Term</label>
     <select class="inp" id="sc-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
-    <label class="lbl">CA Score (0–40)</label><input class="inp" type="number" id="sc-ca" min="0" max="40" placeholder="0" oninput="previewTotal()">
-    <label class="lbl">Exam Score (0–60)</label><input class="inp" type="number" id="sc-exam" min="0" max="60" placeholder="0" oninput="previewTotal()">
+    <label class="lbl">CA Score (3 × 0–10 = 0–30)</label><input class="inp" type="number" id="sc-ca" min="0" max="30" placeholder="0" oninput="previewTotal()">
+    <label class="lbl">Exam Score (0–70)</label><input class="inp" type="number" id="sc-exam" min="0" max="70" placeholder="0" oninput="previewTotal()">
     <div id="sc-total-preview" style="margin-top:0.5rem;font-size:0.85rem;font-weight:700;color:var(--money);"></div>
     <button class="btn-brand" onclick="saveScore()">💾 Save Score</button>
   </div>
@@ -1297,7 +1297,7 @@ if ('serviceWorker' in navigator) {
     <label class="lbl">Term</label>
     <select class="inp" id="pay-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
     <label class="lbl">Payment Method</label>
-    <select class="inp" id="pay-method"><option value="cash">Cash</option><option value="transfer">Bank Transfer</option><option value="POS">POS</option></select>
+    <select class="inp" id="add-pay-method"><option value="cash">Cash</option><option value="transfer">Bank Transfer</option><option value="POS">POS</option></select>
     <label class="lbl">Received By</label><input class="inp" id="pay-received-by" placeholder="Staff name">
     <label class="lbl">Receipt Number (optional)</label><input class="inp" id="pay-receipt" placeholder="RCP-0042">
     <button class="btn-brand" onclick="savePayment()">💾 Save Payment</button>
@@ -1922,7 +1922,7 @@ if ('serviceWorker' in navigator) {
     <div class="ca-summary-bar">
       <span id="ca-summary" style="font-weight:700;font-size:0.85rem;color:var(--money);"></span>
       <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
-        <button class="ca-mark-all" onclick="markAllPresent()">✅ All Present</button>
+        <button class="ca-mark-all" onclick="markAllRollPresent()">✅ All Present</button>
         <button class="ca-mark-all" style="color:var(--danger);" onclick="markAllAbsent()">❌ All Absent</button>
         <button class="ca-mark-all" style="color:var(--warn);" onclick="notifyAbsentParents()">📲 Notify Absent/Late</button>
       <button class="ca-mark-all" style="color:#fbbf24;" onclick="triggerMorningAlertNow()">⏰ 8:30am Alert</button>
