@@ -1583,8 +1583,21 @@ async function _hasSchoolSession(sid) {
   if ((u.email || '').toLowerCase() === _schoolAuthEmail(sid)) return true;
   try {
     const sess = JSON.parse(localStorage.getItem(`p_${sid}_staffSession`) || 'null');
-    if (sess && sess._v2Uid && sess._v2Uid === u.uid) return true;
-    if (sess && (sess.email || '').toLowerCase() === (u.email || '').toLowerCase()) return true;
+    const mine = sess && ((sess._v2Uid && sess._v2Uid === u.uid) ||
+      (sess.email || '').toLowerCase() === (u.email || '').toLowerCase());
+    if (!mine) return false;
+    // A staff member the Principal removed has no staff_directory record any more:
+    // end their saved session. If the check itself fails (offline), allow the cached session.
+    try {
+      const doc = await _staffDirColV2(sid).doc(u.uid).get();
+      if (!doc.exists) {
+        localStorage.removeItem(`p_${sid}_staffSession`);
+        try { await firebase.auth().signOut(); } catch (_) {}
+        try { alert('❌ You have been removed from this school\'s staff. Ask your Principal if this is a mistake.'); } catch (_) {}
+        return false;
+      }
+    } catch (e) { console.warn('staff check skipped (offline?):', e.code || e.message); }
+    return true;
   } catch (e) {}
   return false;
 }
@@ -5139,8 +5152,51 @@ async function deleteStaff(idx) {
   if (!confirm(`Remove ${s.name} from staff?`)) return;
   SD.staff.splice(idx,1);
   await SQ.push('staff',SD.staff); saveLocal('staff',SD.staff);
-  renderStaff(); toast('🗑️ Staff removed.');
+  renderStaff();
+  if (!schoolId || SD.config?._demo) { toast('🗑️ Staff removed.'); return; }
+  // Also delete their staff_directory record, so they can no longer log in.
+  const ok = await _removeStaffLogin(s);
+  toast(ok ? '🗑️ Staff removed. They can no longer log in.'
+           : '⚠️ Staff removed on this phone, but their login is not blocked yet (no internet?). It will retry automatically.');
 }
+
+// Pending staff_directory deletes, kept on this phone until they succeed.
+function _staffDelKey() { return `p_${schoolId}_pendingStaffDirDeletes`; }
+function _pendingStaffDels() { try { return JSON.parse(localStorage.getItem(_staffDelKey()) || '[]'); } catch (e) { return []; } }
+async function _removeStaffLogin(s) {
+  const pending = _pendingStaffDels();
+  pending.push({ uid: s._v2Uid || null, email: (s.email || '').trim() });
+  localStorage.setItem(_staffDelKey(), JSON.stringify(pending));
+  await _flushStaffDirDeletes();
+  const email = (s.email || '').trim();
+  return !_pendingStaffDels().some(x => x.email === email && (x.uid || null) === (s._v2Uid || null));
+}
+let _staffDelBusy = false;
+async function _flushStaffDirDeletes() {
+  if (!db || !schoolId || _staffDelBusy) return;
+  const items = _pendingStaffDels(); if (!items.length) return;
+  _staffDelBusy = true;
+  const left = [];
+  for (const it of items) {
+    try {
+      const col = _staffDirColV2(schoolId);
+      const uids = it.uid ? [it.uid] : [];
+      if (!it.uid && it.email) {
+        const emails = [...new Set([it.email, it.email.toLowerCase()])];
+        const snap = await col.where('email', 'in', emails).get();
+        snap.docs.forEach(d => { if (!uids.includes(d.id)) uids.push(d.id); });
+      }
+      for (const uid of uids) await col.doc(uid).delete();
+    } catch (e) {
+      console.warn('staff_directory delete failed, will retry:', e.code || e.message);
+      left.push(it);
+    }
+  }
+  localStorage.setItem(_staffDelKey(), JSON.stringify(left));
+  _staffDelBusy = false;
+}
+window.addEventListener('online', () => { _flushStaffDirDeletes(); });
+setInterval(() => { _flushStaffDirDeletes(); }, 30000);
 
 // ── Expenses ─────────────────────────────────────────────────────────────
 function renderExpenses() {

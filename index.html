@@ -1273,21 +1273,6 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<div class="modal-bg" id="modal-add-score">
-  <div class="modal">
-    <button class="modal-close" onclick="closeModal('modal-add-score')">✕</button>
-    <div class="modal-title">📝 Record Score</div>
-    <label class="lbl">Student</label><select class="inp" id="sc-student"></select>
-    <label class="lbl">Subject</label><input class="inp" id="sc-subject" placeholder="e.g. Mathematics">
-    <label class="lbl">Term</label>
-    <select class="inp" id="sc-term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
-    <label class="lbl">CA Score (3 × 0–10 = 0–30)</label><input class="inp" type="number" id="sc-ca" min="0" max="30" placeholder="0" oninput="previewTotal()">
-    <label class="lbl">Exam Score (0–70)</label><input class="inp" type="number" id="sc-exam" min="0" max="70" placeholder="0" oninput="previewTotal()">
-    <div id="sc-total-preview" style="margin-top:0.5rem;font-size:0.85rem;font-weight:700;color:var(--money);"></div>
-    <button class="btn-brand" onclick="saveScore()">💾 Save Score</button>
-  </div>
-</div>
-
 <div class="modal-bg" id="modal-add-payment">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('modal-add-payment')">✕</button>
