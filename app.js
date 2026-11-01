@@ -1783,23 +1783,44 @@ async function hydrateFromV2(schoolId) {
 
     const v2Students = await loadAllStudentsV2(schoolId, classFilter);
 
-    const students = [];
-    const scores   = {};
+    // Merge V2 data into the existing flat list instead of replacing it, so the
+    // student order is kept, nobody is duplicated, and scores stay keyed the same
+    // way as everywhere else in the app: SD.scores[term][s.id || listPosition].
+    const v2 = [];
     for (const s of v2Students) {
       const fees          = await loadStudentFeesV2(schoolId, s.id);
       const studentScores = await loadStudentScoresV2(schoolId, s.id);
-      const student = {
-        _v2Id: s.id, name: s.name, phone: s.phone || '', class: s.class || '',
-        totalFee: fees.totalFee || 0, paid: fees.paid || 0,
-        paymentHistory: fees.paymentHistory || []
-      };
-      students.push(student);
-      const sid = s.id;
-      Object.keys(studentScores).forEach(term => {
-        if (!scores[term]) scores[term] = {};
-        scores[term][sid] = studentScores[term];
-      });
+      v2.push({ s, fees, studentScores });
     }
+    const oldStudents = SD.students || [], oldScores = SD.scores || {};
+    const used = new Set(), students = [], srcIdx = [], v2For = [];
+    const fromV2 = (base, r) => ({ ...base, _v2Id: r.s.id, name: r.s.name ?? base.name,
+      phone: r.s.phone || base.phone || '', class: r.s.class || base.class || '',
+      totalFee: r.fees.totalFee || 0, paid: r.fees.paid || 0,
+      paymentHistory: r.fees.paymentHistory || [] });
+    oldStudents.forEach((st, i) => {
+      if (classFilter && st.class !== classFilter) return;
+      const r = v2.find(x => !used.has(x.s.id) && (st._v2Id ? x.s.id === st._v2Id
+        : (x.s.name === st.name && (x.s.class || '') === (st.class || ''))));
+      if (r) used.add(r.s.id);
+      students.push(r ? fromV2(st, r) : st); srcIdx.push(i); v2For.push(r || null);
+    });
+    v2.forEach(r => {
+      if (used.has(r.s.id)) return;
+      students.push(fromV2({}, r)); srcIdx.push(-1); v2For.push(r);
+    });
+    const scores = {};
+    students.forEach((st, j) => {
+      const key = st.id || j, oldKey = srcIdx[j] >= 0 ? (st.id || srcIdx[j]) : null;
+      const terms = new Set([...Object.keys(oldScores), ...Object.keys(v2For[j]?.studentScores || {})]);
+      terms.forEach(term => {
+        const merged = { ...((oldKey !== null && oldScores[term]?.[oldKey]) || {}),
+                         ...((v2For[j]?.studentScores || {})[term] || {}) };
+        if (!Object.keys(merged).length) return;
+        if (!scores[term]) scores[term] = {};
+        scores[term][key] = merged;
+      });
+    });
 
     // Only replace existing data if:
     // a) We got students back, OR
@@ -3642,6 +3663,17 @@ function buildFees(s, idx) {
 }
 
 
+// ── Audit log helper — never throws, so callers (e.g. recordPayment) always finish
+// and refresh the screen. No audit store exists yet, so entries go to the console.
+function _logAudit(action, studentName, amount, method, note, extra) {
+  try {
+    console.info('[audit]', { action, studentName, amount, method, note, ...(extra || {}),
+      by: (typeof currentStaff !== 'undefined' && currentStaff?.name) || (typeof userRole !== 'undefined' ? userRole : ''),
+      at: new Date().toISOString() });
+  } catch (e) { /* never block the caller */ }
+  return Promise.resolve();
+}
+
 // ── POS payment field toggle ───────────────────────────────────────────────
 function togglePosFields() {
   const method = $('pay-method')?.value;
@@ -4315,7 +4347,7 @@ function printReportCard(idx, term) {
   const stars=n=>['','★','★★','★★★','★★★★','★★★★★'][n]||'–';
   const affRows = affTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['aff_'+t]||0)}</td></tr>`).join('');
   const psyRows = psyTraits.map(t=>`<tr><td>${t}</td><td>${stars(aff['psy_'+t]||0)}</td></tr>`).join('');
-  const daysPresent = Object.values(SD.attendance||{}).filter(day=>day[s.name]==='Present').length;
+  const daysPresent = _attDays(s, 'Present');
 
   // ── Stored remarks (set by Report Card Agent or manually) ──
   const remarks = SD.remarks || {};
@@ -4509,8 +4541,8 @@ function printPromotionReportCard(idx) {
       <td style="font-weight:700;">${cumAvg>0?g:'–'}</td></tr>`;
   }).join('');
 
-  const daysPresent = Object.values(SD.attendance||{}).filter(day => day[s.name]==='Present').length;
-  const daysAbsent  = Object.values(SD.attendance||{}).filter(day => day[s.name]==='Absent').length;
+  const daysPresent = _attDays(s, 'Present');
+  const daysAbsent  = _attDays(s, 'Absent');
   const { g: overallGrade } = getGrade(myAvg);
   const decisionColor = promo.decision === 'Repeat' ? '#dc2626' : promo.decision === 'Promoted on Trial' ? '#f59e0b' : '#16a34a';
 
@@ -4736,7 +4768,7 @@ function printAllReportCards(cls, term) {
     const termData = (SD.scores[term]||{})[sid]||{};
     const aff = ((SD.affective||{})[sid]||{})[term]||{};
     const myPos = (allAvgs.findIndex(r=>r.name===s.name)+1)||'–';
-    const daysPresent = Object.values(SD.attendance||{}).filter(day=>day[s.name]==='Present').length;
+    const daysPresent = _attDays(s, 'Present');
     const rows = subs.map(sub=>{
       if (!_hasScoreEntry(termData, sub)) {
         return `<tr><td>${esc(sub)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
@@ -5191,7 +5223,7 @@ function updateRollSummary(){
   if($('ca-summary')) $('ca-summary').textContent=`Present: ${present} · Absent: ${absent} · Late: ${late}`;
 }
 
-function markAllPresent(){document.querySelectorAll('.ca-row').forEach(row=>row.querySelectorAll('.ca-btn')[0]?.click());}
+function markAllRollPresent(){document.querySelectorAll('.ca-row').forEach(row=>row.querySelectorAll('.ca-btn')[0]?.click());}
 function markAllAbsent(){document.querySelectorAll('.ca-row').forEach(row=>row.querySelectorAll('.ca-btn')[1]?.click());}
 
 async function saveClassAttendance(){
@@ -7171,6 +7203,17 @@ function exportScoresCSV() {
   a.click();
 }
 
+// Attendance status for one student on one date, as 'Present'|'Absent'|'Late'|''.
+// Reads SD.attendance[date][name] first, then the older s.attendance[date]='present' format.
+function _attStatus(s, date) {
+  const v = (SD.attendance?.[date] || {})[s.name] || (s.attendance || {})[date] || '';
+  return v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : '';
+}
+function _attDays(s, status) {
+  const dates = new Set([...Object.keys(SD.attendance || {}), ...Object.keys(s.attendance || {})]);
+  return [...dates].filter(d => _attStatus(s, d) === status).length;
+}
+
 // ── Attendance Full Page ────────────────────────────────────────────────────
 let _attPageData = {}; // {studentId: 'present'|'absent'|'late'}
 
@@ -7183,7 +7226,7 @@ function initAttendancePage() {
   renderAttendancePage();
 }
 
-function renderAttendancePage() {
+function renderAttendancePage(keepMarks) {
   const el = $('attendance-page-content'); if (!el) return;
   const cls = $('att-class-page')?.value || '';
   const date = $('att-date-page')?.value || new Date().toISOString().split('T')[0];
@@ -7192,8 +7235,10 @@ function renderAttendancePage() {
   if (!students.length) { el.innerHTML = '<p style="color:var(--sub);padding:1rem;text-align:center;">No students found.</p>'; return; }
 
   // Load existing data for this date
-  _attPageData = {};
-  students.forEach(s => { _attPageData[s.name] = (s.attendance||{})[date] || ''; });
+  if (!keepMarks) {
+    _attPageData = {};
+    students.forEach(s => { _attPageData[s.name] = _attStatus(s, date).toLowerCase(); });
+  }
 
   const present = Object.values(_attPageData).filter(v=>v==='present').length;
   const absent  = Object.values(_attPageData).filter(v=>v==='absent').length;
@@ -7233,7 +7278,7 @@ function setAtt(name, status, btn) {
 
 function markAllPresent() {
   Object.keys(_attPageData).forEach(n => _attPageData[n] = 'present');
-  renderAttendancePage();
+  renderAttendancePage(true);
 }
 
 async function saveAttendancePage() {
@@ -7242,9 +7287,13 @@ async function saveAttendancePage() {
     if (_attPageData[s.name] !== undefined) {
       if (!s.attendance) s.attendance = {};
       s.attendance[date] = _attPageData[s.name] || 'absent';
+      if (!SD.attendance[date]) SD.attendance[date] = {};
+      const st = s.attendance[date];
+      SD.attendance[date][s.name] = st.charAt(0).toUpperCase() + st.slice(1);
     }
   });
   await SQ.push('students', SD.students);
+  await SQ.push('attendance', SD.attendance); saveLocal('attendance', SD.attendance);
   toast('✅ Attendance saved for ' + date);
   renderAttendancePage();
 }
