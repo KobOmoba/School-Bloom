@@ -864,6 +864,25 @@ async function groqVisionOCR(base64, mime, _retry) {
   }).filter(s=>s.fullName.length>=2);
 }
 
+// Merge exact + near-duplicate names across pages (share a word, full name off by <=2 letters).
+function _lev(a, b) {
+  const d = Array.from({length: a.length + 1}, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function _dedupeNames(names) {
+  const out = [];
+  names.forEach(n => {
+    const k = n.toUpperCase().replace(/[^A-Z ]/g, '').replace(/\s+/g, ' ').trim();
+    const w = k.split(' ');
+    const dup = out.some(o => o.k === k || (k.length >= 10 && o.k.split(' ').some(x => x.length > 2 && w.includes(x)) && _lev(o.k, k) <= 1));
+    if (!dup) out.push({ n, k });
+  });
+  return out.map(o => o.n);
+}
+
 async function _readOnePage(file, pageNum, total, fbEl, skipGroq) {
   return new Promise(resolve => {
     const reader = new FileReader();
@@ -3155,6 +3174,7 @@ async function processImagesSequentially(files) {
     });
   }
   ocrOverlayHide(800);
+  { const _d = _dedupeNames(allNames); allNames.length = 0; allNames.push(..._d); }
   if (!allNames.length) {
     if (fbEl) fbEl.textContent = '❌ Could not read any names. Try clearer photo.';
     const _ed = _lastOcrError ? ('\n\nError: ' + _lastOcrError.slice(0,150)) : '';
